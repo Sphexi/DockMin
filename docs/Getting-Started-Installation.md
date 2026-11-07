@@ -263,13 +263,13 @@ Success: the directory `dockmin` holds `compose.yaml`, `.env.example` and `examp
 
 ### Get the image
 
-Build the image from source.
+Build the image from source. To run the published image instead, skip this step and follow [An image from a registry](#an-image-from-a-registry) before [Start](#start).
 
 ```bash
 docker build -t dockmin:local .
 ```
 
-Success: the output ends with `naming to docker.io/library/dockmin:local`. The build produces `dockmin:local`, which is the default of `DOCKMIN_IMAGE`. To run an image from a registry instead, skip the build and follow [An image from a registry](#an-image-from-a-registry). Failure: the build needs Docker with BuildKit and network access to Docker Hub and the Python package index.
+Success: the output ends with `naming to docker.io/library/dockmin:local`. The build produces `dockmin:local`, which is the default of `DOCKMIN_IMAGE`. Failure: the build needs Docker with BuildKit and network access to Docker Hub and the Python package index.
 
 ### Create the encryption key
 
@@ -377,7 +377,7 @@ docker compose up -d
 docker compose ps
 ```
 
-Success: the `STATUS` column reports `Up <time> (healthy)` and `PORTS` shows `127.0.0.1:8000->8000/tcp`.
+Success: the `STATUS` column reports `Up <time> (healthy)` and `PORTS` shows `127.0.0.1:8000->8000/tcp, 8443/tcp`.
 
 | Item | Value |
 |---|---|

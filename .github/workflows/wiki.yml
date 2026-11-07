@@ -1,0 +1,66 @@
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'scripts/publish_wiki.sh'
+      - '.github/workflows/wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: source
+          persist-credentials: false
+
+      - name: Check out the wiki
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          persist-credentials: false
+
+      - name: Publish the documentation
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${TOKEN}" | base64 -w0)"
+          unset TOKEN
+          revision=$(git -C source rev-parse HEAD)
+          branch=$(git -C wiki symbolic-ref --short HEAD)
+          wiki_git() {
+            GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+              GIT_CONFIG_VALUE_0="${header}" \
+              git -C wiki "$@"
+          }
+          for attempt in 1 2 3; do
+            bash source/scripts/publish_wiki.sh source wiki "${revision}"
+            if wiki_git push origin "HEAD:refs/heads/${branch}"; then
+              exit 0
+            fi
+            echo "::warning::Wiki push attempt ${attempt} was rejected; fetching the wiki again."
+            wiki_git fetch --depth=1 origin "${branch}"
+            git -C wiki checkout --quiet -B "${branch}" FETCH_HEAD
+          done
+          exit 1

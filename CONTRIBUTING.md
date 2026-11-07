@@ -181,6 +181,7 @@ Run it by path, with the variables set in the shell:
 - A service function takes the caller's identity and enforces authorisation itself. A router never queries the database.
 - Every function that changes state records an activity event or is listed as exempt; `tests/test_activity_conformance.py` fails otherwise.
 - The documentation is the project wiki. Each page is one Markdown file in `docs/`, named `Section-Page.md`. Pages are reference material: facts, tables and lists, with no introductory prose.
+- A push to `main` publishes `docs/` to the wiki, with `CHANGELOG.md` as the Changelog page and `CONTRIBUTING.md` as the Contributing page (`.github/workflows/wiki.yml`). The wiki is never edited directly; the next publish overwrites it.
 - A link between wiki pages is `[Text](Page-Name)` or `[Text](Page-Name#anchor)`, with no `.md` extension. A link to a repository file is an absolute `https://github.com/Sphexi/DockMin/blob/main/<path>` URL.
 - A command in a document is a line in a `bash` block with placeholders written `<lower-kebab>`. Configuration goes in `yaml`, `json` or `ini` blocks and output in `text` blocks.
 - `tests/test_documentation.py` checks every link and anchor in the documents.
