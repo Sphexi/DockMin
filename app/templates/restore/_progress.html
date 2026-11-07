@@ -1,0 +1,76 @@
+{# While the restore runs the element polls itself; a finished restore carries no polling attributes, which stops the poll. #}
+{% from "partials/badge.html" import badge %}
+{% from "restore/_banner.html" import gate_banner with context %}
+
+{# page is true where base.html already draws the banner; the polled fragment of a finished restore carries it out of band. #}
+{% macro restore_progress(progress, labels, paused=false, can_resume=false, page=false) %}
+{% set running = progress.outcome == "running" %}
+{% set state = {"running": "running", "restored": "succeeded", "failed": "failed"}[progress.outcome] %}
+{% set words = {"pending": "pending", "running": "running", "done": "done", "failed": "failed"} %}
+<section id="restore-progress" class="progress-panel" data-state="{{ state }}" aria-labelledby="restore-progress-title" aria-busy="{{ 'true' if running else 'false' }}"
+         {%- if running %} hx-get="{{ route_path('restore_progress', restore_id=progress.restore_id) }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <header class="progress-panel__head">
+    <h2 class="progress-panel__title" id="restore-progress-title">Restore</h2>
+    {% if progress.outcome == "restored" %}{{ badge("Restored", "ok") }}{% elif progress.outcome == "failed" %}{{ badge("Failed", "danger") }}{% else %}{{ badge("Running", "info") }}{% endif %}
+  </header>
+  {% if running %}
+  <progress class="progress-panel__bar" aria-label="Restore progress">Working</progress>
+  {% endif %}
+  <ol class="progress-panel__steps">
+    {% for step, step_state in progress.steps %}
+    <li class="progress-panel__step" data-step-state="{{ choice(step_state, words) }}">{{ labels[step] }}: {{ words[step_state] }}</li>
+    {% endfor %}
+  </ol>
+
+  {% if progress.outcome == "restored" %}
+  <div class="panel panel--notice" role="status">
+    <p>The restore finished and this instance runs on the restored data. Every session ended. <a href="{{ route_path('login') }}">Sign in</a> again with an administrator account from the archive.</p>
+    {% if paused %}
+    <p>Automation is paused. Scheduled jobs do not run until an administrator resumes it.</p>
+    {% if can_resume %}
+    <form class="inline-form" method="post" action="{{ route_path('restore_resume_automation') }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn">Resume automation</button>
+    </form>
+    {% else %}
+    <p>Sign in as an administrator to resume it.</p>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% elif progress.outcome == "failed" %}
+  <div class="panel panel--alert" role="alert">
+    <p>{{ progress.message or "The restore did not finish." }}</p>
+    {% if progress.reason %}<p>Reason: <span class="mono">{{ progress.reason }}</span></p>{% endif %}
+  </div>
+  <p><a class="btn" href="{{ route_path('restore') }}">Back to the restore</a></p>
+  {% endif %}
+
+  {% if progress.paths %}
+  <h3>Paths</h3>
+  <dl class="facts">
+    <dt>Live data</dt>
+    <dd>
+      <ul class="chip-list">
+        {% for path in progress.paths.live %}
+        <li class="mono cell-wrap">{{ path }}</li>
+        {% endfor %}
+      </ul>
+    </dd>
+    <dt>Previous data</dt>
+    <dd class="mono cell-wrap">{{ progress.paths.previous }}</dd>
+    <dt>Staged data</dt>
+    <dd class="mono cell-wrap">{{ progress.paths.staged }}</dd>
+  </dl>
+  {% if progress.outcome == "restored" %}
+  <p class="field__help">The previous data is kept at the path above. dockmin never deletes it; remove it by hand when it is no longer needed.</p>
+  {% endif %}
+  {% endif %}
+
+  {% if running %}
+  <p class="progress-panel__refresh"><a href="{{ route_path('restore_progress', restore_id=progress.restore_id) }}">Refresh status</a></p>
+  {% endif %}
+</section>
+{% if not running and not page %}
+<div id="restore-banner" hx-swap-oob="true">{{ gate_banner(true) }}</div>
+{% endif %}
+{% endmacro %}

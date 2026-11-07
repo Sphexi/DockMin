@@ -1,0 +1,97 @@
+{# Import with context. #}
+{% from "access/_panel.html" import access_panel with context %}
+{% from "partials/stack_logs.html" import stack_logs %}
+{% from "stacks/_parts.html" import dismissal_state, leftover_links, leftover_summary, restore_form with context %}
+
+{% macro members(environment_id, title, group, link_name, id_param, origin_name=none) %}
+<h3>{{ title }}</h3>
+{% if group.items %}
+<ul class="ref-list">
+  {% for item in group.items %}
+  <li class="ref-list__item">
+    {% if link_name %}<a href="{{ with_origin(route_path(link_name, environment_id=environment_id, **{id_param: item.id}), 'stack:' ~ environment_id ~ ':' ~ origin_name if origin_name else none) }}">{{ item.name }}</a>{% else %}<span>{{ item.name }}</span>{% endif %}
+    <span class="cell-note mono">{{ item.short_id }}</span>
+    {% if item.detail %}<span class="cell-note">{{ item.detail }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if group.more %}<p class="field__help">and {{ group.more }} more not listed.</p>{% endif %}
+{% else %}
+<p>None you can see.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro overview_tab(detail) %}
+<h2 id="tab-heading">Overview</h2>
+<dl class="facts">
+  <dt>Stack name</dt>
+  <dd class="mono">{{ detail.name }}</dd>
+  {% if detail.spellings|length > 1 %}
+  <dt>Spellings</dt>
+  <dd class="mono">{{ detail.spellings|join(", ") }}</dd>
+  {% endif %}
+</dl>
+{% if detail.dismissal %}
+<div class="row-actions">
+  {{ dismissal_state(detail.dismissal, true) }}
+  {{ restore_form(detail.dismissal, route_path("environment_swarm_stack_unmanaged_restore", environment_id=detail.environment_id, namespace=detail.name), detail.name) }}
+</div>
+{% endif %}
+{% if detail.leftovers_only %}
+<p>{{ leftover_summary("No services.", [("config", "configs", detail.configs.items|length + detail.configs.more), ("secret", "secrets", detail.secrets.items|length + detail.secrets.more), ("network", "networks", detail.networks.items|length + detail.networks.more), ("volume visible on this manager", "volumes visible on this manager", detail.manager_volumes_total)]) }}</p>
+{% if detail.volumes_unavailable %}<p class="field__help">The volumes on this manager could not be read.</p>{% endif %}
+{% endif %}
+{% if detail.compose_stack %}
+<div class="panel panel--notice" role="note">
+  <p>This namespace shares its access control with Compose stack <a class="mono" href="{{ route_path('environment_stack_detail', environment_id=detail.environment_id, stack_name=detail.compose_stack) }}">{{ detail.compose_stack }}</a>, so it cannot be adopted as a Swarm stack.</p>
+</div>
+{% elif detail.can_adopt %}
+<div class="panel panel--notice" role="note">
+  <p>This stack is not managed here. Adopting it stores the file you paste for it and puts it under dockmin's control. Adopting changes nothing on the cluster; the first redeploy brings the objects in line with the file.</p>
+  <p><a class="btn btn--primary" href="{{ route_path('environment_swarm_stack_adopt', environment_id=detail.environment_id, namespace=detail.name) }}">Adopt stack</a></p>
+</div>
+{% endif %}
+<p class="field__help">Services, configs and secrets of a stack follow the stack's access control unless they have their own. Only the objects you can see are listed.</p>
+{{ members(detail.environment_id, "Services", detail.services, "environment_swarm_service_detail", "service_id", detail.name) }}
+{{ members(detail.environment_id, "Configs", detail.configs, "environment_swarm_config_detail", "object_id") }}
+{{ members(detail.environment_id, "Secrets", detail.secrets, "environment_swarm_secret_detail", "object_id") }}
+{{ members(detail.environment_id, "Networks", detail.networks, "environment_network_detail", "network_id", detail.name) }}
+{% if detail.leftovers_only %}
+<h3>Volumes visible on this manager</h3>
+{% if detail.manager_volumes %}
+{{ leftover_links("Volumes visible on this manager", detail.manager_volumes, detail.manager_volumes_total, detail.environment_id, "environment_volume_detail", "volume_name", "name", false) }}
+{% else %}
+<p>None.</p>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro access_tab(detail, panel, values, fields) %}
+{% set args = {"environment_id": detail.environment_id, "namespace": detail.name} %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, route_path("environment_swarm_stack_access_save", **args), route_path("environment_swarm_stack_access_delete", **args), values=values, fields=fields) }}
+{% endmacro %}
+
+{% macro stack_tabs(detail, tab, tabs, panel, values, fields, logs=none) %}
+{% set detail_href = route_path("environment_swarm_stack_detail", environment_id=detail.environment_id, namespace=detail.name) %}
+{% set labels = {"overview": "Overview", "logs": "Logs", "access": "Access"} %}
+<div id="stack-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Stack sections">
+    <ul class="tabs__list">
+      {% for key in tabs %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#stack-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% elif tab == "logs" and logs is not none %}{{ stack_logs(logs) }}
+    {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

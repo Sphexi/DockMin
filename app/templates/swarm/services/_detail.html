@@ -1,0 +1,316 @@
+{# Import with context: links and forms read the request. #}
+{% from "access/_panel.html" import access_panel with context %}
+{% from "partials/activity_panel.html" import activity_panel with context %}
+{% from "partials/automation_panel.html" import automation_panel with context %}
+{% from "environments/_parts.html" import age, kind_badge, when with context %}
+{% from "partials/ports.html" import port_list %}
+{% from "swarm/_parts.html" import health_badge, pair_facts, replicas_text, stack_link, task_state_badge, value_table with context %}
+{% from "swarm/services/_logs.html" import logs_tab with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/error_state.html" import error_state %}
+
+{% macro service_summary(detail) %}
+{% set args = {"environment_id": detail.environment_id, "service_id": detail.id} %}
+<section id="service-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span>{{ health_badge(detail.running, detail.desired) }}</span>
+      <span class="mono cell-wrap">{{ detail.image_display }}</span>
+      <span class="cell-note"><span class="mono">{{ detail.short_id }}</span> on {{ detail.environment_name }} {{ kind_badge(true) if detail.is_local else "" }}</span>
+    </div>
+    <div class="row-actions">
+      {% if detail.can_write %}
+      <a class="btn btn--compact" href="{{ route_path('environment_swarm_service_edit', **args) }}">Edit</a>
+      <a class="btn btn--compact" href="{{ route_path('environment_swarm_service_force_update', **args) }}">Force update</a>
+      {% endif %}
+      {% if detail.can_roll_back %}
+      <a class="btn btn--compact" href="{{ route_path('environment_swarm_service_rollback', **args) }}">Roll back</a>
+      {% endif %}
+      {% if detail.can_write %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_service_remove', **args) }}">Remove</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro overview_tab(detail) %}
+<h2 id="tab-heading">Overview</h2>
+<dl class="facts">
+  <dt>Name</dt>
+  <dd class="mono">{{ detail.name }}</dd>
+  <dt>ID</dt>
+  <dd class="mono cell-wrap">{{ detail.id }}</dd>
+  <dt>Mode</dt>
+  <dd>{{ detail.mode|capitalize }}</dd>
+  <dt>Tasks</dt>
+  <dd>
+    {{ replicas_text(detail.running, detail.desired, detail.replicas) }}
+    {% if detail.can_scale %}
+    <form class="scale-form" method="post" action="{{ route_path('environment_swarm_service_scale_run', environment_id=detail.environment_id, service_id=detail.id) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="expected_version" value="{{ detail.version }}">
+      <input type="hidden" name="expected_replicas" value="{{ detail.replicas }}">
+      <label for="scale-replicas">Replicas</label>
+      <input class="field__input field__input--auto" id="scale-replicas" name="replicas" type="number" min="0" max="{{ detail.replicas_maximum }}" step="1" value="{{ detail.replicas }}" required>
+      <button type="submit" class="btn btn--compact">Scale</button>
+    </form>
+    {% endif %}
+  </dd>
+  <dt>Image</dt>
+  <dd class="mono cell-wrap">{{ detail.image_display }}{% if detail.digest_pinned %} <span class="chip">Pinned to a digest</span>{% endif %}</dd>
+  {% if detail.command %}
+  <dt>Command</dt>
+  <dd class="mono cell-wrap">{{ detail.command }}</dd>
+  {% endif %}
+  <dt>Stack</dt>
+  <dd>{{ stack_link(detail.stack, detail.environment_id) }}</dd>
+  <dt>Created</dt>
+  <dd>{{ when(detail.created_at, "—") }}</dd>
+  <dt>Updated</dt>
+  <dd>{{ when(detail.updated_at, "—") }}</dd>
+  <dt>Published ports</dt>
+  <dd>{{ port_list(detail.ports) }} <span class="cell-note">Endpoint mode {{ detail.endpoint_mode }}</span></dd>
+  {% if detail.previous_image %}
+  <dt>Rollback target</dt>
+  <dd class="mono cell-wrap">{{ detail.previous_image }}</dd>
+  {% endif %}
+  {% if detail.update_status %}
+  <dt>Last update</dt>
+  <dd>
+    {{ badge(detail.update_status.state|replace("_", " ")|capitalize, "info") }}
+    {% if detail.update_status.message %}<span class="task-note">{{ detail.update_status.message }}</span>{% endif %}
+    {% if detail.update_status.completed_at %}<span class="cell-note">Completed {{ age(detail.update_status.completed_at, "") }}</span>
+    {% elif detail.update_status.started_at %}<span class="cell-note">Started {{ age(detail.update_status.started_at, "") }}</span>{% endif %}
+  </dd>
+  {% endif %}
+</dl>
+{% endmacro %}
+
+{% macro configuration_tab(detail) %}
+<h2 id="tab-heading">Configuration</h2>
+
+<h3>Environment variables</h3>
+{% if detail.env %}
+<div class="data-table__scroll" role="region" aria-label="Environment variables" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Environment variables of this service</caption>
+    <thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for item in detail.env %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ item.key }}</th>
+        <td class="cell-wrap mono">{% if item.value is none %}<span class="chip">Hidden</span>{% elif item.redacted %}<span class="chip">Redacted</span>{% else %}{{ item.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if not principal.is_administrator %}<p class="field__help">Values are shown to administrators only.</p>{% endif %}
+{% else %}
+<p>The service sets no environment variables.</p>
+{% endif %}
+
+<h3>Labels</h3>
+{% if detail.labels %}
+{{ value_table(detail.labels, "Labels", "Labels of this service") }}
+{% else %}
+<p>The service has no labels.</p>
+{% endif %}
+
+<h3>Placement</h3>
+<dl class="facts">
+  <dt>Constraints</dt>
+  <dd>{% if detail.constraints %}<ul class="review__values mono">{% for item in detail.constraints %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}None{% endif %}</dd>
+  <dt>Preferences</dt>
+  <dd>{% if detail.preferences %}<ul class="review__values mono">{% for item in detail.preferences %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}None{% endif %}</dd>
+  <dt>Most replicas per node</dt>
+  <dd>{{ detail.max_replicas_per_node or "No limit" }}</dd>
+</dl>
+
+<h3>Resources</h3>
+{{ pair_facts(detail.resources, "No limits or reservations are set.") }}
+<h3>Restart policy</h3>
+{{ pair_facts(detail.restart, "The default restart policy applies.") }}
+<h3>Update configuration</h3>
+{{ pair_facts(detail.update_config, "The defaults apply.") }}
+<h3>Rollback configuration</h3>
+{{ pair_facts(detail.rollback_config, "The defaults apply.") }}
+
+<h3>Networks</h3>
+{% if detail.networks %}
+<ul class="ref-list">
+  {% for item in detail.networks %}
+  <li class="ref-list__item">
+    {% if item.name %}<a href="{{ with_origin(route_path('environment_network_detail', environment_id=detail.environment_id, network_id=item.target), 'service:' ~ detail.environment_id ~ ':' ~ detail.id) }}" class="mono">{{ item.name }}</a>{% else %}<span class="mono">{{ item.target }}</span> <span class="chip">Not available to you</span>{% endif %}
+    {% if item.aliases %}<span class="cell-note">Aliases {{ item.aliases|join(", ") }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>The service joins no network of its own.</p>
+{% endif %}
+
+<h3>Mounts</h3>
+{% if detail.mounts %}
+<div class="data-table__scroll" role="region" aria-label="Mounts" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Mounts of this service</caption>
+    <thead><tr><th scope="col">Type</th><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Access</th></tr></thead>
+    <tbody>
+      {% for mount in detail.mounts %}
+      <tr>
+        <th scope="row">{{ mount.type }}</th>
+        <td class="cell-wrap mono">{% if mount.source is none %}<span class="chip">Hidden</span>{% else %}{{ mount.source or "—" }}{% endif %}</td>
+        <td class="cell-wrap mono">{{ mount.target }}</td>
+        <td>{{ "Read-only" if mount.read_only else "Read and write" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>The service mounts nothing.</p>
+{% endif %}
+
+<h3>Configs</h3>
+{{ file_refs(detail.configs, detail.environment_id, "config", "The service uses no config.", detail.id) }}
+<h3>Secrets</h3>
+{{ file_refs(detail.secrets, detail.environment_id, "secret", "The service uses no secret.", detail.id) }}
+{% endmacro %}
+
+{% macro file_refs(items, environment_id, kind, empty, service_id=none) %}
+{% if items %}
+<div class="data-table__scroll" role="region" aria-label="{{ kind|capitalize }}s" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">{{ kind|capitalize }}s used by this service</caption>
+    <thead><tr><th scope="col">Name</th><th scope="col">File</th><th scope="col">Owner</th><th scope="col">Mode</th></tr></thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <th scope="row" class="cell-wrap">
+          {% if item.linkable %}<a href="{{ with_origin(route_path('environment_swarm_' ~ kind ~ '_detail', environment_id=environment_id, object_id=item.object_id), 'service:' ~ environment_id ~ ':' ~ service_id if service_id else none) }}">{{ item.name }}</a>{% else %}{{ item.name }}{% endif %}
+        </th>
+        <td class="cell-wrap mono">{{ item.target }}</td>
+        <td class="mono">{{ item.uid }}:{{ item.gid }}</td>
+        <td class="mono">{{ item.mode }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>{{ empty }}</p>
+{% endif %}
+{% endmacro %}
+
+{# The panel polls itself while any task is still moving toward its desired state, and carries no polling attributes once all have settled. #}
+{% macro tasks_panel(tasks) %}
+{% set poll_href = route_path("environment_swarm_service_tasks", environment_id=tasks.environment_id, service_id=tasks.service_id) %}
+{% set tab_href = route_path("environment_swarm_service_detail", environment_id=tasks.environment_id, service_id=tasks.service_id) ~ "?tab=tasks" %}
+<div id="service-tasks" aria-busy="{{ 'true' if tasks.polling else 'false' }}"
+     {%- if tasks.polling %} hx-get="{{ poll_href }}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="tab-heading">Tasks</h2>
+  <p class="field__help" role="status">
+    {%- if tasks.total == 0 %}This service has no tasks.
+    {%- else %}{{ tasks.shown }} of {{ tasks.total }} {{ "task" if tasks.total == 1 else "tasks" }}, newest first{% if tasks.polling %}. Some are still changing state; this list updates itself{% endif %}.
+    {%- endif %}
+    <a href="{{ tab_href }}">Refresh</a>
+  </p>
+  {% for group in tasks.groups %}
+  <section class="task-group" aria-labelledby="task-group-{{ loop.index }}">
+    <h3 id="task-group-{{ loop.index }}">{{ group.label }}</h3>
+    <div class="data-table__scroll" role="region" aria-label="Tasks of {{ group.label }}" tabindex="0">
+      <table class="table">
+        <caption class="visually-hidden">Tasks of {{ group.label }}, newest first</caption>
+        <thead>
+          <tr><th scope="col">Task</th><th scope="col">State</th><th scope="col">Desired</th><th scope="col">Node</th><th scope="col">Updated</th></tr>
+        </thead>
+        <tbody>
+          {% for task in group.tasks %}
+          <tr>
+            <th scope="row">
+              <div class="cell-stack">
+                <a class="mono" href="{{ route_path('environment_swarm_task_detail', environment_id=tasks.environment_id, task_id=task.id) }}">{{ task.short_id }}</a>
+                {% if task.container_link %}<a class="cell-note" href="{{ with_origin(route_path('environment_container_detail', environment_id=tasks.environment_id, container_id=task.container_id), 'service:' ~ tasks.environment_id ~ ':' ~ tasks.service_id) }}">Container</a>{% endif %}
+              </div>
+            </th>
+            <td>
+              <div class="cell-stack">
+                <span>{{ task_state_badge(task.state) }}</span>
+                {% if task.message %}<span class="task-note">{{ task.message }}</span>{% endif %}
+                {% if task.error %}<span class="task-note task-note--error">{{ task.error }}</span>{% endif %}
+                {% if task.exit_code is not none and task.exit_code != 0 %}<span class="task-note">Exit code {{ task.exit_code }}</span>{% endif %}
+              </div>
+            </td>
+            <td>{{ task.desired_state|capitalize }}</td>
+            <td>
+              {% if task.node_hostname and task.node_id and principal.is_administrator %}<a href="{{ route_path('environment_swarm_node_detail', environment_id=tasks.environment_id, node_id=task.node_id) }}">{{ task.node_hostname }}</a>
+              {% elif task.node_hostname %}{{ task.node_hostname }}
+              {% else %}<span class="cell-note">Not placed</span>{% endif %}
+            </td>
+            <td>{{ age(task.updated_at, "—") }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endfor %}
+  {% if tasks.truncated %}
+  <p class="field__help">Only the newest {{ tasks.shown }} tasks are shown.</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro tasks_unavailable(message, href) %}
+<div id="service-tasks">
+  {{ error_state("Tasks cannot be listed", message, retry_href=href, region_id="service-tasks", region_root=false) }}
+</div>
+{% endmacro %}
+
+{% macro access_tab(detail, panel, values, fields) %}
+{% set base = route_path("environment_swarm_service_access_save", environment_id=detail.environment_id, service_id=detail.id) %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, base, route_path("environment_swarm_service_access_delete", environment_id=detail.environment_id, service_id=detail.id), values=values, fields=fields) }}
+{% endmacro %}
+
+{% macro automation_tab(detail, automation) %}
+<h2 id="tab-heading">Automation</h2>
+{% if automation is not none %}
+{{ automation_panel(automation, route_path("automation_rule_new") ~ "?" ~ {"environment_id": detail.environment_id, "target_kind": "service", "target": detail.name}|urlencode, "service:" ~ detail.id) }}
+{% else %}
+<p class="field__help">Automation is not available.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro service_tabs(detail, tab, tab_keys, tasks, panel, logs, values, fields, automation=none, activity_log=none) %}
+{% set detail_href = route_path("environment_swarm_service_detail", environment_id=detail.environment_id, service_id=detail.id) %}
+{% set labels = {"overview": "Overview", "configuration": "Configuration", "tasks": "Tasks", "logs": "Logs", "automation": "Automation", "access": "Access"} %}
+<div id="service-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Service sections">
+    <ul class="tabs__list">
+      {% for key in tab_keys %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#service-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% elif tab == "configuration" %}{{ configuration_tab(detail) }}
+    {% elif tab == "tasks" %}{{ tasks_panel(tasks) }}
+    {% elif tab == "logs" %}{{ logs_tab(detail, logs) }}
+    {% elif tab == "automation" %}{{ automation_tab(detail, automation) }}
+    {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
+    {% endif %}
+    {% if activity_log is not none %}
+    {{ activity_panel(activity_log.title, activity_log) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

@@ -1,0 +1,240 @@
+{# Import with context: the forms carry the CSRF token. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "stacks/_parts.html" import credential_choices, unwritable_notice with context %}
+
+{% macro hidden_containers(count) %}
+{% if count %}
+<p class="field__help">{{ count }} {{ "container" if count == 1 else "containers" }} {{ "is" if count == 1 else "are" }} hidden from you and not listed.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro container_group(entries, more, hidden) %}
+{% if entries %}
+{{ confirm_targets(entries, "container", more) }}
+{% endif %}
+{{ hidden_containers(hidden) }}
+{% endmacro %}
+
+{% macro removal_containers(review, with_orphans=false) %}
+<h3 class="confirm__subheading">Containers that are deleted</h3>
+{% if review.containers or review.hidden_containers %}
+{{ container_group(review.containers, review.more_containers, review.hidden_containers) }}
+{% else %}
+<p>No service in the file has a container.</p>
+{% endif %}
+{% if with_orphans %}
+<h3 class="confirm__subheading">Also removed: containers no service in the file defines</h3>
+{% if review.orphans or review.hidden_orphans %}
+{{ container_group(review.orphans, review.more_orphans, review.hidden_orphans) }}
+{% else %}
+<p>No container belongs to the stack without a service in the file.</p>
+{% endif %}
+{% elif review.orphans or review.hidden_orphans %}
+<h3 class="confirm__subheading">Containers that are kept</h3>
+<p>These containers belong to the stack but no service in the file defines them. Removing the stack leaves them as they are.</p>
+{{ container_group(review.orphans, review.more_orphans, review.hidden_orphans) }}
+{% endif %}
+{% endmacro %}
+
+{% macro removal_networks(review) %}
+<h3 class="confirm__subheading">Networks that are deleted</h3>
+{% if review.networks %}
+{{ confirm_targets(review.networks, "network") }}
+{% else %}
+<p>The stack has no networks.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro volumes_table(review) %}
+{% if review.volumes %}
+<div class="data-table__scroll" role="region" aria-label="Volumes of the stack" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">What happens to each volume of the stack</caption>
+    <thead>
+      <tr><th scope="col">Volume</th><th scope="col">Driver</th><th scope="col">Result</th></tr>
+    </thead>
+    <tbody>
+      {% for volume in review.volumes %}
+      <tr>
+        <th scope="row" class="mono cell-wrap">{{ volume.name }}</th>
+        <td class="mono">{{ volume.driver or "—" }}</td>
+        <td>
+          {% if volume.delete and volume.writable %}
+          {{ badge("Deleted", "danger") }}
+          {% elif volume.delete %}
+          {{ badge("Deleted", "danger") }} <span class="cell-note">You cannot change this volume.</span>
+          {% else %}
+          {{ badge("Kept", "neutral") }} <span class="cell-note">{{ volume.reason }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>None of the stack's volumes exist on the host.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro removal_form(review, run_href, detail_href, plain_href, compose, with_volumes=false, with_orphans=false, alternatives=[]) %}
+{% set deleting = review.volumes|selectattr("delete")|list %}
+{% set verb = "Force remove" if with_orphans else "Remove" %}
+{% if review.unwritable_containers %}
+{{ unwritable_notice(review.unwritable_containers) }}
+<p class="row-actions">
+  <a class="btn" href="{{ detail_href }}">Back to the stack</a>
+</p>
+{% elif with_volumes and review.cannot_change %}
+<div class="panel panel--notice" role="note">
+  <p>You cannot change {{ review.cannot_change }} of the volumes marked Deleted, so volumes cannot be removed with this stack. Remove the stack without its volumes, or ask an administrator.</p>
+</div>
+<p class="row-actions">
+  <a class="btn" href="{{ plain_href }}">Remove stack without volumes</a>
+  <a class="btn" href="{{ detail_href }}">Cancel</a>
+</p>
+{% elif with_volumes and not deleting %}
+<p class="row-actions">
+  <a class="btn" href="{{ plain_href }}">Remove stack without volumes</a>
+  <a class="btn" href="{{ detail_href }}">Cancel</a>
+</p>
+{% else %}
+<form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_stack_id" value="{{ review.stack_id }}">
+  <input type="hidden" name="expected_containers" value="{{ review.expected_containers }}">
+  <input type="hidden" name="expected_networks" value="{{ review.expected_networks }}">
+  {% if with_volumes %}
+  <input type="hidden" name="remove_volumes" value="yes">
+  <input type="hidden" name="expected_volumes" value="{{ review.expected_volumes }}">
+  {% endif %}
+  {% if with_orphans %}
+  <input type="hidden" name="remove_orphans" value="yes">
+  <input type="hidden" name="confirm_force" value="yes">
+  {% endif %}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger"{% if compose %} disabled{% endif %}>
+      {%- if with_volumes %}{{ verb }} stack and delete {{ deleting|length }} {{ "volume" if deleting|length == 1 else "volumes" }}
+      {%- else %}{{ verb }} stack{% endif -%}
+    </button>
+    {% for label, href in alternatives %}
+    <a class="btn" href="{{ href }}">{{ label }}</a>
+    {% endfor %}
+    <a class="btn" href="{{ detail_href }}">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro redeploy_conflicts(conflicts) %}
+{% if conflicts %}
+<section class="panel panel--alert" aria-labelledby="redeploy-conflicts">
+  <h3 id="redeploy-conflicts">Resolve these before redeploying</h3>
+  <p>Redeploy is unavailable until none of these remain.</p>
+  <ul>
+    {% for path, message in conflicts %}
+    <li><span class="mono cell-wrap">{{ path }}</span>: {{ message }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endmacro %}
+
+{% macro redeploy_builds(review) %}
+{% if review.builds %}
+<section class="panel panel--notice" aria-labelledby="redeploy-builds">
+  <h3 id="redeploy-builds">Images built on {{ review.environment_name }}</h3>
+  <p>The RUN steps of each Dockerfile below execute on {{ review.environment_name }} while its image builds. A RUN step can do anything an unprivileged container with the default capabilities and the default network can do on that host.</p>
+  <div class="data-table__scroll" role="region" aria-label="Services that are built" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">The image each service is built into and the base images it starts from</caption>
+      <thead>
+        <tr><th scope="col">Service</th><th scope="col">Image that is replaced</th><th scope="col">Base images</th><th scope="col">Result</th></tr>
+      </thead>
+      <tbody>
+        {% for build in review.builds %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ build.service }}</th>
+          <td class="mono cell-wrap">{{ build.tag }}</td>
+          <td class="mono cell-wrap">{{ build.bases|join(", ") or "—" }}</td>
+          <td>
+            {% if build.reuse %}
+            {{ badge("Reused", "neutral") }} <span class="cell-note">The image on the host was built from the same inputs.</span>
+            {% else %}
+            {{ badge("Built", "warn") }}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endmacro %}
+
+{% macro redeploy_form(review, run_href, detail_href, edit_href, compose, pull, offers, catalogue, with_orphans=false, alternatives=[], blocked=false) %}
+{% if review.unwritable_containers %}
+{{ unwritable_notice(review.unwritable_containers) }}
+<p class="row-actions">
+  <a class="btn" href="{{ detail_href }}">Back to the stack</a>
+</p>
+{% else %}
+<form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_file_digest" value="{{ review.expected_file_digest }}">
+  <input type="hidden" name="expected_inputs_digest" value="{{ review.expected_inputs_digest }}">
+  <input type="hidden" name="expected_containers" value="{{ review.expected_containers }}">
+  <input type="hidden" name="expected_builds" value="{{ review.expected_builds }}">
+  {% if with_orphans %}
+  <input type="hidden" name="remove_orphans" value="yes">
+  <input type="hidden" name="confirm_force" value="yes">
+  {% endif %}
+
+  {{ redeploy_builds(review) }}
+
+  <fieldset class="choice-group">
+    <legend>Options</legend>
+    {{ checkbox_field("pull", "Pull the images again", "yes", checked=pull, help="Pulls every image the file names, and every base image a build needs, even when the host already has it.") }}
+    {% if review.builds %}
+    {{ checkbox_field("rebuild", "Rebuild the images", "yes", checked=rebuild, help="Builds every service listed above again, even when the host has an image built from the same inputs.") }}
+    {% endif %}
+  </fieldset>
+
+  {{ credential_choices(offers, catalogue) }}
+
+  <div class="form__actions">
+    <button type="submit" class="btn {{ 'btn--danger' if with_orphans else 'btn--primary' }}"{% if compose or blocked %} disabled{% endif %}>
+      {%- set removed = review.orphans|length + review.more_orphans + review.hidden_orphans -%}
+      {%- if with_orphans and removed %}Redeploy stack and remove {{ removed }} {{ "container" if removed == 1 else "containers" }}
+      {%- else %}Redeploy stack{% endif -%}
+    </button>
+    {% for label, href in alternatives %}
+    <a class="btn" href="{{ href }}">{{ label }}</a>
+    {% endfor %}
+    <a class="btn" href="{{ edit_href }}">Edit the file first</a>
+    <a class="btn" href="{{ detail_href }}">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro restart_form(review, run_href, detail_href, compose) %}
+{% if review.unwritable_containers %}
+{{ unwritable_notice(review.unwritable_containers) }}
+<p class="row-actions">
+  <a class="btn" href="{{ detail_href }}">Back to the stack</a>
+</p>
+{% else %}
+<form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_containers" value="{{ review.expected_containers }}">
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary"{% if compose %} disabled{% endif %}>Restart stack</button>
+    <a class="btn" href="{{ detail_href }}">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endmacro %}

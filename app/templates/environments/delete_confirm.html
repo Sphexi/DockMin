@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "environments/_impact.html" import deletion_impact, records_table with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Delete environments - dockmin{% endblock %}
+{% set crumb_page = "Delete environments" if preview and preview.items|length > 1 else "Delete environment" %}
+{% block content %}
+{% set count = preview.items|length if preview else 0 %}
+{% call page_header("Delete " ~ ("environments" if count > 1 else "environment"), "Review what is removed. Nothing is deleted until you confirm.") %}
+<a class="btn" href="{{ route_path('index') }}">Back to environments</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("Check the selection", message) }}
+{% endfor %}
+
+{% if preview %}
+{% if preview.missing %}
+<div class="panel panel--notice" role="status">
+  <p>{{ preview.missing|length }} of the selected {{ "environment does" if preview.missing|length == 1 else "environments do" }} not exist and {{ "is" if preview.missing|length == 1 else "are" }} left out.</p>
+</div>
+{% endif %}
+
+{% if preview.items %}
+{% for item in preview.items %}
+{{ deletion_impact(item) }}
+{% endfor %}
+
+{% if count > 1 %}
+<section class="section" aria-labelledby="totals-heading">
+  <h2 id="totals-heading">Totals</h2>
+  {{ records_table(preview.totals, "Records deleted across all selected environments") }}
+</section>
+{% endif %}
+
+<form class="form" method="post" action="{{ route_path('environment_delete') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ confirm_targets(preview.items, "environment") }}
+  {% for item in preview.items %}
+  <input type="hidden" name="id" value="{{ item.environment_id }}">
+  <input type="hidden" name="expected_name" value="{{ item.name }}">
+  {% endfor %}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Delete {{ count }} {{ "environment" if count == 1 else "environments" }}</button>
+    <a class="btn" href="{{ route_path('index') }}">Cancel</a>
+  </div>
+</form>
+{% else %}
+<p>None of the selected environments exist any more.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

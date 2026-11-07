@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Registry deleted - dockmin{% endblock %}
+{% set crumb_page = "Registry deleted" %}
+{% block content %}
+{% call page_header("Registry deleted") %}
+<a class="btn btn--primary" href="{{ route_path('registries') }}">Back to registries</a>
+{% endcall %}
+<div class="panel" role="status">
+  <p>The credential set <strong>{{ name }}</strong> and its grants were deleted. Pulled images and running containers were not touched. Activity history is kept.</p>
+</div>
+{% if bindings %}
+<div class="panel panel--notice" role="note">
+  <p>{{ bindings }} {{ "image now reads" if bindings == 1 else "images now read" }} "Credential set deleted". Automatic updates for {{ "it" if bindings == 1 else "them" }} stop until each is pulled again with another credential set.</p>
+</div>
+{% endif %}
+{% endblock %}

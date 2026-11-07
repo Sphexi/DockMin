@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied.</Message><Resource>/dockmin-e2e-missing/exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Resource><RequestId>18E17D8A9B87A6950C4CB958</RequestId><Key>exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Key><BucketName>dockmin-e2e-missing</BucketName></Error>

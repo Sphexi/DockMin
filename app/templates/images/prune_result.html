@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Prune result - dockmin{% endblock %}
+{% set crumb_page = "Prune result" %}
+{% block content %}
+{% set labels = {
+  "removed": ("Removed", "ok"),
+  "skipped_changed": ("Skipped: changed since you reviewed it", "warn"),
+  "skipped_in_use": ("Skipped: a container uses it now", "warn"),
+  "busy": ("Skipped: another operation is running on it", "warn"),
+  "gone": ("Already gone", "neutral"),
+  "failed": ("Failed", "danger"),
+} %}
+{% call page_header("Prune result", environment.name) %}
+<a class="btn btn--primary" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+<div class="panel" role="status">
+  <p>{{ result.removed }} of {{ result.items|length }} {{ "image" if result.items|length == 1 else "images" }} removed. Up to {{ result.reclaimed_up_to|filesize }} freed; layers shared with other images are not counted twice by Docker, so the real figure can be lower.</p>
+</div>
+<div class="data-table__scroll" role="region" aria-label="Result for each image" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Result for each listed image</caption>
+    <thead>
+      <tr><th scope="col">Image</th><th scope="col">References</th><th scope="col">Result</th></tr>
+    </thead>
+    <tbody>
+      {% for item in result.items %}
+      {% set shown = labels[item.status] %}
+      <tr>
+        <th scope="row" class="mono">{{ item.short_id }}</th>
+        <td>
+          {% if item.references %}
+          <ul class="chip-list mono">
+            {% for reference in item.references %}<li>{{ reference }}</li>{% endfor %}
+          </ul>
+          {% else %}<span class="cell-note">—</span>{% endif %}
+        </td>
+        <td>{{ badge(shown[0], shown[1]) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

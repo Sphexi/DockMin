@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "swarm/objects/_detail.html" import object_summary, object_tabs with context %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}{{ detail.name }} - dockmin{% endblock %}
+{% set crumb_object = detail.name %}
+{% block content %}
+{% call page_header(detail.name, kind|capitalize ~ " on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to " ~ kind ~ "s", origin) }}
+{% endcall %}
+
+{{ object_summary(kind, detail) }}
+{{ object_tabs(kind, detail, tab, tabs, panel, values, fields) }}
+{% endblock %}

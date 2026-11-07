@@ -1,0 +1,57 @@
+{# A secret input never carries a value; a stored secret is reported as set. #}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+
+{% macro choice_input(item, selected, error) %}
+{% set field_id = "field-" ~ item.name %}
+{% set described_by = (field_id ~ "-help " if item.help else "") ~ (field_id ~ "-error" if error else "") %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ item.label }}{% if item.required %} <span class="field__required" aria-hidden="true">*</span>{% endif %}</label>
+    {% if item.help %}<p class="field__help" id="{{ field_id }}-help">{{ item.help }}</p>{% endif %}
+  </div>
+  <select class="field__input" id="{{ field_id }}" name="{{ item.name }}"
+          {%- if item.required %} required{% endif %}
+          {%- if error %} aria-invalid="true"{% endif %}
+          {%- if described_by|trim %} aria-describedby="{{ described_by|trim }}"{% endif %}>
+    {% for value, text in item.choices %}
+    <option value="{{ value }}"{% if value == selected %} selected{% endif %}>{{ text }}</option>
+    {% endfor %}
+  </select>
+  {% if error %}<p class="field__error" id="{{ field_id }}-error">{{ error }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro text_area(item, value, error) %}
+{% set field_id = "field-" ~ item.name %}
+{% set described_by = (field_id ~ "-help " if item.help else "") ~ (field_id ~ "-error" if error else "") %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ item.label }}{% if item.required %} <span class="field__required" aria-hidden="true">*</span>{% endif %}</label>
+    {% if item.help %}<p class="field__help" id="{{ field_id }}-help">{{ item.help }}</p>{% endif %}
+  </div>
+  <textarea class="field__input" id="{{ field_id }}" name="{{ item.name }}" rows="3" spellcheck="false" autocomplete="off"
+            {%- if item.required %} required{% endif %}
+            {%- if error %} aria-invalid="true"{% endif %}
+            {%- if described_by|trim %} aria-describedby="{{ described_by|trim }}"{% endif %}>{{ value }}</textarea>
+  {% if error %}<p class="field__error" id="{{ field_id }}-error">{{ error }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro channel_field(item, state, errors, stored) %}
+{% set error = errors.get(item.name) %}
+{% if item.secret %}
+{% set is_stored = item.name in stored %}
+{% set status = "Set. Leave blank to keep it." if is_stored else "Not set. It is stored encrypted and never shown again." %}
+{{ form_field(item.name, item.label, type="password", error=error, help=status ~ ((" " ~ item.help) if item.help else ""), autocomplete="new-password", required=item.required and not is_stored) }}
+{% if item.clearable and is_stored %}
+{{ checkbox_field(item.clear_name, "Remove the stored " ~ item.label|lower, checked=item.name in state.clear) }}
+{% endif %}
+{% elif item.input_type == "select" %}
+{{ choice_input(item, state.values.get(item.name, item.choices[0][0]), error) }}
+{% elif item.input_type == "textarea" %}
+{{ text_area(item, state.values.get(item.name, ""), error) }}
+{% else %}
+{{ form_field(item.name, item.label, value=state.values.get(item.name, ""), type=item.input_type, error=error, help=item.help or none, required=item.required) }}
+{% endif %}
+{% endmacro %}

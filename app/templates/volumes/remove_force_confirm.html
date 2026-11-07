@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/container_state_label.html" import container_state_label %}
+{% from "partials/object_users.html" import users_overflow %}
+{% from "partials/page_header.html" import page_header %}
+{% from "volumes/_parts.html" import container_base, facts with context %}
+{% block title %}Force remove volume {{ impact.short_name }} - dockmin{% endblock %}
+{% set crumb_object = impact.short_name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Force remove" %}
+{% block content %}
+{% set base = container_base(impact.environment_id) %}
+{% call page_header("Force remove volume", "This volume is in use. Confirm separately that it and its containers should go.") %}
+<a class="btn" href="{{ detail_href }}">Back to the volume</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="force-heading">
+  <h2 id="force-heading">Force remove volume <span class="mono cell-wrap" title="{{ impact.name }}">{{ impact.short_name }}</span>?</h2>
+  {{ confirm_targets([{"name": impact.name, "detail": "removed after its containers"}], "volume") }}
+  {{ facts(impact, false) }}
+
+  <h3>Containers that would be removed first</h3>
+  {% if impact.containers %}
+  {% set items = [] %}
+  {% for container in impact.containers %}
+  {% set _ = items.append({"name": container.name, "detail": container.short_id ~ ", " ~ container_state_label(container.state)}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "container") }}
+  {% else %}
+  <p>No container you can change uses this volume.</p>
+  {% endif %}
+  {% if impact.containers_more or impact.containers_hidden %}
+  <p class="field__help">{{ users_overflow(impact.containers_more, impact.containers_hidden) }}.</p>
+  {% endif %}
+
+  {% if impact.blocked %}
+  <div class="panel panel--alert" role="note">
+    <h3>This removal cannot go ahead</h3>
+    <ul>
+      {% if impact.running %}
+      <li>Stop {{ "this container" if impact.running|length == 1 else "these containers" }} first. A running container is never killed by this action:
+        {% for container in impact.running %}<a href="{{ base }}/{{ container.id }}">{{ container.name }}</a>{{ ", " if not loop.last }}{% endfor %}.</li>
+      {% endif %}
+      {% if impact.unwritable %}
+      <li>{{ impact.unwritable }} {{ "container you cannot change uses" if impact.unwritable == 1 else "containers you cannot change use" }} this volume. {{ "It is" if impact.unwritable == 1 else "They are" }} not named.</li>
+      {% endif %}
+      {% if impact.too_many %}
+      <li>More than {{ max_containers }} containers use this volume. One run removes at most {{ max_containers }}; remove some of them first.</li>
+      {% endif %}
+    </ul>
+  </div>
+  <div class="form__actions">
+    <a class="btn" href="{{ review_href }}">Review again</a>
+    <a class="btn" href="{{ detail_href }}">Cancel</a>
+  </div>
+  {% else %}
+  <div class="panel panel--alert" role="note">
+    <h3>What forcing does</h3>
+    <ul>
+      <li>Each container above is removed, without its anonymous volumes, one after the other. One run removes at most {{ max_containers }} containers. If one cannot be removed, the run stops there and the volume is kept.</li>
+      <li>Then the volume and all of the data in it are deleted.</li>
+      <li>This cannot be undone.</li>
+    </ul>
+  </div>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="force" value="yes">
+    <input type="hidden" name="expected_created_at" value="{{ impact.created_at_text }}">
+    <input type="hidden" name="expected_containers" value="{{ impact.containers_digest }}">
+    {% for container in impact.containers %}
+    <input type="hidden" name="container" value="{{ container.id }}:{{ container.name }}">
+    {% endfor %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Force remove {{ impact.containers|length }} {{ "container" if impact.containers|length == 1 else "containers" }} and the volume</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

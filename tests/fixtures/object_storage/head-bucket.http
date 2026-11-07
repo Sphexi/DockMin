@@ -1,0 +1,16 @@
+HEAD /dockmin-e2e HTTP/1.1
+Host: 127.0.0.1:29000
+Authorization: AWS4-HMAC-SHA256 Credential=<redacted>/20261024/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=<redacted>
+X-Amz-Date: 20261024T142832Z
+x-amz-content-sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+User-Agent: curl/8.18.0
+Accept: */*
+
+HTTP/1.1 200 OK
+Accept-Ranges: bytes
+Content-Length: 0
+Server: SeaweedFS 30GB 4.48
+Vary: Origin
+X-Amz-Request-Id: 18E17D7F4B3112030B2D2194
+Date: Sat, 24 Oct 2026 14:28:32 GMT
+

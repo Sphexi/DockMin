@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}New team - dockmin{% endblock %}
+{% set crumb_page = "New team" %}
+{% block content %}
+{% call page_header("New team", "Name the team, then add its members.") %}
+<a class="btn" href="{{ route_path('teams') }}">Back to teams</a>
+{% endcall %}
+
+{{ unplaced_errors(fields, ["name"]) }}
+
+<form class="form" method="post" action="{{ route_path('team_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ form_field("name", "Team name", value=name, error=fields.get("name"), help="Up to 64 characters. Names are unique, ignoring case.", required=true, autocomplete="off") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Create team</button>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Terminal in {{ issued.name }} - dockmin{% endblock %}
+{% set crumb_object = issued.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Terminal" %}
+{% block head_extra %}
+{# xterm.js 5.5.0 and addon-fit 0.10.0 (MIT). npm tarball integrity:
+   @xterm/xterm sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==
+   @xterm/addon-fit sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ==
+   The sha384 values below are of the vendored files themselves.
+   Update both hashes when the file changes. #}
+<link rel="stylesheet" href="{{ static_path('vendor/xterm/xterm.css') }}" integrity="sha384-8Xk9wy/gzEDUKrXtrmCFa2bBuK3BpjpDuL/p0SeKQX19Khl/M+lHOgD/CyYf7efP">
+<script src="{{ static_path('vendor/xterm/xterm.js') }}" integrity="sha384-M169f14mRZOXm3hD/v2Ti0ThIT/RnAQagXA9nlE15yHAtrW19gdePJh/HaTzUOe/" defer></script>
+<script src="{{ static_path('vendor/xterm/addon-fit.js') }}" integrity="sha384-iF+jqbuti4XlB64clWgFWYEscb+UnSRv3VgVikGYZu+otNFnSHr7y7NcKfBnGizn" defer></script>
+<script src="{{ static_path('js/terminal.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+{% call page_header("Terminal", ("Attached to " if issued.mode == "attach" else "Exec in ") ~ issued.name ~ " (" ~ issued.short_id ~ ")") %}
+<a class="btn" href="{{ detail_href }}" data-terminal-back>Back to the container</a>
+{% endcall %}
+
+<noscript>
+  <div class="state state--error" role="alert">
+    <h2 class="state__title">JavaScript is required</h2>
+    <p class="state__body">A terminal needs JavaScript. Turn it on for this site, then open a new terminal.</p>
+    <p><a class="btn btn--primary" href="{{ form_href }}">Open a new terminal</a></p>
+  </div>
+</noscript>
+
+<section class="terminal" aria-label="Terminal session" hidden
+         data-terminal data-terminal-ws="{{ issued.websocket_path }}" data-terminal-ticket="{{ issued.ticket }}"
+         data-terminal-mode="{{ issued.mode }}">
+  {% if issued.mode == "attach" %}
+  <p class="panel panel--notice">Input goes to the container's main process. Ctrl-C or Ctrl-D can stop the container. Closing this page detaches and leaves it running.</p>
+  {% endif %}
+  <p class="terminal-status" role="status" aria-live="polite" data-terminal-status data-state="connecting">Connecting.</p>
+  <p class="field__help" id="terminal-help">Press Ctrl+Shift+F6 to move focus out of the terminal. Every other key goes to the terminal.</p>
+  <div class="terminal-frame">
+    <div class="terminal-screen" data-terminal-screen></div>
+  </div>
+  <div class="form__actions terminal-actions" data-terminal-actions hidden>
+    <a class="btn btn--primary" href="{{ form_href }}">Open a new terminal</a>
+    <a class="btn" href="{{ detail_href }}">Back to the container</a>
+  </div>
+</section>
+{% endblock %}

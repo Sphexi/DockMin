@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ title }} - dockmin{% endblock %}
+{% block content %}
+{% call page_header(heading if heading is defined and heading else title, environment_name if environment_name is defined and environment_name else none) %}
+<a class="btn" href="{{ back_href }}">{{ back_label }}</a>
+{% endcall %}
+{{ error_state(title, message, request_id if request_id is defined and request_id else none, engine_detail=engine_detail if engine_detail is defined else none) }}
+{% if review_href is defined and review_href %}
+<p><a class="btn" href="{{ review_href }}">Review again</a></p>
+{% endif %}
+{% endblock %}

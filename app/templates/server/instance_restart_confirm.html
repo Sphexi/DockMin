@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Restart dockmin - dockmin{% endblock %}
+{% set crumb_page = "Restart dockmin" %}
+{% block content %}
+{% call page_header("Restart dockmin", "Review the container below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ back_href }}">Back to Instance</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("dockmin was not restarted", error) }}
+{% endif %}
+
+{% if view.can_restart %}
+<section class="panel" aria-labelledby="confirm-heading">
+  <h2 id="confirm-heading">Restart <span class="mono">{{ view.container_name or view.short_id }}</span>?</h2>
+  {{ confirm_targets([{"name": view.container_name or view.short_id, "detail": view.short_id}], "container") }}
+  <form class="form form--wide" method="post" action="{{ restart_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="container_id" value="{{ view.container_id }}">
+    <input type="hidden" name="boot_id" value="{{ boot_id }}">
+    <input type="hidden" name="confirm" value="{{ confirm_value }}">
+    <p>The container is stopped, then started again. dockmin is unavailable until it is back. Signed-in sessions are kept. Image transfers and other work in progress are interrupted.</p>
+    <p>The restart is recorded in the activity log before it is sent.</p>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Restart dockmin</button>
+      <a class="btn" href="{{ back_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

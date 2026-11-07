@@ -1,0 +1,4 @@
+{# The label always names the state; an empty label falls back to the tone so the badge never carries meaning by colour alone. #}
+{% macro badge(label, tone="neutral") -%}
+<span class="badge" data-tone="{{ choice(tone, ['neutral', 'ok', 'warn', 'danger', 'info']) }}">{{ label if label else tone }}</span>
+{%- endmacro %}

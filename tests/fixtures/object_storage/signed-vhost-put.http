@@ -1,0 +1,21 @@
+PUT /exports/rule-1/2026/01/01/00000000000000000001.csv.gz HTTP/1.1
+Host: dockmin-e2e.s3.localhost:29000
+accept: */*
+accept-encoding: gzip, deflate
+connection: keep-alive
+user-agent: python-httpx/0.28.1
+content-type: application/gzip
+content-md5: Z08L190ptsty/N5xTXWLrw==
+x-amz-date: 20261024T143130Z
+x-amz-content-sha256: fab13701487253cae6169529ccf0609461e84e219231792560fc5bfa9c114101
+authorization: AWS4-HMAC-SHA256 Credential=<redacted>/20261024/us-east-1/s3/aws4_request, SignedHeaders=content-md5;content-type;host;x-amz-content-sha256;x-amz-date, Signature=<redacted>
+content-length: 55
+
+HTTP/1.1 200 OK
+accept-ranges: bytes
+content-length: 0
+etag: "674f0bd7dd29b6cb72fcde714d758baf"
+server: SeaweedFS 30GB 4.48
+vary: Origin
+x-amz-request-id: 18E17DA8A8D92FE1B8B60881
+date: Sat, 24 Oct 2026 14:31:30 GMT

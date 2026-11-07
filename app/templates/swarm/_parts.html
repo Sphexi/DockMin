@@ -1,0 +1,112 @@
+{# Import with context: links come from route names. #}
+{% from "partials/badge.html" import badge %}
+
+{% macro task_state_badge(state) %}
+{% set tones = {"running": "ok", "complete": "neutral", "shutdown": "neutral", "remove": "neutral", "failed": "danger", "rejected": "danger", "orphaned": "warn"} %}
+{{ badge(state|capitalize, tones.get(state, "info")) }}
+{% endmacro %}
+
+{% macro health_badge(running, desired) %}
+{% if running is none or desired is none %}
+{{ badge("Unknown", "neutral") }}
+{% elif desired == 0 %}
+{{ badge("Stopped", "neutral") }}
+{% elif running >= desired %}
+{{ badge("Running", "ok") }}
+{% elif running == 0 %}
+{{ badge("Not running", "danger") }}
+{% else %}
+{{ badge("Partly running", "warn") }}
+{% endif %}
+{% endmacro %}
+
+{% macro replicas_text(running, desired, replicas) -%}
+{%- if running is not none and desired is not none %}{{ running }} of {{ desired }} running
+{%- elif replicas is not none %}{{ replicas }}
+{%- else %}—{% endif -%}
+{%- endmacro %}
+
+{% macro stack_link(stack, environment_id) %}
+{% if stack %}
+<a href="{{ route_path('environment_swarm_service_list', environment_id=environment_id) }}?{{ {'stack': stack}|urlencode }}">{{ stack }}</a>
+{% else %}
+<span class="cell-note">None</span>
+{% endif %}
+{% endmacro %}
+
+{% macro service_base(environment_id) -%}
+{{ route_path("environment_swarm_service_list", environment_id=environment_id) }}
+{%- endmacro %}
+
+{% macro value_table(rows, label, caption) %}
+<div class="data-table__scroll" role="region" aria-label="{{ label }}" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead><tr><th scope="col">Key</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for item in rows %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ item.key }}</th>
+        <td class="cell-wrap mono">{% if item.redacted %}<span class="chip">Redacted</span>{% else %}{{ item.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro pair_facts(pairs, none_text) %}
+{% if pairs %}
+<dl class="facts">
+  {% for name, value in pairs %}
+  <dt>{{ name }}</dt>
+  <dd class="mono">{{ value }}</dd>
+  {% endfor %}
+</dl>
+{% else %}
+<p>{{ none_text }}</p>
+{% endif %}
+{% endmacro %}
+
+{% set category_labels = {
+  "image": "Image",
+  "mode": "Mode and replicas",
+  "command": "Command",
+  "environment": "Environment variables",
+  "labels": "Labels",
+  "placement": "Placement",
+  "resources": "Resources",
+  "restart_policy": "Restart policy",
+  "update_config": "Update configuration",
+  "rollback_config": "Rollback configuration",
+  "networks": "Networks",
+  "ports": "Published ports",
+  "mounts": "Mounts",
+  "configs": "Configs",
+  "secrets": "Secrets",
+  "healthcheck": "Health check",
+  "process": "Process",
+  "host": "Host and DNS",
+  "security": "Security",
+  "ulimits": "Resource limits",
+  "logging": "Logging",
+  "other": "Other settings the form does not show",
+} %}
+
+{# Names the settings that differ, never their values. #}
+{% macro category_list(categories) %}
+<ul class="review__values">
+  {% for category in categories %}
+  <li>{{ category_labels.get(category, category) }}</li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro node_counts(nodes, more) %}
+<ul class="review__values">
+  {% for item in nodes %}
+  <li><span class="mono">{{ item.hostname }}</span>: {{ item.tasks }} {{ "task" if item.tasks == 1 else "tasks" }}</li>
+  {% endfor %}
+  {% if more %}<li>and {{ more }} more {{ "node" if more == 1 else "nodes" }}</li>{% endif %}
+</ul>
+{% endmacro %}

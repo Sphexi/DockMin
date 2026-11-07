@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "activity/_filters.html" import filter_form with context %}
+{% from "activity/_table.html" import activity_results with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Activity - dockmin{% endblock %}
+{% block content %}
+{{ page_header("Activity", "What users and automations did, newest first.") }}
+
+{% if retention is not none %}
+<section class="section" aria-label="Retention">
+  {% if retention.days is none %}
+  <p class="field__help">Retention is off. Every event is kept.</p>
+  {% else %}
+  <p class="field__help">Events older than {{ retention.days }} days are removed hourly.</p>
+  {% endif %}
+  {% if retention.held_since %}
+  <div class="panel panel--notice" role="note">
+    <p>Held for export since <time datetime="{{ retention.held_since|timestamp_iso }}">{{ retention.held_since|timestamp(seconds=True) }}</time>. Retention keeps the events that {{ "the export rule has" if retention.exporter_rules == 1 else "all " ~ retention.exporter_rules ~ " export rules have" }} not copied yet.</p>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{{ filter_form(filters) }}
+
+{{ activity_results(rows, columns, pager, export_href, errors) }}
+{% endblock %}

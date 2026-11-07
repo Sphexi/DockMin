@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "images/_parts.html" import credential_fieldset with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% macro retry_panel(update, selected, check_href, back_href, catalogue, csrf_token) %}
+<section class="panel panel--stacked" aria-labelledby="retry-heading">
+  <h2 id="retry-heading">Check again</h2>
+  <form class="form form--wide" method="post" action="{{ check_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ credential_fieldset(update.offer, selected or update.offer.preselected_value, none, catalogue) }}
+    <div class="form__actions">
+      <button type="submit" class="btn">Check for updates</button>
+      <a class="btn" href="{{ back_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endmacro %}
+{% block title %}Check for updates - dockmin{% endblock %}
+{% set crumb_page = "Check for updates" %}
+{% block content %}
+{% set update = view.update %}
+{% call page_header("Check for updates", "What the registry holds for the image dockmin runs from.") %}
+<a class="btn" href="{{ back_href }}">Back to Instance</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("The check did not finish", error) }}
+{% if update and update.commands %}
+<pre class="code-block" tabindex="0">{{ update.commands | join("\n") }}</pre>
+{% endif %}
+{% if update and update.can_check %}
+{{ retry_panel(update, selected, check_href, back_href, catalogue, csrf_token) }}
+{% endif %}
+{% endif %}
+
+{% if check %}
+<section class="panel" aria-labelledby="check-heading">
+  <h2 id="check-heading">Running now</h2>
+  <dl class="facts">
+    <dt>Image</dt>
+    <dd class="mono">{{ check.reference }}</dd>
+    <dt>Digest</dt>
+    <dd class="mono">{{ check.digest }}</dd>
+    <dt>Version</dt>
+    <dd class="mono">{{ check.version }}</dd>
+    <dt>Registry</dt>
+    <dd class="mono">{{ check.registry_address }}</dd>
+  </dl>
+  {% if check.same_tag == "pinned" %}
+  <p>The image is pinned to a digest, so only newer release tags are offered.</p>
+  {% elif check.same_tag == "current" %}
+  <p>The running tag still points at the digest dockmin runs from.</p>
+  {% elif check.same_tag == "newer" %}
+  <p>The running tag now points at a different digest: <span class="mono break-anywhere">{{ check.same_tag_digest }}</span>.</p>
+  {% elif check.same_tag_error %}
+  <p role="alert">The running tag could not be read: {{ check.same_tag_error }}</p>
+  {% endif %}
+  {% if check.tags_error %}
+  <p role="alert">Newer tags could not be listed: {{ check.tags_error }}</p>
+  {% endif %}
+</section>
+
+<section class="panel panel--stacked" aria-labelledby="targets-heading">
+  <h2 id="targets-heading">Update to</h2>
+  {% if check.candidates %}
+  <form class="form form--wide" method="post" action="{{ confirm_href }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="credential_choice" value="{{ check.credential_choice }}">
+    <fieldset class="choice-group">
+      <legend>Target</legend>
+      <p class="field__help">The next page names everything that is replaced. Nothing changes before you confirm there.</p>
+      {% for candidate in check.candidates %}
+      <div class="choice">
+        <input class="choice__input" type="radio" id="target-{{ loop.index }}" name="target_tag" value="{{ candidate.tag }}" required aria-describedby="target-{{ loop.index }}-help">
+        <label class="choice__label" for="target-{{ loop.index }}"><span class="mono break-anywhere">{{ candidate.reference }}</span></label>
+        <p class="choice__help" id="target-{{ loop.index }}-help">
+          {%- if candidate.same_tag %}The running tag at a new digest
+          {%- else %}A newer release{% endif %}
+          {%- if candidate.digest %}: <span class="mono break-anywhere">{{ candidate.digest }}</span>{% endif %}</p>
+      </div>
+      {% endfor %}
+    </fieldset>
+    <div class="form__actions">
+      <button type="submit" class="btn">Review update</button>
+      <a class="btn" href="{{ back_href }}">Cancel</a>
+    </div>
+  </form>
+  {% elif check.same_tag_error or check.tags_error %}
+  <p>The registry could not be read in full, so no target is offered. Check again, with another credential set if the registry refused this one.</p>
+  {% else %}
+  <p>No update is available. dockmin runs the current image of its tag, and the registry lists no newer release.</p>
+  <p><a class="btn" href="{{ back_href }}">Back to Instance</a></p>
+  {% endif %}
+</section>
+{% if (check.same_tag_error or check.tags_error) and update and update.can_check %}
+{{ retry_panel(update, check.credential_choice, check_href, back_href, catalogue, csrf_token) }}
+{% endif %}
+{% endif %}
+{% endblock %}

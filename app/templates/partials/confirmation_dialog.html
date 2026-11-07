@@ -1,0 +1,33 @@
+{# Import with context: the form carries the request CSRF token. Without script the dialog is shown by :target. #}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+
+{% macro confirm_button(dialog_id, label, opener_id=none) -%}
+<a class="btn btn--danger-quiet" href="#{{ dialog_id }}" id="{{ opener_id if opener_id else dialog_id ~ '-opener' }}" data-dialog-open="{{ dialog_id }}" aria-haspopup="dialog">{{ label }}</a>
+{%- endmacro %}
+
+{# hidden maps the names of extra hidden inputs to their values. #}
+{% macro confirmation_dialog(dialog_id, title, message, action, confirm_label, subject=none, hx_target=none, targets=none, noun=none, hidden=none, opener_id=none) %}
+<dialog id="{{ dialog_id }}" class="dialog" aria-labelledby="{{ dialog_id }}-title" aria-describedby="{{ dialog_id }}-body" data-confirm-dialog>
+  <form class="dialog__form" method="post" action="{{ action }}"
+        {%- if hx_target %} hx-post="{{ action }}" hx-target="{{ hx_target }}" hx-swap="outerHTML"{% endif %}>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if hidden is mapping %}
+    {% for field, value in hidden.items() %}
+    <input type="hidden" name="{{ field }}" value="{{ value }}">
+    {% endfor %}
+    {% endif %}
+    <h2 class="dialog__title" id="{{ dialog_id }}-title">{{ title }}</h2>
+    <div class="dialog__body" id="{{ dialog_id }}-body">
+      <p>{{ message }}
+        {%- if subject %} <strong class="mono">{{ subject }}</strong>{% endif %}</p>
+      {% if targets is not none %}
+      {{ confirm_targets(targets, noun if noun else "item") }}
+      {% endif %}
+    </div>
+    <div class="dialog__actions">
+      <a class="btn" href="#{{ opener_id if opener_id else dialog_id ~ '-opener' }}" data-dialog-close>Cancel</a>
+      <button type="submit" class="btn btn--danger">{{ confirm_label }}</button>
+    </div>
+  </form>
+</dialog>
+{% endmacro %}

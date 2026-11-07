@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/users_table.html" import users_table with context %}
+{% block title %}Users - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Users", "Everyone who can sign in to this dockmin.") %}
+{% endcall %}
+
+{% call list_bar(list_count(total|default(none), "user")) %}
+<a class="btn btn--primary" href="{{ route_path('user_new') }}">New user</a>
+{% endcall %}
+{{ users_table(rows, columns, pager, principal.user_id) }}
+{% endblock %}

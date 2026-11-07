@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Update dockmin - dockmin{% endblock %}
+{% set crumb_page = "Update dockmin" %}
+{% block content %}
+{% call page_header("Update dockmin", "Review the replacement below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ back_href }}">Back to Instance</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("dockmin was not updated", error) }}
+{% endif %}
+
+{% if confirmation %}
+{% set name = confirmation.container_name %}
+<section class="panel" aria-labelledby="confirm-heading">
+  <h2 id="confirm-heading">Update <span class="mono">{{ name }}</span>?</h2>
+  {{ confirm_targets([{"name": name, "detail": confirmation.container_id[:12]}], "container") }}
+  <dl class="facts">
+    <dt>Current image</dt>
+    <dd class="mono">{{ confirmation.current_reference }}</dd>
+    <dt>Current digest</dt>
+    <dd class="mono">{{ confirmation.current_digest }}</dd>
+    <dt>New image</dt>
+    <dd class="mono">{{ confirmation.target_reference }}</dd>
+    <dt>New digest</dt>
+    <dd class="mono">{{ confirmation.target_digest }}</dd>
+    <dt>Registry</dt>
+    <dd class="mono">{{ confirmation.registry_address }}</dd>
+    <dt>Update helper</dt>
+    <dd class="mono">{{ confirmation.helper_reference }}</dd>
+    <dt>Update helper digest</dt>
+    <dd class="mono">{{ confirmation.helper_digest }}</dd>
+    <dt>Outage</dt>
+    <dd>dockmin is unavailable from the moment the container stops until the new one is healthy. Stopping takes up to {{ confirmation.stop_timeout }} seconds; the new container has up to {{ confirmation.health_timeout_seconds }} seconds to become healthy.</dd>
+    <dt>Database copy</dt>
+    <dd>The database files are copied inside the data directory after the container stops and before the replacement is created.</dd>
+    <dt>Automatic rollback</dt>
+    <dd>If the new container exits, cannot be created or is not healthy within {{ confirmation.health_timeout_seconds }} seconds, it is removed, the database copy is restored and the previous container is started again. Anything written to the database since the copy is lost.</dd>
+  </dl>
+
+  <h3 id="sequence-heading">What happens</h3>
+  <ol class="steps" aria-labelledby="sequence-heading">
+    <li>The update is recorded in the activity log.</li>
+    <li>The new image and the update helper are pulled from <span class="mono">{{ confirmation.registry_address }}</span>.</li>
+    <li>The helper stops <span class="mono">{{ name }}</span> and copies the database.</li>
+    <li>The helper renames <span class="mono">{{ name }}</span> to <span class="mono">{{ name }}-previous</span>, then creates and starts <span class="mono">{{ name }}</span> from the new image with the same configuration.</li>
+    <li>When the new container is healthy, <span class="mono">{{ name }}-previous</span> is removed. Otherwise the rollback above runs.</li>
+  </ol>
+  <p class="field__help steps-note">If the helper itself stops after step 3, the previous container is left stopped on the Docker host. It is named <span class="mono">{{ name }}-previous</span> once it has been renamed, otherwise <span class="mono">{{ name }}</span>. Start it with <span class="mono">docker start {{ name }}-previous</span>, or <span class="mono">docker start {{ name }}</span>.</p>
+
+  <form class="form form--wide" method="post" action="{{ request_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="container_id" value="{{ confirmation.container_id }}">
+    <input type="hidden" name="boot_id" value="{{ confirmation.boot_id }}">
+    <input type="hidden" name="current_digest" value="{{ confirmation.current_digest }}">
+    <input type="hidden" name="target_tag" value="{{ confirmation.target_tag }}">
+    <input type="hidden" name="target_digest" value="{{ confirmation.target_digest }}">
+    <input type="hidden" name="helper_digest" value="{{ confirmation.helper_digest }}">
+    <input type="hidden" name="credential_choice" value="{{ confirmation.credential_choice }}">
+    <input type="hidden" name="confirm" value="{{ confirm_value }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Update dockmin</button>
+      <a class="btn" href="{{ back_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

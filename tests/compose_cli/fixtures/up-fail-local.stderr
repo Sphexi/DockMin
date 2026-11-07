@@ -1,0 +1,12 @@
+{"id":"Network dockmin-e2e-fail_default","status":"Working","text":"Creating"}
+{"id":"Network dockmin-e2e-fail_default","status":"Working","text":"Creating"}
+{"id":"Network dockmin-e2e-fail_default","status":"Done","text":"Created"}
+{"id":"Network dockmin-e2e-fail_default","status":"Done","text":"Created"}
+{"id":"Container dockmin-e2e-fail-b-1","status":"Working","text":"Creating"}
+{"id":"Container dockmin-e2e-fail-a-1","status":"Working","text":"Creating"}
+{"id":"Container dockmin-e2e-fail-a-1","status":"Done","text":"Created"}
+{"id":"Container dockmin-e2e-fail-b-1","status":"Done","text":"Created"}
+{"id":"Container dockmin-e2e-fail-a-1","status":"Working","text":"Starting"}
+{"id":"Container dockmin-e2e-fail-b-1","status":"Working","text":"Starting"}
+{"id":"Container dockmin-e2e-fail-a-1","status":"Done","text":"Started"}
+{"error":true,"message":"Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint dockmin-e2e-fail-b-1 (df072c92c828b85da1225b5da8613547bad6434e589293eeb9e3c760bce9dce0): Bind for 127.0.0.1:23782 failed: port is already allocated"}

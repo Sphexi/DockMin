@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import when with context %}
+{% from "object_storage/_checks.html" import target_test_result %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% from "registries/_parts.html" import ca_certificates with context %}
+{% block title %}{{ target.name }} - dockmin{% endblock %}
+{% set crumb_object = target.name %}
+{% block content %}
+{% call page_header(target.name, "Object storage target") %}
+<a class="btn" href="{{ route_path('object_storage_targets') }}">Back to targets</a>
+<a class="btn" href="{{ route_path('object_storage_target_edit', target_id=target.id) }}">Edit</a>
+<a class="btn btn--danger-quiet" href="{{ route_path('object_storage_target_delete_confirm', target_id=target.id) }}">Delete</a>
+{% endcall %}
+
+
+{% for warning in target.warnings %}
+<div class="panel panel--notice" role="note">
+  <p>{{ warning }}</p>
+</div>
+{% endfor %}
+
+<section class="section" aria-labelledby="settings-heading">
+  <h2 id="settings-heading">Settings</h2>
+  <dl class="facts">
+    <dt>Endpoint address</dt>
+    <dd class="mono cell-wrap">{{ target.endpoint_url }}</dd>
+    <dt>Region</dt>
+    <dd class="mono">{{ target.region }}</dd>
+    <dt>Bucket</dt>
+    <dd class="mono cell-wrap">{{ target.bucket }}</dd>
+    <dt>Addressing</dt>
+    <dd>{{ "Path-style" if target.use_path_style else "Virtual-host" }}</dd>
+    <dt>Access key ID</dt>
+    <dd class="mono cell-wrap">{{ target.access_key_id }}</dd>
+    <dt>Secret access key</dt>
+    <dd>Stored. It is never shown.</dd>
+    <dt>Certificate verification</dt>
+    <dd>{% if target.verify_tls %}{{ badge("On", "ok") }}{% else %}{{ badge("TLS not verified", "danger") }}{% endif %}</dd>
+    <dt>Activity log folder</dt>
+    <dd class="mono">{{ target.activity_log_prefix or "(top of the bucket)" }}</dd>
+    <dt>Backup folder</dt>
+    <dd class="mono">{{ target.backup_prefix or "(top of the bucket)" }}</dd>
+    <dt>Archives kept</dt>
+    <dd>
+      {%- if target.retention_count is none %}Every archive is kept.
+      {%- else %}The newest {{ target.retention_count }} of each rule. A backup rule deletes older objects named <span class="mono">{{ retention_files }}</span> inside its own folder <span class="mono">{{ retention_folder }}</span>.{% endif -%}
+    </dd>
+    <dt>Added</dt>
+    <dd>{{ when(target.created_at, "") }}</dd>
+    <dt>Last changed</dt>
+    <dd>{{ when(target.updated_at, "") }}</dd>
+  </dl>
+  <p class="field__help">{{ advice }}</p>
+  {% if target.ca_certificates %}
+  <h3>CA certificates</h3>
+  <p class="field__help">Trusted for this server in addition to the system store. Only these details are kept on view; the certificates are never shown.</p>
+  {{ ca_certificates(target.ca_certificates) }}
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="test-heading">
+  <h2 id="test-heading">Connection</h2>
+  <div class="row-actions">
+    <form class="inline-form" method="post" action="{{ route_path('object_storage_target_test', target_id=target.id) }}"
+          hx-post="{{ route_path('object_storage_target_test', target_id=target.id) }}" hx-target="#object-storage-test" hx-swap="outerHTML"
+          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn btn--primary">Test connection</button>
+    </form>
+  </div>
+  <p class="field__help">A test connects from this server with the saved settings and the stored secret. It checks the bucket and lists the backup folder and the activity log folder.</p>
+  {{ target_test_result(checks, test_error, permission_note) }}
+</section>
+
+<section class="section" aria-labelledby="rules-heading">
+  <h2 id="rules-heading">Automation rules</h2>
+  {% if rules %}
+  <ul class="chip-list">
+    {% for rule in rules %}
+    <li><a href="{{ route_path('automation_rule_detail', rule_id=rule.rule_id) }}">{{ rule.name|visible_text }}</a> <span class="cell-note mono">{{ rule.subsystem }}</span></li>
+    {% endfor %}
+  </ul>
+  {% if more_rules %}
+  <p class="field__help">More rules use this target than are listed.</p>
+  {% endif %}
+  {% else %}
+  <p class="field__help">No rule sends to this target.</p>
+  {% endif %}
+  <p><a class="btn" href="{{ route_path('automation') }}">Open automation</a></p>
+</section>
+{% endblock %}

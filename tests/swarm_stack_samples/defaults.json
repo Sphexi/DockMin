@@ -1,0 +1,19 @@
+{
+  "name": "shop",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "shop_default"
+    }
+  },
+  "services": {
+    "web": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    }
+  }
+}

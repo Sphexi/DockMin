@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ "Switch on" if enable else "Switch off" }} {{ name }} - dockmin{% endblock %}
+{% set crumb_object = "Subsystems" %}
+{% set crumb_object_href = route_path('job_subsystems') %}
+{% set crumb_page = ("Switch on " if enable else "Switch off ") ~ name %}
+{% block content %}
+{% set verb = "Switch on" if enable else "Switch off" %}
+{% call page_header(verb ~ " " ~ name, "Review the jobs this changes. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ route_path('job_subsystems') }}">Back to subsystems</a>
+{% endcall %}
+
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What changes</h2>
+  <ul>
+    {% if enable %}
+    <li>Every job of <span class="mono">{{ name }}</span> is scheduled again and runs when it is next due.</li>
+    <li>Automation that acts on a host resumes with it.</li>
+    {% else %}
+    <li>No job of <span class="mono">{{ name }}</span> runs, on schedule or by request, until it is switched on.</li>
+    <li>A run already in progress finishes.</li>
+    {% endif %}
+    <li>No automation and no run history is deleted.</li>
+    {% if not available %}
+    <li>This subsystem is not available in this build, so its jobs cannot run either way.</li>
+    {% endif %}
+    {% if enable == enabled %}
+    <li>The subsystem is already {{ "on" if enabled else "off" }}. Confirming changes nothing.</li>
+    {% endif %}
+  </ul>
+</section>
+
+<section class="section" aria-labelledby="jobs-heading">
+  <h2 id="jobs-heading">{{ job_count }} {{ "job" if job_count == 1 else "jobs" }} affected</h2>
+  {% if jobs %}
+  <ul class="ref-list">
+    {% for row in jobs %}
+    <li class="ref-list__item"><a href="{{ route_path('job_detail', job_id=row.summary.job.id) }}">{{ row.summary.rule_name if row.summary.rule_name else row.summary.job.subsystem }}</a>
+      {%- if row.summary.environment_name %} <span class="cell-note">on {{ row.summary.environment_name }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% if job_count > jobs|length %}
+  <p class="field__help">Showing {{ jobs|length }}. The jobs list filtered by this subsystem shows all of them.</p>
+  {% endif %}
+  {% else %}
+  <p>This subsystem has no jobs yet.</p>
+  {% endif %}
+</section>
+
+<form class="form" method="post" action="{{ route_path('job_subsystem_enable' if enable else 'job_subsystem_disable', subsystem=name) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ confirm_targets([name], "subsystem") }}
+  <div class="form__actions">
+    <button type="submit" class="btn {{ 'btn--primary' if enable else 'btn--danger' }}">{{ verb }} {{ name }}</button>
+    <a class="btn" href="{{ route_path('job_subsystems') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

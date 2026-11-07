@@ -1,0 +1,63 @@
+{
+  "version": "3",
+  "templates": [
+    {
+      "id": 1,
+      "type": 1,
+      "title": "Nginx",
+      "description": "<b>High performance</b> web server",
+      "note": "<script>alert(1)</script> Edit the config after start.",
+      "categories": ["webserver", "Web"],
+      "platform": "linux",
+      "logo": "https://example.invalid/nginx.png",
+      "image": "nginx:latest",
+      "name": "web",
+      "restart_policy": "unless-stopped",
+      "ports": ["80:80/tcp", "443/tcp"],
+      "volumes": [{"container": "/etc/nginx/conf.d"}],
+      "env": [
+        {"name": "MODE", "label": "Mode", "default": "prod", "select": [
+          {"text": "Production", "value": "prod", "default": true},
+          {"text": "Development", "value": "dev"}
+        ]},
+        {"name": "TOKEN", "label": "Access token"},
+        {"name": "REGION", "default": "eu", "preset": true}
+      ],
+      "labels": [{"name": "managed-by", "value": "template"}]
+    },
+    {
+      "id": 2,
+      "type": 1,
+      "title": "Docker socket proxy",
+      "description": "Needs the socket.",
+      "categories": ["tools"],
+      "image": "tecnativa/docker-socket-proxy:latest",
+      "registry": "quay.io",
+      "administrator_only": true,
+      "privileged": true,
+      "interactive": true,
+      "network": "host",
+      "hostname": "proxy",
+      "command": "--verbose",
+      "volumes": [{"container": "/var/run/docker.sock", "bind": "/var/run/docker.sock", "readonly": true}]
+    },
+    {
+      "id": 3,
+      "type": 2,
+      "title": "Swarm stack",
+      "repository": {"url": "https://example.invalid/repo", "stackfile": "stack.yml"}
+    },
+    {
+      "id": 4,
+      "type": 3,
+      "title": "Compose stack",
+      "repository": {"url": "https://example.invalid/repo", "stackfile": "compose.yml"}
+    },
+    {"id": 5, "type": 1, "description": "No title", "image": "busybox"},
+    {"id": 6, "type": 1, "title": "Bad image", "image": "Not A Valid Image!"},
+    {"id": 1, "type": 1, "title": "Duplicate id", "image": "busybox"},
+    {"id": 8, "type": 7, "title": "Unknown type", "image": "busybox"},
+    {"id": 9, "type": 1, "title": "Bad port", "image": "busybox", "ports": ["http"]},
+    ["not", "an", "object"]
+  ]
+}

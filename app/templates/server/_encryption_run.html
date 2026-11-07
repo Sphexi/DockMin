@@ -1,0 +1,122 @@
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/badge.html" import badge %}
+
+{% macro encryption_run(run, rows, href, poll_seconds) %}
+{% set running = run.phase == "running" %}
+{% set states = {
+  "complete": ("ok", "Complete"),
+  "values_unreadable": ("danger", "Finished with values that did not open"),
+  "interrupted": ("warn", "Interrupted"),
+  "failed": ("danger", "Failed"),
+} %}
+{% set state = ("info", "Running") if running else states.get(run.outcome, ("neutral", "Finished")) %}
+{% set is_rekey = run.kind == "rekey" %}
+{% set title = ("Re-encrypting stored secrets" if is_rekey else "Checking stored secrets") if running else ("Re-encryption of stored secrets" if is_rekey else "Check of stored secrets") %}
+{% set kinds = {
+  "unreadable": "No key opens it",
+  "corrupt": "Does not open with the current key",
+  "unparseable": "Not a well-formed stored secret",
+} %}
+{% set unopened = run.unreadable + run.corrupt + run.unparseable %}
+{% set total = run.rewritten + run.remaining_below_current %}
+<div id="encryption-run"
+     {%- if running %} hx-get="{{ href }}" hx-trigger="every {{ poll_seconds|int }}s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <section class="progress-panel" data-state="{{ 'running' if running else ('succeeded' if run.outcome == 'complete' else 'failed') }}" aria-labelledby="encryption-run-title" aria-busy="{{ 'true' if running else 'false' }}">
+    <header class="progress-panel__head">
+      <h2 class="progress-panel__title" id="encryption-run-title">{{ title }}</h2>
+      {{ badge(state[1], state[0]) }}
+    </header>
+    {% if is_rekey and total %}
+    <progress class="progress-panel__bar" max="{{ total }}" value="{{ run.rewritten }}" aria-label="{{ title }} progress">{{ run.rewritten }} of {{ total }}</progress>
+    {% elif running %}
+    <progress class="progress-panel__bar" aria-label="{{ title }} progress">Working</progress>
+    {% endif %}
+    <p class="visually-hidden" role="status">{{ title }}: {{ state[1] }}{% if is_rekey and total %}, {{ run.rewritten }} of {{ total }} rewritten{% endif %}</p>
+    {% if running and is_rekey %}
+    <p class="progress-panel__detail">The instance refuses changes until this finishes. Pages can still be read.</p>
+    {% elif run.outcome == "interrupted" %}
+    <p class="progress-panel__detail" role="status">{{ "Stopped before it finished. Every stored secret is still readable. Re-encrypting again resumes where this stopped." if is_rekey else "Stopped before it finished. Nothing was changed." }}</p>
+    {% elif run.outcome == "failed" %}
+    <p class="progress-panel__detail" role="alert">The run failed before it finished. Every stored secret is still readable. The server log names the reason; start it again when it is resolved.</p>
+    {% elif run.outcome == "values_unreadable" %}
+    <p class="progress-panel__detail" role="alert">
+      {%- if is_rekey and run.remaining_below_current %}{{ run.remaining_below_current }} stored {{ "secret is" if run.remaining_below_current == 1 else "secrets are" }} still below key version {{ run.key_version }}. {% endif %}
+      {%- if unopened %}{{ unopened }} stored {{ "secret" if unopened == 1 else "secrets" }} did not open. Enter each of them again on the page named below.{% endif %}</p>
+    {% elif run.outcome == "complete" %}
+    <p class="progress-panel__detail" role="status">{{ "Every stored secret is now sealed under key version " ~ run.key_version ~ "." if is_rekey else "Every stored secret opened." }}</p>
+    {% endif %}
+    {% if running %}
+    <p class="progress-panel__refresh"><a href="{{ href }}">Refresh status</a></p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="run-facts-heading">
+    <h2 id="run-facts-heading">Counts</h2>
+    <dl class="facts">
+      <dt>Key version</dt>
+      <dd>{{ run.key_version }}</dd>
+      <dt>Started</dt>
+      <dd>{{ when(run.started_at, "") }}</dd>
+      {% if not running %}
+      <dt>Finished</dt>
+      <dd>{{ when(run.finished_at, "") }}</dd>
+      {% endif %}
+      {% if is_rekey %}
+      <dt>Rewritten</dt>
+      <dd>{{ run.rewritten }}</dd>
+      <dt>Still below key version {{ run.key_version }}</dt>
+      <dd>{{ run.remaining_below_current }}</dd>
+      {% endif %}
+      <dt>Opened and checked</dt>
+      <dd>{{ run.checked }}</dd>
+      <dt>No key opens it</dt>
+      <dd>{{ run.unreadable }}</dd>
+      <dt>Does not open with the current key</dt>
+      <dd>{{ run.corrupt }}</dd>
+      <dt>Not well formed</dt>
+      <dd>{{ run.unparseable }}</dd>
+    </dl>
+  </section>
+
+  {% if rows %}
+  <section class="section" aria-labelledby="run-failures-heading">
+    <h2 id="run-failures-heading">Values that did not open</h2>
+    <div class="data-table__scroll" role="region" aria-labelledby="run-failures-heading" tabindex="0">
+      <table class="table">
+        <caption class="visually-hidden">Stored secrets that did not open, by location</caption>
+        <thead>
+          <tr>
+            <th scope="col">Location</th>
+            <th scope="col">Problem</th>
+            <th scope="col">Page</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <th scope="row" class="mono cell-wrap">{{ row.location }}</th>
+            <td>{{ kinds.get(row.kind, row.kind) }}</td>
+            <td>{% if row.href %}<a href="{{ row.href }}">{{ row.link_label }}</a>{% else %}<span class="cell-note">No page of its own</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if unopened > rows|length %}
+    <p class="field__help">Showing the first {{ rows|length }} of {{ unopened }} locations.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if is_rekey and run.outcome == "complete" %}
+  <div class="panel panel--notice" role="note">
+    <h2>After the re-encryption</h2>
+    <ul>
+      <li>Remove <span class="mono">DOCKMIN_PREVIOUS_SECRET_KEY</span> or <span class="mono">DOCKMIN_PREVIOUS_SECRET_KEY_FILE</span>, and <span class="mono">DOCKMIN_ALLOW_KEY_ROTATION</span>, from the container's configuration.</li>
+      <li>Recreate the container so it starts without them.</li>
+      <li>Keep the old key while any archive made before the rotation may be restored.</li>
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}

@@ -1,0 +1,62 @@
+{% macro action_label(action) -%}
+{{ {"start": "Start", "stop": "Stop", "restart": "Restart", "kill": "Kill", "pause": "Pause", "unpause": "Unpause", "remove": "Remove"}.get(action, action) }}
+{%- endmacro %}
+
+{% macro action_past(action) -%}
+{{ {"start": "Started", "stop": "Stopped", "restart": "Restarted", "kill": "Killed", "pause": "Paused", "unpause": "Unpaused", "remove": "Removed"}.get(action, action) }}
+{%- endmacro %}
+
+{% macro action_effect(action) -%}
+{{ {
+  "start": "Starts the container with its saved configuration.",
+  "stop": "Sends the stop signal, then kills the process if it has not exited when the container's grace period ends.",
+  "restart": "Stops the container, then starts it again.",
+  "kill": "Sends SIGKILL at once. The process gets no chance to shut down and work in progress is lost.",
+  "pause": "Freezes every process in the container until it is unpaused.",
+  "unpause": "Resumes the processes in the container.",
+  "remove": "Deletes the container and its writable layer. This cannot be undone. Named volumes are kept.",
+}.get(action, "") }}
+{%- endmacro %}
+
+{# Import with context: links come from route names. #}
+{% macro action_button(environment_id, container_id, name, action, view, slot=false) %}
+{% set href = route_path("environment_container_action_confirm", environment_id=environment_id, container_id=container_id, action=action) ~ "?view=" ~ view %}
+<a class="btn btn--compact{% if slot %} btn--slot{% endif %}{% if action in ("kill", "remove") %} btn--danger{% endif %}" id="act-{{ container_id }}-{{ action }}" href="{{ href }}" aria-label="{{ action_label(action) }} {{ name }}"
+   hx-get="{{ href }}" hx-target="#action-region" hx-swap="innerHTML">{{ action_label(action) }}</a>
+{% endmacro %}
+
+{% macro disabled_button(label, name, danger=false, slot=false) %}
+<button type="button" class="btn btn--compact{% if slot %} btn--slot{% endif %}{% if danger %} btn--danger{% endif %}" disabled aria-label="{{ label }} {{ name }}">{{ label }}</button>
+{% endmacro %}
+
+{% macro state_action(environment_id, container_id, name, action, actions, view, danger=false, slot=false) %}
+{% if action in actions %}
+{{ action_button(environment_id, container_id, name, action, view, slot) }}
+{% else %}
+{{ disabled_button(action_label(action), name, danger, slot) }}
+{% endif %}
+{% endmacro %}
+
+{% macro action_buttons(environment_id, container_id, name, actions, view, state, can_write=false, may_create=false, is_self=false) %}
+{% set lifecycle = "stop" if state in ("running", "restarting", "paused") else "start" %}
+{% set freeze = "unpause" if state == "paused" else "pause" %}
+<div class="row-actions">
+  {% if can_write %}
+  {{ state_action(environment_id, container_id, name, lifecycle, actions, view, slot=true) }}
+  {{ state_action(environment_id, container_id, name, "restart", actions, view) }}
+  {{ state_action(environment_id, container_id, name, "kill", actions, view, danger=true) }}
+  {{ state_action(environment_id, container_id, name, freeze, actions, view, slot=true) }}
+  {{ state_action(environment_id, container_id, name, "remove", actions, view, danger=true) }}
+  {% if view == "list" %}
+  {% if is_self %}
+  {{ disabled_button("Recreate", name) }}
+  {% else %}
+  <a class="btn btn--compact" href="{{ route_path('environment_container_recreate_confirm', environment_id=environment_id, container_id=container_id) }}" aria-label="Recreate {{ name }}">Recreate</a>
+  {% endif %}
+  {% endif %}
+  {% endif %}
+  {% if view == "list" and may_create %}
+  <a class="btn btn--compact" href="{{ route_path('environment_container_new', environment_id=environment_id) }}?from={{ container_id }}" aria-label="Duplicate {{ name }}">Duplicate</a>
+  {% endif %}
+</div>
+{% endmacro %}

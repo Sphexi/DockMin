@@ -1,0 +1,53 @@
+{# Import with context. #}
+
+{% macro cell(prefix, index, number, column, label, subject, values, errors, key_list=none) %}
+{% set name = prefix ~ "-" ~ index ~ "-" ~ column %}
+{% set field_id = "field-" ~ name %}
+{% set error = errors[name]|default(none) %}
+{% set group_error = errors[prefix ~ "s"]|default(none) %}
+{% set described_by = (field_id ~ "-error " if error else "") ~ ("group-" ~ prefix ~ "-error" if group_error else "") %}
+<div class="field repeat__cell"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subject }} {{ number }}: </span>{{ label }}</label>
+  </div>
+  <input class="field__input" id="{{ field_id }}" name="{{ name }}" type="text" value="{{ values[name]|default('') }}"
+         {%- if key_list and column == "key" %} list="{{ key_list }}"{% endif %}
+         {%- if error or group_error %} aria-invalid="true"{% endif %}
+         {%- if described_by|trim %} aria-describedby="{{ described_by|trim }}"{% endif %}
+         autocomplete="off">
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro row(prefix, index, number, key_label, value_label, subject, values, errors, key_list=none) %}
+<div class="repeat__row" data-repeat-row="{{ index }}">
+  {{ cell(prefix, index, number, "key", key_label, subject, values, errors, key_list) }}
+  {{ cell(prefix, index, number, "value", value_label, subject, values, errors, key_list) }}
+</div>
+{% endmacro %}
+
+{# prefix is option or label; count is how many rows to show; cap is the most the form takes. #}
+{% macro key_value_rows(prefix, legend, subject, help, count, cap, values, errors, submit_href, key_list=none) %}
+{% set group_error = errors[prefix ~ "s"]|default(none) %}
+<fieldset class="choice-group repeat" id="group-{{ prefix }}" data-repeat data-repeat-cap="{{ cap }}"{% if group_error %} data-invalid{% endif %}>
+  <legend class="visually-hidden">{{ legend }}</legend>
+  {% if help %}
+  <p class="field__help">{{ help }}</p>
+  {% endif %}
+  {% if group_error %}
+  <p class="field__error" id="group-{{ prefix }}-error">{{ group_error }}</p>
+  {% endif %}
+  <div class="repeat__rows" data-repeat-rows>
+    {% for index in range(count|int) %}
+    {{ row(prefix, index, index + 1, "Key", "Value", subject, values, errors, key_list) }}
+    {% endfor %}
+  </div>
+  <template data-repeat-template>{{ row(prefix, "__INDEX__", "__NUMBER__", "Key", "Value", subject, {}, {}, key_list) }}</template>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--compact" name="rows" value="{{ prefix }}" formaction="{{ submit_href }}#group-{{ prefix }}" formnovalidate data-repeat-more>Add rows</button>
+    <button type="button" class="btn btn--compact" data-repeat-add hidden>Add row</button>
+  </div>
+</fieldset>
+{% endmacro %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "images/_tables.html" import images_results, results_summary with context %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/list_bar.html" import list_bar %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Images on {{ environment.name }} - dockmin{% endblock %}
+{% block content %}
+{% set list_href = route_path("environment_image_list", environment_id=environment.id) %}
+{% call page_header("Images", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ route_path('environment_detail', environment_id=environment.id) }}">Back to environment</a>
+{% endcall %}
+
+
+<form id="image-filters" class="filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter images"
+      hx-get="{{ list_href }}" hx-target="#images-results" hx-swap="innerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#image-filters select, #image-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ form_field("q", "Reference contains", value=q, type="search", autocomplete="off") }}
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-dangling">Dangling</label>
+    </div>
+    <select class="field__input" id="field-dangling" name="dangling">
+      <option value="">Any</option>
+      {% for value in dangling_options %}
+      <option value="{{ value }}"{% if dangling == value %} selected{% endif %}>{{ "Dangling only" if value == "yes" else "Not dangling" }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-usage">Use</label>
+    </div>
+    <select class="field__input" id="field-usage" name="usage">
+      <option value="">Any</option>
+      {% for value in usage_options %}
+      <option value="{{ value }}"{% if usage == value %} selected{% endif %}>{{ "Used by a container" if value == "used" else "Unused" }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-binding">Binding</label>
+    </div>
+    <select class="field__input" id="field-binding" name="binding">
+      <option value="">Any</option>
+      {% for value in binding_options %}
+      <option value="{{ value }}"{% if binding == value %} selected{% endif %}>{{ {"bound": "Bound to a credential set", "anonymous": "Anonymous pull", "credential_missing": "Credential set deleted", "unbound": "Not bound"}[value] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-update">Updates</label>
+    </div>
+    <select class="field__input" id="field-update" name="update">
+      <option value="">Any</option>
+      {% for value in update_options %}
+      <option value="{{ value }}"{% if update == value %} selected{% endif %}>{{ "Available" if value == "available" else value|capitalize }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply filters</button>
+    <a class="btn" href="{{ list_href }}">Reset</a>
+  </div>
+</form>
+
+{% call list_bar(results_summary(none if (errors or failure) else total, filtered)) %}
+{% if can_create %}
+<a class="btn btn--primary" href="{{ route_path('environment_image_pull', environment_id=environment.id) }}">Pull image</a>
+{% endif %}
+{% if can_remove %}
+<a class="btn" href="{{ route_path('environment_image_prune', environment_id=environment.id) }}">Prune images</a>
+{% endif %}
+{% endcall %}
+<div id="images-results">
+  {{ images_results(rows, columns, pager, total, filtered, environment_id, errors, failure, retry_href, checkable, orphans, can_create, can_remove, max_batch=max_batch) }}
+</div>
+{% endblock %}

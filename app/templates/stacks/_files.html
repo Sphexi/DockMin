@@ -1,0 +1,64 @@
+{# Import with context. #}
+
+{% macro use_text(use) -%}
+{{ {"env": "environment file", "source": "config or secret source", "compose": "Compose file"}.get(use.role, use.role) }}{% if use.document %} in {{ use.document }}{% endif %}
+{%- endmacro %}
+
+{% macro file_uses(uses) %}
+{% if uses %}
+<ul class="ref-list">
+  {% for use in uses %}
+  <li class="ref-list__item"><span class="mono cell-wrap">{{ use.path }}</span> <span class="cell-note">{{ use_text(use) }}</span></li>
+  {% endfor %}
+</ul>
+{% else %}
+<span class="cell-note">Not used</span>
+{% endif %}
+{% endmacro %}
+
+{% macro files_tab(files, can_write, prefix, args) %}
+<h2 id="tab-heading">Files</h2>
+<p class="field__help">Files the Compose file refers to by name: environment files, label files, the source of a config or secret, and Compose files it includes. A plain file is shown here. A secret file is stored encrypted and its content is never shown.</p>
+{% if can_write %}
+<p><a class="btn btn--primary" href="{{ route_path(prefix ~ '_new', **args) }}">Add file</a></p>
+{% endif %}
+{% if files %}
+<div class="data-table__scroll" role="region" aria-label="Files added to the stack" tabindex="0">
+  <table class="table" data-optional="4 5">
+    <caption class="visually-hidden">Files added to the stack</caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th><th scope="col">Used by</th><th scope="col">Kind</th>
+        <th scope="col" class="col-optional is-numeric">Size</th><th scope="col" class="col-optional">Digest</th>
+        {% if can_write %}<th scope="col">Actions</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for file in files %}
+      <tr>
+        <th scope="row" class="mono cell-wrap">{{ file.name }}</th>
+        <td>{{ file_uses(file.uses) }}</td>
+        <td>{% if file.secret %}<span class="chip">Secret</span>{% else %}Plain{% endif %}</td>
+        <td class="col-optional is-numeric">{% if file.secret %}<span class="cell-note">Set</span>{% else %}{{ file.size|filesize }}{% endif %}</td>
+        <td class="col-optional">{% if file.digest %}<span class="mono" title="{{ file.digest }}">{{ file.digest[:12] }}</span>{% else %}<span class="cell-note">Not shown</span>{% endif %}</td>
+        {% if can_write %}
+        <td>
+          <span class="row-actions">
+            <a class="btn btn--compact" href="{{ route_path(prefix ~ '_edit', file=file.name, **args) }}" aria-label="Edit {{ file.name }}">Edit</a>
+            <a class="btn btn--compact btn--danger-quiet" href="{{ route_path(prefix ~ '_remove', file=file.name, **args) }}" aria-label="Remove {{ file.name }}">Remove</a>
+          </span>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% for file in files if not file.secret %}
+<h3 class="mono cell-wrap">{{ file.name }}</h3>
+<pre class="code-block" tabindex="0">{{ file.content }}</pre>
+{% endfor %}
+{% else %}
+<p>The stack has no files.</p>
+{% endif %}
+{% endmacro %}

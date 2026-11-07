@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "images/_impact.html" import image_facts with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Force remove image {{ impact.short_id }} - dockmin{% endblock %}
+{% set crumb_object = impact.short_id %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Force remove" %}
+{% block content %}
+{% call page_header("Force remove image", "This image is in use. Confirm separately that it should go anyway.") %}
+<a class="btn" href="{{ detail_href }}">Back to the image</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="force-heading">
+  <h2 id="force-heading">Force remove image <span class="mono">{{ impact.short_id }}</span>?</h2>
+  {{ confirm_targets([{"name": impact.short_id, "detail": impact.references|join(", ") if impact.references else "dangling"}], "image") }}
+  {{ image_facts(impact) }}
+  <div class="panel panel--alert" role="note">
+    <h3>What forcing does</h3>
+    <ul>
+      <li>The image and all of its references are removed, even though {{ impact.in_use }} {{ "container uses" if impact.in_use == 1 else "containers use" }} it.</li>
+      <li>Docker refuses a forced removal while one of those containers is running. Stop it first.</li>
+      <li>Stopped containers stay but no longer have their image, and a recreate has to pull it again.</li>
+      <li>This cannot be undone. Credential bindings are kept.</li>
+    </ul>
+  </div>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_references" value="{{ impact.references_digest }}">
+    <input type="hidden" name="expected_in_use" value="{{ impact.in_use }}">
+    <input type="hidden" name="force" value="yes">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Force remove image</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

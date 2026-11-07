@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% from "automation/_fields.html" import choice_select, number_param, storage_target_param with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "automation/_target_rows.html" import target_rows with context %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ "Edit " ~ rule_name if editing else "New automation" }} - dockmin{% endblock %}
+{% set crumb_object = rule_name if editing else none %}
+{% set crumb_object_href = cancel_href if editing else none %}
+{% set crumb_page = "Edit" if editing else "New automation" %}
+{% block content %}
+{% set errors = state.errors %}
+{% set kinds = info.target_kinds %}
+{% call page_header("Edit automation" if editing else "New automation", ("Step 2 of 2. " if not editing else "") ~ info.name ~ (" on " ~ environment.name if environment else "")) %}
+{% if not editing %}
+<a class="btn" href="{{ route_path('automation_rule_new') }}?{{ ({'subsystem': info.name, 'environment_id': environment.id} if environment else {'subsystem': info.name})|urlencode }}">Change automation{% if environment %} or environment{% endif %}</a>
+{% endif %}
+<a class="btn" href="{{ cancel_href }}">Cancel</a>
+{% endcall %}
+
+{% if banner %}
+{{ error_state("The target could not be checked", banner) }}
+{% endif %}
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+{% if not editing %}
+<div class="panel panel--notice" role="note">
+  <p>The automation is created disabled. Run a dry run to see what it would do, then enable it.{% if info.schedule_kinds == ("webhook",) %} The webhook URL is shown once, when you create the automation.{% endif %}</p>
+</div>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ submit_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" id="field-subsystem" name="subsystem" value="{{ info.name }}">
+  <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true">{{ "Save automation" if editing else "Create automation" }}</button>
+  {% if environment %}
+  <input type="hidden" name="environment_id" value="{{ environment.id }}">
+  {% endif %}
+
+  <section class="panel create-section" aria-labelledby="section-name-title">
+    <h2 class="create-section__title" id="section-name-title">Name</h2>
+    <div class="create-section__body">
+      {{ form_field("name", "Name", value=state.name, error=errors.get("name"), help="1 to 64 characters. Shown only to you and to administrators.", required=true) }}
+    </div>
+  </section>
+
+  {% if info.schedule_kinds == ("webhook",) %}
+  <input type="hidden" name="schedule_kind" value="webhook">
+  <input type="hidden" name="schedule_expression" value="">
+  <input type="hidden" name="time_zone" value="UTC">
+  {% else %}
+  <section class="panel create-section" aria-labelledby="section-schedule-title">
+    <h2 class="create-section__title" id="section-schedule-title">Schedule</h2>
+    <div class="create-section__body">
+      {% if schedule_options|length > 1 %}
+      {{ choice_select("schedule_kind", "Schedule type", schedule_options, state.schedule_kind) }}
+      {% else %}
+      <input type="hidden" name="schedule_kind" value="{{ schedule_options[0][0] }}">
+      {% endif %}
+      {% set schedule_help = ("A fixed interval is a number of seconds, at least " ~ info.min_interval ~ ". " if "interval" in info.schedule_kinds else "") ~ ("A cron expression has five fields, for example 0 3 * * * for 03:00 every day." if "cron" in info.schedule_kinds else "") ~ (" This automation takes a " ~ schedule_options[0][1]|lower ~ " only." if schedule_options|length == 1 else "") %}
+      {{ form_field("schedule_expression", "Schedule" if schedule_options|length > 1 else schedule_options[0][1], value=state.schedule_expression, error=errors.get("schedule_expression"), help=schedule_help, required=true) }}
+      {% if "cron" in info.schedule_kinds %}
+      {{ form_field("time_zone", "Time zone", value=state.time_zone, error=errors.get("time_zone"), help="An IANA name such as Europe/London. Used by cron expressions; a fixed interval ignores it.") }}
+      {% else %}
+      <input type="hidden" name="time_zone" value="{{ state.time_zone }}">
+      {% endif %}
+      {% if policy_options|length > 1 %}
+      {{ choice_select("overrun_policy", "If a run is still going when the next is due", policy_options, state.overrun_policy or info.default_overrun, error=errors.get("overrun_policy")) }}
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if info.requires_environment %}
+  <section class="panel create-section" aria-labelledby="section-target-title">
+    <h2 class="create-section__title" id="section-target-title">Target</h2>
+    <div class="create-section__body" data-target-form>
+      {{ choice_select("target_kind", "Acts on", target_options, state.target_kind, help="Choose the kind of target, then name it below. A container, stack or service that does not exist yet is accepted.", error=errors.get("target")) }}
+      {% set name_kinds = kinds|select("in", ["container", "stack", "service"])|list %}
+      {% if name_kinds %}
+      <div class="target-section" data-target-section="{{ name_kinds|join(' ') }}">
+        <p class="field__help" id="target-names-help">One name in each field.
+          {%- if "container" in kinds %} A container is named exactly, without a leading slash.{% endif %}
+          {%- if "stack" in kinds %} {{ "A stack is a Compose or Swarm stack dockmin manages." if stack_label == "Stack name" else "A stack is a Compose project." }}{% endif %}
+          {%- if "service" in kinds %} A Swarm service takes its full name, such as shop_web, and the environment must be a Swarm manager.{% endif %}</p>
+        {{ target_rows(state.target_names, state.target_kind, info.name, environment.id if environment else "", none, max_target_names) }}
+      </div>
+      {% endif %}
+      {% if "labels" in kinds or offers_service_labels %}
+      {% set label_sections = ["labels"] if "labels" in kinds else [] %}
+      {% if offers_service_labels %}{% set label_sections = label_sections + ["service_labels"] %}{% endif %}
+      <div class="target-section field" data-target-section="{{ label_sections|join(' ') }}">
+        <div class="field__head">
+          <label class="field__label" for="field-target_labels">Labels</label>
+          <p class="field__help" id="field-target_labels-help">Used when the target is {% if "labels" in kinds %}containers with labels{% endif %}{% if "labels" in kinds and offers_service_labels %} or {% endif %}{% if offers_service_labels %}services with labels{% endif %}. One label per line, as <span class="mono">key</span> or <span class="mono">key=value</span>. {% if "labels" in kinds %}A container{% else %}A service{% endif %}{% if "labels" in kinds and offers_service_labels %} or service{% endif %} must carry all of them. Up to 8.{% if info.name == "container-log-exporter" %} To export the containers that opt in, enter <span class="mono">dockmin.export-logs=true</span>.{% endif %}{% if offers_service_labels %} A service is matched on its own labels, not its containers'. To select the services of a Swarm stack that dockmin does not manage, enter <span class="mono">com.docker.stack.namespace=&lt;name&gt;</span>.{% endif %}</p>
+        </div>
+        <textarea class="field__input" id="field-target_labels" name="target_labels" rows="4" aria-describedby="field-target_labels-help" autocomplete="off" spellcheck="false">{{ state.target_labels }}</textarea>
+      </div>
+      {% endif %}
+      {% if "environment" in kinds %}
+      <p class="target-section field__help" data-target-section="environment">Every container in the environment needs no further field.</p>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel create-section" aria-labelledby="section-settings-title">
+    <h2 class="create-section__title" id="section-settings-title">Settings</h2>
+    <div class="create-section__body">
+      {% if errors.get("parameters") %}
+      <p class="field__error">{{ errors["parameters"] }}</p>
+      {% endif %}
+      {% if info.requires_environment %}
+      {% include ["automation/_params_" ~ info.name ~ ".html", "automation/_params_default.html"] %}
+      {% include "automation/_params_common.html" %}
+      {% else %}
+      {{ storage_target_param(state, errors, storage_targets, "The bucket this automation sends to. " ~ ("Backup archives go to the target's backup folder and are pruned by its retention." if info.name == "backup-syncer" else "Activity log files go to the target's activity log folder.")) }}
+      {% if info.name == "activity-log-exporter" %}
+      {% set chosen_format = "ndjson" if state.parameters.get("format", "csv")|lower == "ndjson" else "csv" %}
+      {{ choice_select("param_format", "File format", [("csv", "CSV"), ("ndjson", "NDJSON")], chosen_format, "CSV is a spreadsheet-friendly table. NDJSON writes one JSON object per line, with typed fields and the event detail as an object. Files are gzip-compressed either way; the next run writes the chosen format.", errors.get("format")) }}
+      {% endif %}
+      {{ number_param("max_consecutive_failures", "Disable the automation after failed runs in a row", state, "After this many failed runs in a row the automation's job is disabled. 1 to 100. Leave empty for the automation's default.", 1, 100) }}
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">{{ "Save automation" if editing else "Create automation" }}</button>
+    <a class="btn" href="{{ cancel_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_files.html" import file_uses %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Remove file {{ confirmation.file.name }} from {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Remove file" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Remove file", "Review the file below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the files</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Remove file <span class="mono cell-wrap">{{ review.file.name }}</span> from {{ review.stack }}?</h2>
+  {{ confirm_targets([{"name": review.file.name, "detail": "in " ~ review.stack ~ " on " ~ review.environment_name}], "file") }}
+  <p>The file is deleted from the stack's stored files. Nothing runs on the {{ "cluster" if swarm else "host" }}: containers keep what they started with until the stack is redeployed.</p>
+
+  <h3 class="confirm__subheading">Where it is used</h3>
+  {% if review.in_use %}
+  <div class="panel panel--alert" role="note">
+    <p>A document still names this file, so it cannot be removed. Remove these references from the Compose file first.</p>
+    {{ file_uses(review.file.uses) }}
+  </div>
+  <p class="row-actions">
+    <a class="btn" href="{{ stack_edit_href }}">Edit the Compose file</a>
+    <a class="btn" href="{{ detail_href }}">Back to the files</a>
+  </p>
+  {% else %}
+  <p>No document names this file.</p>
+  <form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_inputs_digest" value="{{ review.expected_inputs_digest }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger"{% if compose %} disabled{% endif %}>Remove file</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

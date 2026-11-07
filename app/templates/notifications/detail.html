@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import when with context %}
+{% from "notifications/_test.html" import channel_test_result %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ channel.name }} - dockmin{% endblock %}
+{% set crumb_object = channel.name %}
+{% block content %}
+{% call page_header(channel.name, channel.kind_label ~ " channel") %}
+<a class="btn" href="{{ route_path('notification_channels') }}">Back to channels</a>
+<a class="btn" href="{{ route_path('notification_subscriptions', channel_id=channel.id) }}">Subscriptions</a>
+<a class="btn" href="{{ route_path('notification_channel_edit', channel_id=channel.id) }}">Edit</a>
+<a class="btn btn--danger-quiet" href="{{ route_path('notification_channel_delete_confirm', channel_id=channel.id) }}">Delete</a>
+{% endcall %}
+
+{% for warning in channel.warnings %}
+<div class="panel panel--notice" role="note">
+  <p>{{ warning }}</p>
+</div>
+{% endfor %}
+
+{% if channel.event_type_count == 0 %}
+<div class="panel panel--notice" role="note">
+  <p>No event types are subscribed, so this channel receives nothing. <a href="{{ route_path('notification_subscriptions', channel_id=channel.id) }}">Choose event types</a>.</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="settings-heading">
+  <h2 id="settings-heading">Settings</h2>
+  {% if channel.secrets_unreadable %}
+  <div class="panel panel--notice" role="note">
+    <p>Stored secrets of this channel cannot be opened with the current key, so their masks are not shown. <a href="{{ route_path('server_encryption') }}">Open encryption</a>.</p>
+  </div>
+  {% endif %}
+  <dl class="facts">
+    <dt>State</dt>
+    <dd>{% if channel.is_enabled %}{{ badge("Enabled", "ok") }}{% else %}{{ badge("Disabled", "neutral") }}{% endif %}</dd>
+    {% if channel.summary not in channel.values.values() %}
+    <dt>Destination</dt>
+    <dd class="mono cell-wrap">{{ channel.summary|visible_text }}</dd>
+    {% endif %}
+    {% for item in spec.fields %}
+    <dt>{{ item.label }}</dt>
+    <dd>
+      {%- if item.secret %}
+        {%- if item.name in channel.secrets_set %}
+          {%- if channel.secret_masks.get(item.name) %}<code class="mono secret-mask">{{ channel.secret_masks[item.name] }}</code> <span class="cell-note">Set. Shown masked only.</span>
+          {%- else %}Set. It is never shown.{% endif %}
+        {%- else %}Not set.{% endif %}
+      {%- elif channel.values.get(item.name) %}<span class="mono cell-wrap">{{ channel.values.get(item.name)|visible_text }}</span>
+      {%- else %}Not set.{% endif -%}
+    </dd>
+    {% endfor %}
+    <dt>Event types</dt>
+    <dd>{{ channel.event_type_count }}</dd>
+    <dt>Environments</dt>
+    <dd>{% if channel.environment_scope == "all" %}All{% else %}{{ channel.environment_count }} listed{% endif %}</dd>
+    <dt>Added</dt>
+    <dd>{{ when(channel.created_at, "") }}</dd>
+    <dt>Last changed</dt>
+    <dd>{{ when(channel.updated_at, "") }}</dd>
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="delivery-heading">
+  <h2 id="delivery-heading">Delivery</h2>
+  <dl class="facts">
+    <dt>Last success</dt>
+    <dd>{{ when(channel.last_success_at, "Never") }}</dd>
+    <dt>Last error</dt>
+    <dd>
+      {%- if channel.last_error %}<span class="cell-wrap">{{ channel.last_error|visible_text }}</span> <span class="cell-note">{{ when(channel.last_error_at, "") }}</span>
+      {%- else %}None{% endif -%}
+    </dd>
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="test-heading">
+  <h2 id="test-heading">Test</h2>
+  <form class="inline-form" method="post" action="{{ route_path('notification_channel_test', channel_id=channel.id) }}"
+        hx-post="{{ route_path('notification_channel_test', channel_id=channel.id) }}" hx-target="#notification-test" hx-swap="outerHTML"
+        hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn--primary">Send a test message</button>
+  </form>
+  <p class="field__help">Sends one message with fixed text through the saved settings. Edits you have not saved are not used. The test is recorded in the activity log.</p>
+  {{ channel_test_result(test) }}
+</section>
+{% endblock %}

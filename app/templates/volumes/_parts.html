@@ -1,0 +1,43 @@
+{# Import with context: links come from route names. #}
+{% from "partials/badge.html" import badge %}
+
+{% macro kind_badge(kind) %}
+{% if kind == "anonymous" %}{{ badge("Anonymous", "neutral") }}{% endif %}
+{% endmacro %}
+
+{% macro stack_cell(stack, environment_id) %}
+{% if stack %}
+<a href="{{ route_path('environment_volume_list', environment_id=environment_id) }}?{{ {'stack': stack}|urlencode }}">{{ stack }}</a>
+{% else %}
+<span class="cell-note">None</span>
+{% endif %}
+{% endmacro %}
+
+{% macro container_base(environment_id) -%}
+{{ route_path("environment_container_list", environment_id=environment_id) }}
+{%- endmacro %}
+
+{# The name of an anonymous volume is a 64-digit id, so the list shows its start and keeps the whole name in the title. #}
+{% macro volume_name(row) %}
+<a href="{{ route_path('environment_volume_detail', environment_id=row.environment_id, volume_name=row.name) }}"{% if row.short_name != row.name %} title="{{ row.name }}"{% endif %}>{{ row.short_name }}</a>
+{% endmacro %}
+
+{# A removal names the volume's kind and stack; the force page has neither to show. #}
+{% macro facts(impact, detailed=true) %}
+<dl class="facts">
+  {% if detailed %}
+  <dt>Kind</dt>
+  <dd>{{ "Anonymous" if impact.kind == "anonymous" else "Named" }}</dd>
+  {% endif %}
+  <dt>Driver</dt>
+  <dd class="mono">{{ impact.driver }}</dd>
+  {% if detailed %}
+  <dt>Stack</dt>
+  <dd>{{ impact.stack or "None" }}</dd>
+  {% endif %}
+  <dt>Created</dt>
+  <dd><time datetime="{{ impact.created_at_text|timestamp_iso }}">{{ impact.created_at_text|timestamp }}</time></dd>
+  <dt>Environment</dt>
+  <dd>{{ impact.environment_name }}</dd>
+</dl>
+{% endmacro %}

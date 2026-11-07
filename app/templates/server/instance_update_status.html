@@ -1,0 +1,44 @@
+{% from "partials/badge.html" import badge %}
+{% macro update_status(status, poll_seconds, href) %}
+{% set steps = [
+  ("pulling_target", "Pull the new image"),
+  ("pulling_helper", "Pull the update helper"),
+  ("preparing", "Prepare the replacement"),
+  ("starting_helper", "Start the update helper"),
+  ("handed_over", "Replace the container"),
+] %}
+{% set order = steps | map(attribute=0) | list %}
+{% set position = order.index(status.phase) if status.phase in order else -1 %}
+{% set outcomes = {"succeeded": ["ok", "Updated"], "rolled_back": ["warn", "Rolled back"], "rollback_failed": ["danger", "Rollback failed"], "not_started": ["warn", "Not started"]} %}
+<div id="update-status" class="update-status" role="status"
+     {%- if status.phase not in ("abandoned", "finished") %} hx-get="{{ href }}" hx-trigger="every {{ poll_seconds }}s" hx-swap="outerHTML"{% endif %}
+     data-phase="{{ status.phase }}"{% if status.phase in ("abandoned", "finished") %} data-terminal{% endif %}>
+  {% if position >= 0 %}
+  <ol class="phases">
+    {% for key, label in steps %}
+    <li class="phases__item" data-state="{{ 'done' if loop.index0 < position else ('current' if loop.index0 == position else 'pending') }}"
+        {%- if loop.index0 == position %} aria-current="step"{% endif %}>
+      {{- label -}}
+      <span class="visually-hidden"> ({{ 'done' if loop.index0 < position else ('in progress' if loop.index0 == position else 'waiting') }})</span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% if status.phase == "handed_over" %}
+  <p>The update helper is replacing the container. dockmin is unavailable until the new container is healthy.</p>
+  {% endif %}
+  {% elif status.phase == "abandoned" and status.reason == "helper_lost" %}
+  <p>{{ badge("Helper stopped", "danger") }} {{ status.message }}</p>
+  <p>The update may have stopped partway. If dockmin does not return, the previous container is left stopped on the Docker host, named after dockmin's container with <span class="mono">-previous</span> added, or with its original name if it was not yet renamed. Start it with <span class="mono">docker start</span> and that name.</p>
+  {% elif status.phase == "abandoned" %}
+  <p>{{ badge("Not started", "warn") }} {{ status.message }}</p>
+  {% elif status.phase == "finished" %}
+  {% set tone = outcomes.get(status.outcome, ["neutral", "Finished"]) %}
+  <p>{{ badge(tone[1], tone[0]) }} {{ status.message }}</p>
+  {% if status.outcome == "not_started" and status.reason == "locked" %}
+  <p>Wait for the other update to finish, then check for updates again.</p>
+  {% endif %}
+  {% else %}
+  <p>No status is available for this update. The Instance page shows the latest result.</p>
+  {% endif %}
+</div>
+{% endmacro %}

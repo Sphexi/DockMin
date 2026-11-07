@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import age, when with context %}
+{% from "swarm/_parts.html" import task_state_badge with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Task {{ detail.task.short_id }} - dockmin{% endblock %}
+{% set crumb_object = detail.service_name %}
+{% set crumb_object_href = service_href %}
+{% set crumb_page = "Task " ~ detail.task.short_id %}
+{% block content %}
+{% set task = detail.task %}
+{% call page_header("Task " ~ task.short_id, "Task of " ~ detail.service_name ~ " on " ~ detail.environment_name) %}
+<a class="btn" href="{{ service_href }}">Back to the tasks</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="task-heading">
+  <h2 id="task-heading">Task</h2>
+  <dl class="facts">
+    <dt>ID</dt>
+    <dd class="mono cell-wrap">{{ task.id }}</dd>
+    <dt>Service</dt>
+    <dd><a href="{{ route_path('environment_swarm_service_detail', environment_id=detail.environment_id, service_id=detail.service_id) }}">{{ detail.service_name }}</a></dd>
+    <dt>Slot</dt>
+    <dd>{{ task.slot if task.slot is not none else "None (global service)" }}</dd>
+    <dt>State</dt>
+    <dd>{{ task_state_badge(task.state) }} <span class="cell-note">desired {{ task.desired_state }}</span></dd>
+    {% if task.message %}
+    <dt>Message</dt>
+    <dd class="task-note">{{ task.message }}</dd>
+    {% endif %}
+    {% if task.error %}
+    <dt>Error</dt>
+    <dd class="task-note task-note--error">{{ task.error }}</dd>
+    {% endif %}
+    {% if task.exit_code is not none %}
+    <dt>Exit code</dt>
+    <dd>{{ task.exit_code }}</dd>
+    {% endif %}
+    <dt>Node</dt>
+    <dd>
+      {% if task.node_hostname and task.node_id and detail.can_view_node %}<a href="{{ route_path('environment_swarm_node_detail', environment_id=detail.environment_id, node_id=task.node_id) }}">{{ task.node_hostname }}</a>
+      {% elif task.node_hostname %}{{ task.node_hostname }}
+      {% else %}Not placed on a node yet{% endif %}
+    </dd>
+    <dt>Container</dt>
+    <dd>
+      {% if task.container_link %}<a class="mono" href="{{ route_path('environment_container_detail', environment_id=detail.environment_id, container_id=task.container_id) }}">{{ task.container_id[:12] }}</a>
+      {% elif task.container_id %}<span class="mono">{{ task.container_id[:12] }}</span> <span class="cell-note">on another node or not visible to you</span>
+      {% else %}None{% endif %}
+    </dd>
+    <dt>Created</dt>
+    <dd>{{ when(task.created_at, "—") }}</dd>
+    <dt>Updated</dt>
+    <dd>{{ when(task.updated_at, "—") }} ({{ age(task.updated_at, "—") }})</dd>
+  </dl>
+</section>
+{% endblock %}

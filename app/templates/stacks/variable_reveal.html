@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/stack_variable_reveal_form.html" import stack_variable_reveal_form with context %}
+{% from "partials/stack_variable_revealed.html" import stack_variable_revealed with context %}
+{% block title %}Reveal {{ variable.name }} - dockmin{% endblock %}
+{% set crumb_object = stack_name %}
+{% set crumb_object_href = back_href %}
+{% set crumb_page = "Reveal variable" %}
+{% block content %}
+{% call page_header("Reveal variable", stack_name) %}
+<a class="btn" href="{{ back_href }}">Back to the Variables tab</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="reveal-heading">
+  <h2 id="reveal-heading">Variable <span class="mono cell-wrap">{{ variable.name }}</span></h2>
+  <div class="data-table__scroll" role="region" aria-label="Variable" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">The variable to reveal</caption>
+      <thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead>
+      <tbody>
+        {% if revealed is none %}
+        {{ stack_variable_reveal_form(variable, environment_id, stack_kind, stack_name, row_id, reveal_href, row_href, back_href, error=error) }}
+        {% else %}
+        {{ stack_variable_revealed(variable, environment_id, stack_kind, stack_name, row_id, reveal_href, row_href, back_href, revealed=revealed, window_expires_at=window_expires_at, reveals_left=reveals_left) }}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

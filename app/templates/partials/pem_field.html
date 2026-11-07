@@ -1,0 +1,20 @@
+{% macro pem_field(name, label, help, error=none) %}
+{% set field_id = "field-" ~ name %}
+{% set described_by = field_id ~ "-help" ~ (" " ~ field_id ~ "-error" if error else "") %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ label }}</label>
+    <p class="field__help" id="{{ field_id }}-help">{{ help }}</p>
+  </div>
+  <textarea class="field__input field__input--pem" id="{{ field_id }}" name="{{ name }}" rows="6"
+            spellcheck="false" autocomplete="off" autocapitalize="off"
+            {%- if error %} aria-invalid="true"{% endif %}
+            aria-describedby="{{ described_by }}"></textarea>
+  <label class="field__label field__label--secondary" for="{{ field_id }}-file">Or choose a file</label>
+  <input class="field__input" type="file" id="{{ field_id }}-file" name="{{ name }}_file"
+         accept=".pem,.crt,.cer,.key,text/plain">
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}

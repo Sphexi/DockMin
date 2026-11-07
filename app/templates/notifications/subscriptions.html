@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/radio_field.html" import radio_field %}
+{% block title %}Subscriptions of {{ view.channel_name }} - dockmin{% endblock %}
+{% set crumb_object = view.channel_name %}
+{% set crumb_object_href = route_path('notification_channel_detail', channel_id=view.channel_id) %}
+{% set crumb_page = "Subscriptions" %}
+{% block content %}
+{% set back = route_path('notification_channel_detail', channel_id=view.channel_id) %}
+{% call page_header("Subscriptions", view.channel_name) %}
+<a class="btn" href="{{ back }}">Cancel</a>
+{% endcall %}
+
+{{ unplaced_errors(errors, ["event_types", "environment_scope"]) }}
+
+<form class="form form--wide subscription-form" method="post" action="{{ route_path('notification_subscriptions_save', channel_id=view.channel_id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <fieldset class="choice-group"{% if errors.get("event_types") %} data-invalid aria-describedby="event-types-error"{% endif %}>
+    <legend>Event types</legend>
+    <p class="field__help">The channel receives a message for each event type ticked here. With none ticked it receives nothing.</p>
+    {% for choice in view.event_types %}
+    {{ checkbox_field("event_type", choice.label, value=choice.key, checked=choice.selected) }}
+    {% endfor %}
+    {% if errors.get("event_types") %}<p class="field__error" id="event-types-error">{{ errors.get("event_types") }}</p>{% endif %}
+  </fieldset>
+
+  <fieldset class="choice-group"{% if errors.get("environment_scope") %} data-invalid aria-describedby="environment-scope-error"{% endif %}>
+    <legend>Environments</legend>
+    <p class="field__help">Events that belong to no environment, such as backups and exports, reach every subscribed channel.</p>
+    {{ radio_field("environment_scope", "Every environment", "all", checked=view.environment_scope == "all") }}
+    {{ radio_field("environment_scope", "Only the environments ticked below", "listed", checked=view.environment_scope == "listed") }}
+    {% if errors.get("environment_scope") %}<p class="field__error" id="environment-scope-error">{{ errors.get("environment_scope") }}</p>{% endif %}
+  </fieldset>
+
+  <fieldset class="choice-group scope-list">
+    <legend>Environments to include</legend>
+    <p class="field__help">These apply only to &ldquo;Only the environments ticked below&rdquo;.</p>
+    {% for environment in view.environments %}
+    {{ checkbox_field("environment_id", environment.name, value=environment.id, checked=environment.selected) }}
+    {% else %}
+    <p class="field__help">No environments exist yet.</p>
+    {% endfor %}
+    {% if view.more_environments %}
+    <p class="field__help">More environments exist than are listed. Only the ones listed can be ticked.</p>
+    {% endif %}
+  </fieldset>
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Save subscriptions</button>
+    <a class="btn" href="{{ back }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

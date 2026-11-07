@@ -1,0 +1,3 @@
+{% from "automation/_fields.html" import number_param with context %}
+{{ number_param("suppression_seconds", "Leave an object alone after someone acts on it, in seconds", state, "A run skips an object that a person changed within this time. 0 to 3600. Leave empty for the automation's default.", 0, 3600) }}
+{{ number_param("max_consecutive_failures", "Disable the automation after failed runs in a row", state, "After this many failed runs in a row the automation's job is disabled. 1 to 100. Leave empty for the automation's default.", 1, 100) }}

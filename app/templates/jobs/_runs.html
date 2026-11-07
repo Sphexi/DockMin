@@ -1,0 +1,28 @@
+{% from "partials/data_table.html" import data_table %}
+{% from "jobs/_parts.html" import held_badges, outcome_badge, trigger_label %}
+
+{% macro runs_table(rows, columns, pager) %}
+{% call data_table("runs-table", "Run history", columns, pager, empty_title="No runs recorded", empty_body="No run of this job is recorded. Successful scheduled runs of a job that writes no activity events are not kept.") %}
+{% for row in rows %}
+{% set run = row.run %}
+<tr>
+  <th scope="row">
+    <a href="{{ route_path('job_run_detail', run_id=run.id) }}"><time datetime="{{ run.started_at|timestamp_iso }}">{{ run.started_at|timestamp(seconds=True) }}</time></a>
+  </th>
+  <td>{{ trigger_label(run.trigger) }}</td>
+  <td>{{ outcome_badge(run.outcome) }}</td>
+  <td class="cell-wrap">
+    {% set held = held_badges(run.detail) %}
+    {% if run.reason or run.message or held|trim %}
+    <div class="cell-stack">
+      {% if run.reason %}<span class="mono">{{ run.reason }}</span>{% endif %}
+      {% if run.message %}<span class="cell-note">{{ run.message }}</span>{% endif %}
+      {% if held|trim %}<span>{{ held }}</span>{% endif %}
+    </div>
+    {% else %}&mdash;{% endif %}
+  </td>
+  <td class="is-numeric">{{ row.elapsed|duration }}</td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ title }} - dockmin{% endblock %}
+{% block content %}
+{% call page_header(heading, environment_name) %}
+<a class="btn" href="{{ back_href }}">{{ back_label }}</a>
+{% endcall %}
+{{ error_state(title, message, retry_href=retry_href) }}
+{% endblock %}

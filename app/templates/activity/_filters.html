@@ -1,0 +1,49 @@
+{# f is the filters entry of the page context; with oob the form replaces the one on the page. #}
+{% from "automation/_fields.html" import choice_select %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_field %}
+
+{% macro moment_field(name, label, value, error) %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-{{ name }}">{{ label }}</label>
+  </div>
+  <input class="field__input" id="field-{{ name }}" name="{{ name }}" type="datetime-local" step="1" value="{{ value }}"
+         {%- if error %} aria-invalid="true" aria-describedby="field-{{ name }}-error"{% endif %}>
+  {% if error %}
+  <p class="field__error" id="field-{{ name }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro filter_form(f, oob=false) %}
+{% set values = f["values"] %}
+{% set errors = f.errors %}
+<form class="filters" id="activity-filters" method="get" action="{{ f.list_href }}" role="search" aria-label="Filter the activity log"
+      hx-get="{{ f.list_href }}" hx-target="#activity-results" hx-swap="outerHTML"
+      hx-push-url="true" hx-trigger="submit" hx-sync="this:replace"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {{ choice_select("category", "Category", f.categories, values["category"], error=errors.get("category")) }}
+  {{ choice_select("actor_type", "Actor", f.actor_types, values["actor_type"], error=errors.get("actor_type")) }}
+  {{ name_field("username", "Username", route_path("suggestions", kind="users"), value=values["username"], error=errors.get("username")) }}
+  {{ choice_select("subsystem", "Subsystem", f.subsystems, values["subsystem"], error=errors.get("subsystem")) }}
+  {{ choice_select("result", "Result", f.results, values["result"], error=errors.get("result")) }}
+  {{ form_field("action", "Action", values["action"], errors.get("action")) }}
+  {{ moment_field("from", "From (UTC)", values["from"], errors.get("from")) }}
+  {{ moment_field("to", "Until (UTC)", values["to"], errors.get("to")) }}
+  {{ choice_select("limit", "Events per page", f.size_options, f.size_text, error=errors.get("limit")) }}
+  <details class="filters__wide"{% if f.more_open %} open{% endif %}>
+    <summary>More filters</summary>
+    <div class="filters__group">
+      {{ choice_select("environment_id", "Environment", f.environment_options, values["environment_id"], error=errors.get("environment_id")) }}
+      {{ form_field("target_type", "Target type", values["target_type"], errors.get("target_type")) }}
+      {{ form_field("target_id", "Target id", values["target_id"], errors.get("target_id")) }}
+      {{ form_field("rule_id", "Rule id", values["rule_id"], errors.get("rule_id"), type="number") }}
+      {{ form_field("job_run_id", "Run id", values["job_run_id"], errors.get("job_run_id"), type="number") }}
+    </div>
+  </details>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary" id="activity-apply">Apply filters</button>
+    <a class="btn" href="{{ f.list_href }}">Reset</a>
+  </div>
+</form>
+{% endmacro %}

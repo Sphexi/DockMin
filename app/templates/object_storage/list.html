@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "object_storage/_table.html" import targets_table with context %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Object storage - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Object storage", "S3-compatible buckets that receive backup archives and the exported activity log.") %}
+{% endcall %}
+
+
+{% call list_bar(list_count(total|default(none), "target")) %}
+<a class="btn btn--primary" href="{{ route_path('object_storage_target_new') }}">Add target</a>
+{% endcall %}
+{{ targets_table(rows, columns, pager) }}
+{% endblock %}

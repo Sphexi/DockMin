@@ -1,0 +1,8 @@
+{% macro engine_detail_block(detail) %}
+{% if detail %}
+<div class="stderr">
+  <p class="field__help"><strong>Docker said</strong></p>
+  <pre class="stderr__text mono" tabindex="0" role="region" aria-label="Docker's message">{{ detail }}</pre>
+</div>
+{% endif %}
+{% endmacro %}

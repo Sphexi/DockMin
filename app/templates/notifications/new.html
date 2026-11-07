@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Add notification channel - dockmin{% endblock %}
+{% set crumb_page = "Add channel" %}
+{% block content %}
+{% call page_header("Add notification channel", "Choose where notifications are sent.") %}
+<a class="btn" href="{{ route_path('notification_channels') }}">Cancel</a>
+{% endcall %}
+{% if error %}
+{{ error_state("Check the form", error) }}
+{% endif %}
+<ul class="kind-list" aria-label="Kinds of channel">
+  {% for kind in kinds %}
+  <li class="kind-list__item">
+    <a class="kind-list__link" href="{{ route_path('notification_channel_new') }}?kind={{ kind.kind }}">
+      <span class="kind-list__name">{{ kind.label }}</span>
+      <span class="kind-list__text">{{ kind.description }}</span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+<p class="field__help">Addresses and tokens are stored encrypted and are never shown again.</p>
+{% endblock %}

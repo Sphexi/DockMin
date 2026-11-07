@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied.</Message><Resource>/dockmin-e2e/backups/rule-1-20260101T000000/dockmin-backup-20260102T000000Z.tar.gz</Resource><RequestId>18E18702141EF6D03CC3F7E9</RequestId><Key>backups/rule-1-20260101T000000/dockmin-backup-20260102T000000Z.tar.gz</Key><BucketName>dockmin-e2e</BucketName></Error>

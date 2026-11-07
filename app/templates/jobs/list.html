@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "jobs/_table.html" import jobs_table with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Jobs - dockmin{% endblock %}
+{% block content %}
+{% set list_href = route_path("jobs") %}
+{% call page_header("Jobs", "The administrator's view of every scheduled job: every user's automations, and the system tasks that have no automation.") %}
+<a class="btn" href="{{ route_path('job_subsystems') }}">Subsystems</a>
+{% endcall %}
+
+{% if problem %}
+{{ error_state("Check the filter", problem) }}
+{% endif %}
+
+<form class="filters" id="job-filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter jobs"
+      hx-get="{{ list_href }}" hx-target="#jobs-table" hx-swap="outerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#job-filters select, #job-filters input[type=checkbox])" hx-sync="this:replace">
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-subsystem">Subsystem</label>
+    </div>
+    <select class="field__input" id="field-subsystem" name="subsystem">
+      <option value="">All subsystems</option>
+      {% for name in subsystems %}
+      <option value="{{ name }}"{% if subsystem == name %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-kind">Kind</label>
+    </div>
+    <select class="field__input" id="field-kind" name="kind">
+      <option value="">All kinds</option>
+      {% for value, label in kinds %}
+      <option value="{{ value }}"{% if kind == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply filter</button>
+    <a class="btn" href="{{ list_href }}">Reset</a>
+  </div>
+</form>
+
+{{ jobs_table(rows, columns, pager, filtered) }}
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "containers/_job.html" import container_job_progress with context %}
+{% from "partials/page_header.html" import page_header %}
+{% set noun = "Recreate" if job.kind == "container_recreate" else "Create" %}
+{% block title %}{{ noun }} {{ job.reference }} - dockmin{% endblock %}
+{% set crumb_page = noun ~ " container" %}
+{% block head_extra %}
+{% if job.running %}
+<noscript><meta http-equiv="refresh" content="5"></noscript>
+{% endif %}
+{% endblock %}
+{% block content %}
+{% call page_header(noun ~ " container", job.reference) %}
+<a class="btn" href="{{ list_href }}">Back to containers</a>
+{% endcall %}
+
+<section id="job-panel" class="panel job-panel" aria-label="{{ noun }} progress"{% if job.running %} data-job-stream="{{ stream_href }}"{% endif %}>
+  <div data-job-body>
+    {{ container_job_progress(job, stages, notices, can_cancel, cancel_href) }}
+  </div>
+  {% if job.running %}
+  <p class="field__help" data-job-status>Without script this page reloads every few seconds. Choose Refresh status to see the current state sooner. The {{ noun|lower }} carries on if you leave this page.</p>
+  <p class="job__refresh" data-job-refresh><a class="btn" href="{{ job_href }}">Refresh status</a></p>
+  {% endif %}
+</section>
+{% endblock %}

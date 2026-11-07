@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% from "automation/_parts.html" import environment_link, rule_state, run_marker with context %}
+{% from "automation/_runs.html" import rule_runs_table with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}{{ view.rule.name }} - dockmin{% endblock %}
+{% set crumb_object = view.rule.name %}
+{% block content %}
+{% set rule = view.rule %}
+{% set job = view.job %}
+{% call page_header(rule.name, rule.subsystem) %}
+<a class="btn" href="{{ route_path('automation_rule_edit', rule_id=rule.id) }}">Edit</a>
+{% if principal.is_administrator %}
+<a class="btn" href="{{ route_path('activity') }}?{{ {'rule_id': rule.id}|urlencode }}">Events of this automation</a>
+{% endif %}
+{{ back_actions(route_path('automation'), "Back to automation", origin) }}
+{% endcall %}
+
+{% for text in errors.values() %}
+{{ error_state("The automation was not changed", text) }}
+{% endfor %}
+
+<section class="section" aria-labelledby="rule-heading">
+  <h2 id="rule-heading">Automation</h2>
+  <dl class="facts">
+    <dt>State</dt>
+    <dd>{{ rule_state(view) }}</dd>
+    <dt>Enabled</dt>
+    <dd>{% if rule.is_enabled %}Yes{% elif job.schedule_kind == "webhook" %}No. Calls to the webhook URL are refused until the automation is enabled.{% else %}No. Enable the automation to run it on its schedule.{% endif %}</dd>
+    <dt>Type</dt>
+    <dd class="mono">{{ rule.subsystem }}</dd>
+    {% if rule.environment_id is none %}
+    <dt>Environment</dt>
+    <dd>None. This automation is not tied to an environment.</dd>
+    {% else %}
+    <dt>Environment</dt>
+    <dd>{{ environment_link(view) }}</dd>
+    <dt>Acts on</dt>
+    <dd>{{ view.target }}
+      {%- if target_names|length > 3 %}
+      <ul class="name-list mono">
+        {% for name in target_names %}<li>{{ name }}</li>{% endfor %}
+      </ul>
+      {%- endif %}</dd>
+    {% endif %}
+    {% if storage_target %}
+    <dt>Object storage target</dt>
+    <dd>{% if storage_target.name %}<a href="{{ route_path('object_storage_target_detail', target_id=storage_target.id) }}">{{ storage_target.name }}</a>{% else %}Deleted. Edit the automation to choose another target.{% endif %}</dd>
+    {% endif %}
+    <dt>Schedule</dt>
+    <dd>{{ view.schedule }}</dd>
+    <dt>Next run</dt>
+    <dd>{% if view.job.schedule_kind == "webhook" %}{{ "Pending" if view.next_run_at else "When called" }}{% elif view.next_run_at %}<time datetime="{{ view.next_run_at|timestamp_iso }}">{{ view.next_run_at|timestamp }}</time>{% else %}&mdash;{% endif %}</dd>
+    {% if view.paused_until %}
+    <dt>Paused until</dt>
+    <dd><time datetime="{{ view.paused_until|timestamp_iso }}">{{ view.paused_until|timestamp }}</time></dd>
+    {% endif %}
+    {% if job.schedule_kind != "webhook" %}
+    <dt>If a run is still going when the next is due</dt>
+    <dd>{{ policy_label or job.overrun_policy }}</dd>
+    {% endif %}
+    <dt>Consecutive failures</dt>
+    <dd>{{ job.consecutive_failures }}{% if job.failure_threshold %} (disabled at {{ job.failure_threshold }}){% endif %}</dd>
+    <dt>Last run</dt>
+    <dd>
+      {% if view.last_run %}
+      <a href="{{ route_path('automation_rule_run', rule_id=rule.id, run_id=view.last_run.id) }}">{{ run_marker(view.last_run) }}</a>
+      <span class="cell-note"><time datetime="{{ view.last_run.started_at|timestamp_iso }}">{{ view.last_run.started_at|timestamp }}</time></span>
+      {% else %}
+      Never run
+      {% endif %}
+    </dd>
+    <dt>Last dry run</dt>
+    <dd>{% if view.last_dry_run_id %}<a href="{{ route_path('automation_rule_run', rule_id=rule.id, run_id=view.last_dry_run_id) }}">Open</a>{% else %}None{% endif %}</dd>
+    {% for key, value in parameters if not (storage_target and key == "object_storage_target_id") %}
+    <dt class="mono">{{ key }}</dt>
+    <dd>{{ value }}</dd>
+    {% endfor %}
+    {% if waiting is not none and waiting.count %}
+    <dt>Replaced images waiting</dt>
+    <dd>{{ waiting.count }}{% if waiting.oldest_due_at %}, the oldest due <time datetime="{{ waiting.oldest_due_at|timestamp_iso }}">{{ waiting.oldest_due_at|timestamp }}</time>{% endif %}</dd>
+    {% endif %}
+    {% if view.owner %}
+    <dt>Owner</dt>
+    <dd>{{ view.owner }}</dd>
+    {% endif %}
+    {% if not view.subsystem_enabled %}
+    <dt>Subsystem switch</dt>
+    <dd>Off. No automation of this type runs.{% if principal.is_administrator %} <a href="{{ route_path('job_subsystems') }}">Subsystems</a>{% endif %}</dd>
+    {% endif %}
+    {% if principal.is_administrator %}
+    <dt>Job</dt>
+    <dd><a href="{{ route_path('job_detail', job_id=job.id) }}">Open the job</a></dd>
+    {% endif %}
+  </dl>
+</section>
+
+{% if webhook %}
+<section class="section" aria-labelledby="webhook-heading">
+  <h2 id="webhook-heading">Webhook</h2>
+  <dl class="facts">
+    <dt>URL</dt>
+    <dd class="mono">{{ webhook_masked_url }}</dd>
+    <dt>State</dt>
+    <dd>{{ badge(webhook_state[0], webhook_state[1]) }}</dd>
+    <dt>Issued</dt>
+    <dd><time datetime="{{ webhook.issued_at|timestamp_iso }}">{{ webhook.issued_at|timestamp }}</time></dd>
+    <dt>Last called</dt>
+    <dd>
+      {% if webhook.last_called_at %}
+      <time datetime="{{ webhook.last_called_at|timestamp_iso }}">{{ webhook.last_called_at|timestamp }}</time>{% if webhook.last_call_address %} from <span class="mono">{{ webhook.last_call_address }}</span>{% endif %}
+      {% else %}
+      Never called
+      {% endif %}
+    </dd>
+    {% if webhook_armed %}
+    <dt>Pending</dt>
+    <dd>A call is waiting</dd>
+    {% endif %}
+  </dl>
+  <p class="field__help">The secret part of the URL is shown once, when it is created or rotated. Anyone holding the URL can start this automation, at most once a minute.</p>
+  <div class="row-actions">
+    {% if webhook_can_rotate %}
+    <a class="btn" href="{{ route_path('automation_webhook_rotate_confirm', rule_id=rule.id) }}">Rotate URL</a>
+    {% endif %}
+    {% if webhook.state == "active" %}
+    <a class="btn btn--danger-quiet" href="{{ route_path('automation_webhook_revoke_confirm', rule_id=rule.id) }}">Revoke URL</a>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if rule.subsystem == "container-health-checker" and holds is not none %}
+<section class="section" aria-labelledby="holds-heading">
+  <h2 id="holds-heading">Held containers</h2>
+  {% if holds.note %}
+  <p class="field__help">{{ holds.note }}</p>
+  {% endif %}
+  {% if holds.containers %}
+  <p class="field__help">These containers used all their restarts and are left alone. Release one to start its restarts again.</p>
+  <div class="data-table__scroll" role="region" aria-label="Held containers table" tabindex="0">
+    <table class="table" data-optional="3">
+      <caption class="visually-hidden">Held containers</caption>
+      <thead>
+        <tr>
+          <th scope="col">Container</th>
+          <th scope="col">Held since</th>
+          <th scope="col">Last seen unhealthy</th>
+          <th scope="col"><span class="visually-hidden">Action</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for held in holds.containers %}
+        <tr>
+          <th scope="row" class="cell-wrap">{{ held.name }}</th>
+          <td><time datetime="{{ held.held_since|timestamp_iso }}">{{ held.held_since|timestamp }}</time></td>
+          <td><time datetime="{{ held.last_unhealthy_at|timestamp_iso }}">{{ held.last_unhealthy_at|timestamp }}</time></td>
+          <td>
+            <form class="inline-form" method="post" action="{{ route_path('automation_rule_hold_release', rule_id=rule.id, container_id=held.container_id) }}" data-submit-once>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn btn--compact">Release<span class="visually-hidden"> {{ held.name }}</span></button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if holds.more %}
+  <p class="field__help">and {{ holds.more }} more not listed here.</p>
+  {% endif %}
+  {% elif not holds.note %}
+  <p>No container is held.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="actions-heading">
+  <h2 id="actions-heading">Actions</h2>
+  <div class="job-actions">
+  {% if not job.is_enabled %}
+  <div class="panel panel--notice" role="note">
+    <p>The automation's job was disabled after {{ job.consecutive_failures }} {{ "failure" if job.consecutive_failures == 1 else "failures" }} in a row. It does not run until the automation is enabled again.</p>
+  </div>
+  {% endif %}
+
+  <div class="row-actions">
+    {% if not rule.is_enabled or not job.is_enabled %}
+    <a class="btn btn--primary" href="{{ route_path('automation_rule_enable_confirm', rule_id=rule.id) }}">Enable</a>
+    {% endif %}
+    {% if rule.is_enabled %}
+    <form class="inline-form" method="post" action="{{ route_path('automation_rule_disable', rule_id=rule.id) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn">Disable automation</button>
+    </form>
+    {% endif %}
+    {% if blocked %}
+    <p class="field__help">Cannot run now. {{ blocked }}</p>
+    {% else %}
+    <a class="btn" href="{{ route_path('automation_rule_run_confirm', rule_id=rule.id) }}">Run now</a>
+    {% endif %}
+    {% if dry_run_offered %}
+    <form class="inline-form" method="post" action="{{ route_path('automation_rule_dry_run', rule_id=rule.id) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn">Dry run</button>
+    </form>
+    {% endif %}
+    <a class="btn btn--danger-quiet" href="{{ route_path('automation_rule_delete_confirm', rule_id=rule.id) }}">Delete</a>
+  </div>
+
+  {% if view.paused_until %}
+  <form class="form" method="post" action="{{ route_path('automation_rule_resume', rule_id=rule.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p>The automation is paused. A run already going finishes.</p>
+    <div class="form__actions">
+      <button type="submit" class="btn">Resume</button>
+    </div>
+  </form>
+  {% elif rule.is_enabled and view.available %}
+  <form class="form" method="post" action="{{ route_path('automation_rule_pause', rule_id=rule.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field"{% if errors.get('duration') %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="field-duration">Pause for</label>
+        <p class="field__help" id="field-duration-help">The automation starts no new runs until the time is up. A run already going finishes.</p>
+      </div>
+      <select class="field__input" id="field-duration" name="duration" aria-describedby="field-duration-help">
+        {% for value, label in durations %}
+        <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form__actions">
+      <button type="submit" class="btn">Pause automation</button>
+    </div>
+  </form>
+  {% endif %}
+  </div>
+</section>
+
+<section class="section" aria-labelledby="runs-heading">
+  <h2 id="runs-heading">Run history</h2>
+  {{ rule_runs_table(rule.id, rows, columns, pager) }}
+</section>
+{% endblock %}

@@ -1,0 +1,1 @@
+{"error":true,"message":"validating /WORK/proj-missing/compose.yaml: services.a additional properties 'bogus_key' not allowed"}

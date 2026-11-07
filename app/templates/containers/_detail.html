@@ -1,0 +1,421 @@
+{# Import with context: links and forms read the request. #}
+{% from "access/_panel.html" import access_panel with context %}
+{% from "containers/_actions.html" import action_buttons with context %}
+{% from "containers/_logs.html" import logs_tab with context %}
+{% from "containers/_tables.html" import image_link with context %}
+{% from "containers/_stats.html" import stats_panel %}
+{% from "environments/_parts.html" import age, kind_badge, when with context %}
+{% from "networks/_attach.html" import attach_section with context %}
+{% from "partials/activity_panel.html" import activity_panel with context %}
+{% from "partials/automation_panel.html" import automation_panel with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/disclosure.html" import disclosure with context %}
+{% from "partials/ports.html" import port_list %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/name_field.html" import name_field %}
+
+{% macro container_summary(detail, instance_href=none) %}
+<section id="container-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span>{{ container_state_badge(detail.state, detail.health_status) }}{% if detail.is_self %} {{ badge("This dockmin instance", "info") }}{% endif %}</span>
+      <span class="mono cell-wrap">{{ detail.image }}</span>
+      <span class="cell-note"><span class="mono">{{ detail.short_id }}</span> on {{ detail.environment_name }} {{ kind_badge(true) if detail.is_local else "" }}</span>
+    </div>
+    {% if detail.can_write %}
+    {{ action_buttons(detail.environment_id, detail.id, detail.name, detail.actions, "detail", detail.state, true, false, detail.is_self) }}
+    {% endif %}
+    {% if detail.is_self %}
+    <p class="summary__note" role="note">This is the container dockmin runs in. It cannot be stopped, restarted, killed, paused, removed or recreated from here.
+      {%- if instance_href %} Restart it from <a href="{{ instance_href }}">Administration &gt; Instance</a>.{% endif %}</p>
+    {% endif %}
+  </div>
+</section>
+{% endmacro %}
+
+{% macro removed_summary(name, environment_id) %}
+<section id="container-summary" class="panel summary" aria-label="Summary">
+  <p><strong class="mono">{{ name }}</strong> was removed.</p>
+  <p><a class="btn btn--primary" href="{{ route_path('environment_container_list', environment_id=environment_id) }}">Back to containers</a></p>
+</section>
+{% endmacro %}
+
+{% macro redacted_mark() %}
+<span class="chip">Redacted</span>
+{% endmacro %}
+
+{% macro truncated_note(truncated) %}
+{% if truncated %}
+<p class="field__help">Only the first entries are shown.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro overview_tab(detail, last_output=none, show_last_exit=false) %}
+<h2 id="tab-heading">Overview</h2>
+<dl class="facts">
+  <dt>Name</dt>
+  <dd class="mono">{{ detail.name }}</dd>
+  <dt>ID</dt>
+  <dd class="mono">{{ detail.id }}</dd>
+  <dt>Image</dt>
+  <dd class="mono">{{ image_link(detail.environment_id, detail.image) }}</dd>
+  <dt>State</dt>
+  <dd>{{ container_state_badge(detail.state, detail.health_status) }}</dd>
+  <dt>Created</dt>
+  <dd>{{ when(detail.created_at, "—") }}</dd>
+  <dt>Started</dt>
+  <dd>{{ when(detail.started_at, "Never") }}</dd>
+  <dt>Restart count</dt>
+  <dd>{{ detail.restart_count }}</dd>
+  <dt>Restart policy</dt>
+  <dd class="mono">{{ detail.restart_policy }}</dd>
+  <dt>Ports</dt>
+  <dd>{{ port_list(detail.ports) }}</dd>
+  <dt>Entrypoint</dt>
+  <dd class="mono">{% if detail.entrypoint is none %}<span class="cell-note">Not shown for your role</span>{% else %}{{ detail.entrypoint or "—" }}{% endif %}</dd>
+  <dt>Command</dt>
+  <dd class="mono">{% if detail.command is none %}<span class="cell-note">Not shown for your role</span>{% else %}{{ detail.command or "—" }}{% endif %}</dd>
+  <dt>Stack</dt>
+  <dd>
+    {% if detail.stack %}
+    <a href="{{ route_path('environment_container_list', environment_id=detail.environment_id) }}?stack={{ detail.stack|urlencode }}">{{ detail.stack }}</a>
+    {% elif not detail.labels_truncated %}
+    None
+    {% endif %}
+    {% if detail.labels_truncated %}
+    <span class="cell-note">Labels truncated</span>
+    {% endif %}
+  </dd>
+</dl>
+{% if show_last_exit %}
+{{ last_exit_section(detail, last_output) }}
+{% endif %}
+{{ health_section(detail.health) }}
+{% if detail.admin is not none %}
+<h3>Isolation</h3>
+<dl class="facts">
+  <dt>Privileged</dt>
+  <dd>{{ "Yes" if detail.admin.privileged else "No" }}</dd>
+  <dt>Added capabilities</dt>
+  <dd class="mono">{{ detail.admin.cap_add|join(", ") if detail.admin.cap_add else "None" }}</dd>
+  <dt>Network mode</dt>
+  <dd class="mono">{{ detail.admin.network_mode or "—" }}</dd>
+  <dt>PID mode</dt>
+  <dd class="mono">{{ detail.admin.pid_mode or "—" }}</dd>
+</dl>
+{% endif %}
+{% endmacro %}
+
+{% macro health_section(health) %}
+<h3>Health</h3>
+<dl class="facts">
+  <dt>Status</dt>
+  <dd>{% if health.configured %}{{ health.status|capitalize if health.status else "—" }}{% else %}No health check{% endif %}</dd>
+  <dt>Failing streak</dt>
+  <dd>{% if health.configured %}{{ health.failing_streak }}{% else %}—{% endif %}</dd>
+  <dt>Last check</dt>
+  <dd>{% if health.configured %}{{ when(health.last_check_at, "—") }}{% else %}—{% endif %}</dd>
+  <dt>Last exit code</dt>
+  <dd>{% if health.configured and health.last_exit_code is not none %}{{ health.last_exit_code }}{% else %}—{% endif %}</dd>
+  {% if health.configured and health.last_output is not none %}
+  <dt>Last output</dt>
+  <dd>{% if health.last_output %}<pre class="code-block" tabindex="0">{{ health.last_output }}</pre>{% else %}Nothing printed{% endif %}</dd>
+  {% elif health.configured and health.output_restricted %}
+  <dt>Last output</dt>
+  <dd class="cell-note">Visible to administrators</dd>
+  {% endif %}
+</dl>
+{% endmacro %}
+
+{% macro last_exit_section(detail, last_output) %}
+<h3>Last exit</h3>
+<dl class="facts">
+  {% if detail.ever_started %}
+  <dt>Finished</dt>
+  <dd>{{ when(detail.finished_at, "—") }}</dd>
+  {% endif %}
+  <dt>Exit code</dt>
+  <dd>{% if detail.ever_started %}{{ detail.exit_code }}{% else %}Never started{% endif %}</dd>
+  {% if detail.oom_killed %}
+  <dt>Cause</dt>
+  <dd>Killed: out of memory</dd>
+  {% endif %}
+  {% if detail.error %}
+  <dt>Engine error</dt>
+  <dd class="mono cell-wrap">{{ detail.error }}</dd>
+  {% elif detail.has_error %}
+  <dt>Engine error</dt>
+  <dd>The Engine recorded an error. Its text is shown to administrators.</dd>
+  {% endif %}
+</dl>
+{% if last_output %}
+<h4>Last output</h4>
+{% if last_output.note %}
+<p class="field__help">{{ last_output.note }}</p>
+{% endif %}
+{% if last_output.lines %}
+<pre class="log-output log-output--static" role="region" aria-label="Last output of {{ detail.name }}" tabindex="0" data-timestamps="on">
+{%- for line in last_output.lines -%}
+<span class="log-line{% if line.stderr %} log-line--err{% endif %}">{% if line.time %}<span class="log-line__time">{{ line.time }} </span>{% endif %}{% if line.stderr %}<span class="visually-hidden">stderr </span>{% endif %}<span class="log-line__text">{{ line.text }}</span></span>{% if not loop.last %}{{ "\n" }}{% endif %}
+{%- endfor -%}
+</pre>
+{% if last_output.cut %}
+<p class="field__help">Only the newest lines are shown.</p>
+{% endif %}
+{% elif not last_output.note %}
+<p>The container printed no output.</p>
+{% endif %}
+<p><a href="{{ last_output.href }}">Open the Logs tab</a></p>
+{% endif %}
+{% endmacro %}
+
+{% macro labels_tab(detail) %}
+<h2 id="tab-heading">Labels</h2>
+{% if detail.labels %}
+<div class="data-table__scroll" role="region" aria-label="Labels table" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Labels on this container</caption>
+    <thead>
+      <tr><th scope="col">Key</th><th scope="col">Value</th></tr>
+    </thead>
+    <tbody>
+      {% for label in detail.labels %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ label.key }}</th>
+        <td class="cell-wrap mono">{% if label.redacted %}{{ redacted_mark() }}{% else %}{{ label.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if detail.labels_truncated %}
+<p class="field__help">Labels truncated. Only the first labels are shown.</p>
+{% endif %}
+{% if not detail.admin %}
+<p class="field__help">Values of keys that look like secrets are redacted for your role.</p>
+{% endif %}
+{% else %}
+<p>This container has no labels.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro mounts_tab(detail) %}
+<h2 id="tab-heading">Mounts</h2>
+{% if detail.mounts %}
+<div class="data-table__scroll" role="region" aria-label="Mounts table" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Mounts of this container</caption>
+    <thead>
+      <tr>
+        <th scope="col">Type</th>
+        <th scope="col">Source</th>
+        <th scope="col">Destination</th>
+        <th scope="col">Access</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for mount in detail.mounts %}
+      <tr>
+        <th scope="row">{{ mount.type }}</th>
+        <td class="cell-wrap mono">
+          {%- if mount.type == "volume" and mount.volume_name %}{{ mount.volume_name }}
+          {%- elif mount.source %}{{ mount.source }}
+          {%- elif mount.type == "bind" %}<span class="cell-note">Not shown for your role</span>
+          {%- else %}—{% endif -%}
+        </td>
+        <td class="cell-wrap mono">{{ mount.destination }}</td>
+        <td>{{ "Read and write" if mount.read_write else "Read only" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ truncated_note(detail.truncated) }}
+{% else %}
+<p>This container has no mounts.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro networks_tab(detail, attach) %}
+<h2 id="tab-heading">Networks</h2>
+{% if detail.networks %}
+<div class="data-table__scroll" role="region" aria-label="Networks table" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Networks this container is attached to</caption>
+    <thead>
+      <tr>
+        <th scope="col">Network</th>
+        <th scope="col">IP address</th>
+        <th scope="col">Gateway</th>
+        <th scope="col">MAC address</th>
+        <th scope="col">Aliases</th>
+        {% if detail.can_attach %}
+        <th scope="col">Actions</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for network in detail.networks %}
+      <tr>
+        <th scope="row" class="cell-wrap">
+          {% if network.network_id %}
+          <a href="{{ with_origin(route_path('environment_network_detail', environment_id=detail.environment_id, network_id=network.network_id), 'container:' ~ detail.environment_id ~ ':' ~ detail.id) }}">{{ network.name }}</a>
+          {% else %}
+          {{ network.name }}
+          {% endif %}
+        </th>
+        <td class="mono">{{ network.ip_address or "—" }}{% if network.ipv6_address %}<br>{{ network.ipv6_address }}{% endif %}</td>
+        <td class="mono">{{ network.gateway or "—" }}</td>
+        <td class="mono">{{ network.mac_address or "—" }}</td>
+        <td class="cell-wrap mono">{{ network.aliases|join(", ") if network.aliases else "—" }}</td>
+        {% if detail.can_attach %}
+        <td>
+          {% if network.network_id %}
+          {% set detach_href = route_path("environment_container_network_disconnect", environment_id=detail.environment_id, container_id=detail.id, network_id=network.network_id) %}
+          <a class="btn btn--compact btn--danger-quiet" href="{{ detach_href }}" aria-label="Detach {{ detail.name }} from {{ network.name }}"
+             hx-get="{{ detach_href }}" hx-target="#action-region" hx-swap="innerHTML">Detach</a>
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ truncated_note(detail.truncated) }}
+{% else %}
+<p>This container is not attached to any network.</p>
+{% endif %}
+{% if attach is not none %}
+{{ attach_section(attach) }}
+{% endif %}
+{% endmacro %}
+
+{% macro environment_tab(detail) %}
+<h2 id="tab-heading">Environment variables</h2>
+{% if detail.variables %}
+<div class="data-table__scroll" role="region" aria-label="Environment variables table" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Environment variables of this container</caption>
+    <thead>
+      <tr><th scope="col">Name</th><th scope="col">Value</th></tr>
+    </thead>
+    <tbody>
+      {% for variable in detail.variables %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ variable.key }}</th>
+        <td class="cell-wrap mono">{% if variable.redacted %}{{ redacted_mark() }}{% else %}{{ variable.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ truncated_note(detail.truncated) }}
+<p class="field__help">Values of variables whose names look like secrets are redacted.</p>
+{% else %}
+<p>This container sets no environment variables.</p>
+{% endif %}
+{% endmacro %}
+
+{# series is a sequence of (key, label, slot class, dashed) tuples. #}
+{% macro stats_chart(key, title, series) %}
+<figure class="stats-chart" data-chart="{{ key }}">
+  <figcaption class="stats-chart__head">
+    <span class="stats-chart__title">{{ title }}</span>
+    <span class="stats-chart__scale" data-chart-scale></span>
+  </figcaption>
+  <div class="stats-chart__plot" role="img" aria-label="{{ title }}: waiting for readings" data-chart-plot></div>
+  <ul class="stats-chart__legend">
+    {% for id, label, slot, dashed in series %}
+    <li class="stats-chart__series">
+      <span class="stats-key {{ slot }}{% if dashed %} stats-key--dashed{% endif %}" aria-hidden="true"></span>
+      {{ label }} <span class="stats-chart__value mono" data-chart-value="{{ id }}">—</span>
+    </li>
+    {% endfor %}
+  </ul>
+</figure>
+{% endmacro %}
+
+{% macro stats_tab(detail, sample, failure, tab_href) %}
+<h2 id="tab-heading">Resource use</h2>
+{% if not detail.is_running %}
+<p>The container is not running, so there are no readings to show.</p>
+{% elif failure %}
+{{ error_state("Readings are not available", failure) }}
+{% else %}
+<div class="stats" data-stats-stream="{{ route_path('environment_container_stats_stream', environment_id=detail.environment_id, container_id=detail.id) }}">
+  <div data-stats-body>
+    {{ stats_panel(sample) }}
+  </div>
+  <div class="stats-charts" data-stats-charts hidden>
+    {{ stats_chart("cpu", "CPU", [("cpu", "CPU", "stats-slot--1", false)]) }}
+    {{ stats_chart("mem", "Memory", [("mem", "Used", "stats-slot--2", false), ("limit", "Limit", "stats-slot--0", true)]) }}
+    {{ stats_chart("net", "Network", [("rx", "Received", "stats-slot--3", false), ("tx", "Sent", "stats-slot--4", true)]) }}
+    {{ stats_chart("blk", "Block I/O", [("read", "Read", "stats-slot--3", false), ("write", "Written", "stats-slot--4", true)]) }}
+  </div>
+  <p class="field__help" data-stats-status>Live readings update every few seconds while this tab is open.</p>
+  <p data-stats-refresh><a class="btn" href="{{ tab_href }}">Take another reading</a></p>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro access_tab(detail, panel, values, fields) %}
+{% set base = route_path("environment_container_access_save", environment_id=detail.environment_id, container_id=detail.id) %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, base, route_path("environment_container_access_delete", environment_id=detail.environment_id, container_id=detail.id), values=values, fields=fields) }}
+{% call disclosure("effective-access", "Effective access") %}
+<form class="filters" method="get" action="{{ route_path('environment_container_effective_access', environment_id=detail.environment_id) }}">
+  {{ name_field("username", "Username", route_path("suggestions", kind="users"), help="Shows what this account can reach among the containers on this host, and why.", required=true) }}
+  <div class="form__actions">
+    <button type="submit" class="btn">Explain access</button>
+  </div>
+</form>
+{% endcall %}
+{% endmacro %}
+
+{% macro automation_tab(detail, automation) %}
+<h2 id="tab-heading">Automation</h2>
+{% if automation is not none %}
+{% set projects = detail.labels|selectattr("key", "equalto", "com.docker.compose.project")|rejectattr("redacted")|map(attribute="value")|reject("equalto", "")|list %}
+{% set prefill = {"environment_id": detail.environment_id, "target_kind": "container", "target": detail.name, "stack": projects[0]} if projects else {"environment_id": detail.environment_id, "target_kind": "container", "target": detail.name} %}
+{{ automation_panel(automation, route_path("automation_rule_new") ~ "?" ~ prefill|urlencode, "container:" ~ detail.id) }}
+{% else %}
+<p class="field__help">Automation is not available.</p>
+{% endif %}
+{% endmacro %}
+
+{# Every tab but access reloads itself after an action, so a half-filled access form is not discarded. #}
+{% macro container_tabs(detail, tab, tab_keys, sample, stats_failure, panel, values, fields, logs=none, automation=none, activity_log=none, last_output=none, show_last_exit=false) %}
+{% set detail_href = route_path("environment_container_detail", environment_id=detail.environment_id, container_id=detail.id) %}
+{% set labels = {"overview": "Overview", "labels": "Labels", "mounts": "Mounts", "networks": "Networks", "environment": "Environment", "stats": "Stats", "logs": "Logs", "automation": "Automation", "access": "Access"} %}
+<div id="container-tabs" class="tabs"
+     {%- if tab != "access" %} hx-get="{{ with_origin(detail_href ~ '?tab=' ~ tab, origin_ref) }}" hx-trigger="container-changed from:body" hx-swap="outerHTML"{% endif %}>
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Container sections">
+    <ul class="tabs__list">
+      {% for key in tab_keys %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#container-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(detail, last_output, show_last_exit) }}
+    {% elif tab == "labels" %}{{ labels_tab(detail) }}
+    {% elif tab == "mounts" %}{{ mounts_tab(detail) }}
+    {% elif tab == "networks" %}{{ networks_tab(detail, panel) }}
+    {% elif tab == "environment" %}{{ environment_tab(detail) }}
+    {% elif tab == "stats" %}{{ stats_tab(detail, sample, stats_failure, with_origin(detail_href ~ "?tab=stats", origin_ref)) }}
+    {% elif tab == "logs" %}{{ logs_tab(detail, logs) }}
+    {% elif tab == "automation" %}{{ automation_tab(detail, automation) }}
+    {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
+    {% endif %}
+    {% if activity_log is not none %}
+    {{ activity_panel(activity_log.title, activity_log) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

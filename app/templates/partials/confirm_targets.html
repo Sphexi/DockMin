@@ -1,0 +1,22 @@
+{# targets: names, or objects with name and an optional detail. noun is singular. more counts targets the list was cut short of. #}
+{% macro confirm_targets(targets, noun, more=0, plural=none) %}
+{% set items = [targets] if targets is string else targets|list %}
+{% set extra = more if more is number else 0 %}
+{% set total = items|length + extra %}
+{% set word = noun if total == 1 else (plural if plural else (noun[:-1] ~ "ies" if noun.endswith("y") and noun[-2:-1] not in "aeiou" else noun ~ "s")) %}
+<div class="confirm-targets">
+  <p class="confirm-targets__count">{{ total }} {{ word }}</p>
+  <ul class="confirm-targets__list">
+    {% for target in items %}
+    <li>
+      {%- if target is string %}<span class="mono">{{ target }}</span>
+      {%- else %}<span class="mono">{{ target.name }}</span>
+      {%- if target.detail is defined and target.detail %} <span class="cell-note">{{ target.detail }}</span>{% endif %}
+      {%- endif %}</li>
+    {% endfor %}
+  </ul>
+  {% if extra > 0 %}
+  <p class="confirm-targets__more">and {{ extra }} more not shown</p>
+  {% endif %}
+</div>
+{% endmacro %}

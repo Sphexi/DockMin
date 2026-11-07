@@ -1,0 +1,53 @@
+{# token is the whole webhook secret, read only in this file and never placed in a link. #}
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Webhook URL for {{ rule.name }} - dockmin{% endblock %}
+{% set crumb_object = rule.name %}
+{% set crumb_object_href = route_path('automation_rule_detail', rule_id=rule.id) %}
+{% set crumb_page = "Webhook URL" %}
+{% block content %}
+{% call page_header("Webhook URL", rule.name) %}
+<a class="btn btn--primary" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Open the automation</a>
+{% endcall %}
+
+<section class="panel panel--notice token-reveal" aria-labelledby="webhook-reveal-heading" role="note">
+  <h2 id="webhook-reveal-heading">Copy the webhook URL now</h2>
+  <p><strong>This URL is shown once. Store it as a secret in the sender.</strong> dockmin keeps a one-way hash, not the URL, so it cannot show it again or recover it. If it is lost or leaks, rotate the URL.</p>
+  {% if rotated %}
+  <p>The previous URL no longer works.</p>
+  {% else %}
+  <p>The automation is created and is disabled. Calls are refused until it is enabled. Run a dry run, then enable it.</p>
+  {% endif %}
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="webhook-url">Webhook URL</label>
+      <p class="field__help" id="webhook-url-help">A POST to this address starts the automation. The secret is the last part.</p>
+    </div>
+    <textarea class="field__input mono" id="webhook-url" rows="3" readonly spellcheck="false" aria-describedby="webhook-url-help">{{ endpoint }}/{{ token }}</textarea>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="webhook-header-heading">
+  <h2 id="webhook-header-heading">Send the secret in a header</h2>
+  <p class="field__help">A sender that can set a header keeps the secret out of the URL, which proxies and logs may record. A sender that can set only a URL uses the address above.</p>
+  <dl class="facts">
+    <dt>Address</dt>
+    <dd class="mono">{{ endpoint }}</dd>
+    <dt>Header</dt>
+    <dd class="mono">Authorization: Bearer {{ token }}</dd>
+  </dl>
+  <h3 id="webhook-example-heading">Example</h3>
+  <pre class="code-block" tabindex="0" aria-labelledby="webhook-example-heading">curl -fsS -X POST \
+  -H "Authorization: Bearer {{ token }}" \
+  {{ endpoint }}</pre>
+</section>
+
+<section class="section" aria-labelledby="webhook-effect-heading">
+  <h2 id="webhook-effect-heading">What a call does</h2>
+  <ul>
+    <li>A call starts one run of the automation. It carries no settings: the body and any query string are ignored or refused.</li>
+    <li>A call that arrives while a run is waiting joins it; a call during a run starts one more run after it, at least a minute after the previous one started.</li>
+    <li>Anyone holding the URL can start this automation.</li>
+  </ul>
+</section>
+{% endblock %}

@@ -1,0 +1,20 @@
+{# Each item is a string, an object with a text attribute, or a Swarm port with published, target, protocol and mode. #}
+{% macro port_text(port) -%}
+{%- if port is string -%}{{ port }}
+{%- elif port.text is defined -%}{{ port.text }}
+{%- else -%}{% if port.published %}{{ port.published }}&rarr;{% endif %}{{ port.target }}/{{ port.protocol }}{% if port.mode == "host" %} (host){% endif %}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro port_list(items, empty="None") %}
+{% set entries = [items] if items is string else items %}
+{% if entries %}
+<ul class="port-list">
+  {% for item in entries %}
+  <li class="port-chip mono">{{ port_text(item) }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<span class="cell-note">{{ empty }}</span>
+{% endif %}
+{% endmacro %}

@@ -1,0 +1,391 @@
+{% from "environments/_parts.html" import age with context %}
+{% from "images/_parts.html" import binding_text, transfer_progress %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/error_state.html" import error_state %}
+
+{% set operation_labels = {"deploy": "Deploy", "redeploy": "Redeploy", "start": "Start", "stop": "Stop", "adopt": "Adopt"} %}
+{% set outcome_labels = {"success": "succeeded", "failure": "failed", "interrupted": "was interrupted", "outcome_unknown": "ended with an unknown result"} %}
+{% set kind_labels = {"create": "Create and deploy", "redeploy": "Redeploy", "start": "Start", "stop": "Stop", "restart": "Restart", "remove": "Remove", "adopt": "Adopt"} %}
+{% set origin_labels = {"created": "Created here", "adopted": "Adopted"} %}
+
+{% macro status_badge(row) -%}
+{% if row.status == "active" -%}{{ badge("Running", "ok") }}
+{%- elif row.status == "partial" -%}{{ badge("Partly running", "warn") }}
+{%- elif row.status == "inactive" -%}{{ badge("Stopped", "neutral") }}
+{%- elif row.status == "error" -%}{{ badge("Error", "danger") }}
+{%- else -%}{{ badge("Not deployed" if row.last_operation is none else "Unknown", "neutral") }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro changed_chip(row) -%}
+{% if row.changed_since_deploy %}{{ badge("Changed since the last deploy", "warn") }}{% endif %}
+{%- endmacro %}
+
+{% macro origin_text(origin) -%}
+{{ origin_labels.get(origin, origin) }}
+{%- endmacro %}
+
+{% macro last_operation(row) %}
+{% if row.last_operation %}
+<div class="cell-stack">
+  <span>{{ operation_labels.get(row.last_operation, row.last_operation) }} {{ outcome_labels.get(row.last_outcome, "") }}</span>
+  <span class="cell-note">{{ age(row.last_operation_at, "") }}</span>
+</div>
+{% else %}
+<span class="cell-note">None yet</span>
+{% endif %}
+{% endmacro %}
+
+{% macro stderr_block(text, label="Docker Compose output") %}
+{% if text %}
+<details class="stderr">
+  <summary>{{ label }}</summary>
+  <pre class="stderr__text" tabindex="0">{{ text }}</pre>
+</details>
+{% endif %}
+{% endmacro %}
+
+{% macro compose_banner(compose) %}
+{% if compose %}
+<div class="panel panel--notice" role="note">
+  <h2>Docker Compose is not ready</h2>
+  <p>{{ compose.message }}</p>
+  {% if compose.installed and compose.required %}
+  <dl class="facts">
+    <dt>Installed</dt>
+    <dd class="mono">{{ compose.installed }}</dd>
+    <dt>Required</dt>
+    <dd class="mono">{{ compose.required }} or later</dd>
+  </dl>
+  {% endif %}
+  <p>Stacks can still be listed and read. Anything that runs Compose is refused until this is fixed.</p>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro busy_note(text) %}
+{% if text %}
+<div class="panel panel--notice" role="status">
+  <p>{{ text }}</p>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro unwritable_notice(count) %}
+<div class="panel panel--alert" role="note">
+  <h3>You cannot change every container of this stack</h3>
+  <p>{{ count }} {{ "container" if count == 1 else "containers" }} of this stack {{ "is" if count == 1 else "are" }} outside what you can change. Compose acts on every container of a stack, so the action is refused unless you can change all of them. Ask an administrator.</p>
+</div>
+{% endmacro %}
+
+{% macro lifecycle_form(action, label) %}
+<form class="inline-form" method="post" action="{{ action }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="btn btn--compact">{{ label }}</button>
+</form>
+{% endmacro %}
+
+{% macro container_link(container, environment_id, origin_ref=none) %}
+<a href="{{ with_origin(route_path('environment_container_detail', environment_id=environment_id, container_id=container.id), origin_ref) }}">{{ container.name }}</a>
+{% endmacro %}
+
+{% macro container_list(containers, hidden, environment_id, more=0) %}
+{% if containers %}
+<ul class="chip-list">
+  {% for container in containers %}
+  <li>{{ container_link(container, environment_id) }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if more %}
+<p class="cell-note">and {{ more }} more {{ "container" if more == 1 else "containers" }} not listed</p>
+{% endif %}
+{% if hidden %}
+<span class="cell-note">{{ "and " if containers else "" }}{{ hidden }} {{ "container" if hidden == 1 else "containers" }} you cannot see</span>
+{% endif %}
+{% endmacro %}
+
+{% macro credential_choices(offers, catalogue) %}
+{% for choice in offers %}
+{% set offer = choice.offer %}
+{% set binding = offer.binding %}
+{% set locked = (not offer.may_rebind) and binding.state != "unbound" %}
+{% set prefix = "credential-" ~ choice.index %}
+{% if locked and offer.preselected is none %}
+<div class="panel panel--notice" role="note">
+  <p><span class="mono cell-wrap">{{ choice.reference }}</span>: {% if binding.state == "credential_missing" %}the credential set this image was pulled with has been deleted. {% else %}this image is bound to a credential set you cannot use. {% endif %}Only an administrator can change which credential set it uses.</p>
+</div>
+{% elif locked or not offer.candidates %}
+{% set bound_name = namespace(text="Anonymous (no credentials)") %}
+{% for candidate in offer.candidates if choice.selected == candidate.id|string %}{% set bound_name.text = candidate.name %}{% endfor %}
+<div class="field">
+  <div class="field__head">
+    <span class="field__label">Credential set for <span class="mono cell-wrap">{{ choice.reference }}</span></span>
+    <p class="field__help">Registry <span class="mono">{{ offer.reference.registry_address }}</span>. {{ binding_text(binding) }}.
+      {%- if locked %} Only an administrator can change which credential set this image uses.
+      {%- else %} No credential set is available for this registry.{% endif %}</p>
+  </div>
+  <p>{{ bound_name.text }}</p>
+  <input type="hidden" name="{{ prefix }}-reference" value="{{ choice.reference }}">
+  <input type="hidden" name="{{ prefix }}-choice" value="{{ choice.selected if locked else 'anonymous' }}">
+  {% if choice.error %}
+  <p class="field__error" role="alert">{{ choice.error }}</p>
+  {% endif %}
+</div>
+{% else %}
+<fieldset class="choice-group"{% if choice.error %} data-invalid{% endif %}>
+  <legend>Credential set for <span class="mono cell-wrap">{{ choice.reference }}</span></legend>
+  <input type="hidden" name="{{ prefix }}-reference" value="{{ choice.reference }}">
+  <p class="field__help">Registry <span class="mono">{{ offer.reference.registry_address }}</span>. {{ binding_text(binding) }}.
+    {%- if binding.state != "unbound" %} Choosing a different option changes the binding for every user of this image.
+    {%- else %} The set that pulls the image is bound to it, so updates use the same set.{% endif %}</p>
+  {% if choice.error %}
+  <p class="field__error" role="alert">{{ choice.error }}</p>
+  {% endif %}
+  <div class="choice">
+    <input class="choice__input" type="radio" id="{{ prefix }}-choice-anonymous" name="{{ prefix }}-choice" value="anonymous"
+           {%- if choice.selected == "anonymous" %} checked{% endif %}{% if not choice.selected %} required{% endif %} aria-describedby="{{ prefix }}-choice-anonymous-help">
+    <label class="choice__label" for="{{ prefix }}-choice-anonymous">Anonymous (no credentials)</label>
+    <p class="choice__help" id="{{ prefix }}-choice-anonymous-help">Pull without signing in. Private images and rate-limited registries may refuse it.</p>
+  </div>
+  {% for candidate in offer.candidates %}
+  <div class="choice">
+    <input class="choice__input" type="radio" id="{{ prefix }}-choice-{{ candidate.id }}" name="{{ prefix }}-choice" value="{{ candidate.id }}"
+           {%- if choice.selected == candidate.id|string %} checked{% endif %}{% if not choice.selected %} required{% endif %} aria-describedby="{{ prefix }}-choice-{{ candidate.id }}-help">
+    <label class="choice__label" for="{{ prefix }}-choice-{{ candidate.id }}">{{ candidate.name }}</label>
+    <p class="choice__help" id="{{ prefix }}-choice-{{ candidate.id }}-help">
+      {{- catalogue[candidate.provider].label if candidate.provider in catalogue else candidate.provider }} at <span class="mono">{{ candidate.url }}</span>
+      {%- if not candidate.authentication_enabled %}, no authentication{% endif %}
+      {%- if candidate.is_default_for_host %}. Default for this registry.{% endif %}</p>
+  </div>
+  {% endfor %}
+</fieldset>
+{% endif %}
+{% endfor %}
+{% endmacro %}
+
+{# Also rendered as each stream event, so it reads only the job and route names. #}
+{% macro stack_job_progress(job) %}
+{% set state = choice(job.state, ["running", "succeeded", "failed", "cancelled"]) %}
+{% set tones = {"running": "info", "succeeded": "ok", "failed": "danger", "cancelled": "warn"} %}
+{% set progress = job.progress %}
+{% set outcome = job.outcome %}
+<div class="job" data-state="{{ state }}">
+  <div class="job__head">
+    {{ badge(state|capitalize, tones[state]) }}
+    <span>{{ kind_labels.get(job.kind, "Operation") }}</span>
+    <span class="mono cell-wrap">{{ job.stack }}</span>
+  </div>
+  {% if job.running %}
+  <progress class="progress-panel__bar" aria-label="Operation progress">Working</progress>
+  {% endif %}
+
+  {% if progress.pulls %}
+  <h2 class="job__subheading">Images</h2>
+  <ul class="job-list">
+    {% for pull in progress.pulls %}
+    <li class="job-list__item">
+      <div class="job__head"><span class="mono cell-wrap">{{ pull.reference }}</span></div>
+      {{ transfer_progress(pull.progress, job.running, "Pull progress of " ~ pull.reference) }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if progress.builds %}
+  <h2 class="job__subheading">Image builds</h2>
+  <ul class="job-list">
+    {% for build in progress.builds %}
+    <li class="job-list__item">
+      <div class="job__head"><span class="mono cell-wrap">{{ build.service }}</span> <span class="cell-note mono cell-wrap">{{ build.tag }}</span></div>
+      {% if build.steps %}
+      <div class="data-table__scroll" role="region" aria-label="Build steps of {{ build.service }}" tabindex="0">
+        <table class="table job__layers">
+          <caption class="visually-hidden">What the builder reported for each step of {{ build.service }}</caption>
+          <thead>
+            <tr><th scope="col">Step</th><th scope="col">Status</th></tr>
+          </thead>
+          <tbody>
+            {% for step in build.steps %}
+            {% set tone = "danger" if step.error else {"running": "info", "done": "ok"}.get(step.status, "neutral") %}
+            <tr>
+              <th scope="row" class="mono cell-wrap">{{ step.name or "—" }}</th>
+              <td>{{ badge(("Error" if step.error else ("Cached" if step.cached and step.status == "done" else (step.status|capitalize or "—"))), tone) }}{% if step.error %} <span class="cell-note cell-wrap">{{ step.error }}</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if build.more_steps %}
+      <p class="field__help">and {{ build.more_steps }} more {{ "step" if build.more_steps == 1 else "steps" }} not listed.</p>
+      {% endif %}
+      {% else %}
+      <p class="job__summary">Waiting for the builder to report.</p>
+      {% endif %}
+      {% if build.log %}
+      <details class="stderr">
+        <summary>Build output of {{ build.service }}</summary>
+        <pre class="stderr__text" tabindex="0">{{ build.log|join("\n") }}</pre>
+      </details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if progress.resources %}
+  <h2 class="job__subheading">Resources</h2>
+  <div class="data-table__scroll" role="region" aria-label="Compose resources" tabindex="0">
+    <table class="table job__layers">
+      <caption class="visually-hidden">What Docker Compose reported for each resource</caption>
+      <thead>
+        <tr><th scope="col">Resource</th><th scope="col">Status</th><th scope="col">Detail</th></tr>
+      </thead>
+      <tbody>
+        {% for resource in progress.resources %}
+        {% set tone = "danger" if resource.is_error else {"working": "info", "done": "ok"}.get(resource.status, "neutral") %}
+        <tr>
+          <th scope="row" class="cell-wrap"><span class="cell-note">{{ resource.kind }}</span> <span class="mono">{{ resource.name }}</span></th>
+          <td>{{ badge(("Error" if resource.is_error else (resource.status|capitalize or "—")), tone) }}</td>
+          <td class="cell-wrap">{{ resource.text or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if progress.untracked_resources %}
+  <p class="field__help">and {{ progress.untracked_resources }} more {{ "resource" if progress.untracked_resources == 1 else "resources" }} not listed.</p>
+  {% endif %}
+  {% elif job.running and not progress.pulls and not progress.builds %}
+  <p class="job__summary">Waiting for Docker Compose to report.</p>
+  {% endif %}
+
+  {% if outcome %}
+  {% set result = outcome.result %}
+  <div class="job__outcome" role="{{ 'status' if outcome.ok else 'alert' }}">
+    <p><strong>{{ outcome.message }}</strong></p>
+    {% if outcome.ok and result %}
+    {% if result.interrupted %}
+    <p>The request was interrupted; this is the result that was recorded afterwards.</p>
+    {% endif %}
+    {% if result.services %}
+    <div class="data-table__scroll" role="region" aria-label="Services after the operation" tabindex="0">
+      <table class="table job__layers">
+        <caption class="visually-hidden">Containers of each service after the operation</caption>
+        <thead>
+          <tr><th scope="col">Service</th><th scope="col" class="is-numeric">Containers</th><th scope="col" class="is-numeric">Running</th></tr>
+        </thead>
+        <tbody>
+          {% for service in result.services %}
+          <tr>
+            <th scope="row" class="mono cell-wrap">{{ service.service or "—" }}</th>
+            <td class="is-numeric">{{ service.containers }}</td>
+            <td class="is-numeric">{{ service.running }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if result.pulled %}
+    <p>Pulled: <span class="mono cell-wrap">{{ result.pulled|join(", ") }}</span>.</p>
+    {% endif %}
+    {% if result.built %}
+    <p>Images: {% for item in result.built %}<span class="mono cell-wrap">{{ item.tag }}</span> ({{ "reused" if item.reused else "built" }}){{ ", " if not loop.last else "" }}{% endfor %}.</p>
+    {% endif %}
+    {% if result.orphans_removed %}
+    <p>Removed {{ result.orphans_removed }} {{ "container" if result.orphans_removed == 1 else "containers" }} no service in the file defines.</p>
+    {% endif %}
+    {% if result.volumes_removed %}
+    <p>Deleted {{ result.volumes_removed|length }} {{ "volume" if result.volumes_removed|length == 1 else "volumes" }}: <span class="mono cell-wrap">{{ result.volumes_removed|join(", ") }}</span>.</p>
+    {% endif %}
+    {% if result.volumes_kept %}
+    <p>Kept {{ result.volumes_kept }} {{ "volume" if result.volumes_kept == 1 else "volumes" }} with their data.</p>
+    {% endif %}
+    {% if result.preexisting_after_deploy %}
+    <div class="panel panel--notice" role="note">
+      <p>These objects appeared during the deployment and do not belong to this stack: <span class="mono cell-wrap">{{ result.preexisting_after_deploy|join(", ") }}</span>.</p>
+    </div>
+    {% endif %}
+    {% elif not outcome.ok %}
+    {% if outcome.reason == "outcome_unknown" %}
+    <p>Check the stack's containers before trying again. The host may have changed.</p>
+    {% endif %}
+    {% if outcome.progress %}
+    <p class="field__help">Last events: <span class="cell-wrap">{{ outcome.progress }}</span></p>
+    {% endif %}
+    {{ stderr_block(outcome.stderr, "Build output" if outcome.reason == "build_failed" else "Docker Compose output") }}
+    {% endif %}
+  </div>
+  <p class="row-actions">
+    {% if not (outcome.ok and job.kind == "remove") %}
+    <a class="btn btn--primary" href="{{ route_path('environment_stack_detail', environment_id=job.environment_id, stack_name=job.stack) }}">Open stack</a>
+    {% endif %}
+    <a class="btn" href="{{ route_path('environment_stack_list', environment_id=job.environment_id) }}">Back to stacks</a>
+  </p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro leftover_summary(lead, counts) -%}
+{% set present = counts|selectattr("2")|list %}{{ lead }}{% if present %} Left behind: {% for singular, plural, total in present %}{{ total }} {{ singular if total == 1 else plural }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+{%- endmacro %}
+
+{% macro leftover_links(label, items, total, environment_id, route, param, key, show_label=true) %}
+{% if items %}
+{% if show_label %}<span class="cell-note">{{ label }}</span>{% endif %}
+<ul class="ref-list" aria-label="{{ label }}">
+  {% for item in items %}
+  <li class="ref-list__item">
+    {% if item.linkable %}
+    <a class="mono cell-wrap" href="{{ route_path(route, environment_id=environment_id, **{param: item[key]}) }}">{{ item.label }}</a>
+    {% else %}
+    <span class="mono cell-wrap">{{ item.label }}</span>
+    {% endif %}
+    {% if item.created_at is defined and item.created_at %}<span class="cell-note"><time datetime="{{ item.created_at|timestamp_iso }}">{{ item.created_at|timestamp }}</time></span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if total > items|length %}<span class="cell-note">and {{ total - items|length }} more not listed</span>{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro dismissal_state(dismissal, show_dismissed) %}
+{% if dismissal and show_dismissed %}
+<span class="cell-note">{{ badge("Dismissed", "neutral") }} <time datetime="{{ dismissal.dismissed_at|timestamp_iso }}">{{ dismissal.dismissed_at|timestamp }}</time>{% if dismissal.dismissed_by %} by {{ dismissal.dismissed_by }}{% endif %}</span>
+{% endif %}
+{% if dismissal and dismissal.changed_since %}
+<span class="cell-note">Dismissed earlier; it has changed since</span>
+{% endif %}
+{% endmacro %}
+
+{% macro restore_form(dismissal, action, name) %}
+{% if dismissal and principal.is_administrator %}
+<form class="inline-form" method="post" action="{{ action }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="btn btn--compact" aria-label="Restore {{ name }} to the list">Restore</button>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro dismiss_form(action, digest, name) %}
+{% if principal.is_administrator %}
+<form class="inline-form" method="post" action="{{ action }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_objects" value="{{ digest }}">
+  <button type="submit" class="btn btn--compact" aria-label="Dismiss {{ name }}">Dismiss</button>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro dismissed_line(hidden, show_dismissed, list_href) %}
+{% if hidden > 0 %}
+<p class="field__help" id="dismissed-line">
+  {% if show_dismissed %}
+  Showing {{ hidden }} dismissed {{ "entry" if hidden == 1 else "entries" }}. <a href="{{ list_href }}">Hide dismissed</a>
+  {% else %}
+  {{ hidden }} dismissed {{ "entry is" if hidden == 1 else "entries are" }} hidden. <a href="{{ list_href }}?dismissed=1">Show dismissed</a>
+  {% endif %}
+</p>
+{% endif %}
+{% endmacro %}

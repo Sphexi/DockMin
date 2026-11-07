@@ -1,0 +1,127 @@
+{
+  "configs": {
+    "motd": {
+      "name": "dockmin-e2e-sample_motd",
+      "content": "hello from content\n$$literal-dollar\n"
+    }
+  },
+  "name": "dockmin-e2e-sample",
+  "networks": {
+    "appnet": {
+      "name": "dockmin-e2e-sample_appnet",
+      "ipam": {}
+    },
+    "default": {
+      "name": "dockmin-e2e-sample_default",
+      "ipam": {}
+    }
+  },
+  "secrets": {
+    "tok": {
+      "name": "dockmin-e2e-sample_tok",
+      "environment": "SAMPLE_SECRET"
+    }
+  },
+  "services": {
+    "once": {
+      "command": null,
+      "entrypoint": [
+        "/bin/sh",
+        "-c",
+        "exit 3"
+      ],
+      "image": "registry:2",
+      "networks": {
+        "appnet": null
+      },
+      "restart": "no"
+    },
+    "tool": {
+      "profiles": [
+        "debug"
+      ],
+      "command": null,
+      "entrypoint": [
+        "/bin/sh",
+        "-c",
+        "sleep 30"
+      ],
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "web": {
+      "command": null,
+      "configs": [
+        {
+          "source": "motd",
+          "target": "/etc/motd-sample",
+          "mode": "0444"
+        }
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "cpus": 0.5,
+            "memory": "134217728"
+          },
+          "reservations": {
+            "memory": "67108864"
+          }
+        },
+        "placement": {}
+      },
+      "entrypoint": null,
+      "environment": {
+        "FROM_DOTENV": "dotenv-not-read"
+      },
+      "image": "registry:2",
+      "networks": {
+        "appnet": null
+      },
+      "ports": [
+        {
+          "mode": "ingress",
+          "host_ip": "127.0.0.1",
+          "target": 5000,
+          "published": "23781",
+          "protocol": "tcp"
+        }
+      ],
+      "secrets": [
+        {
+          "source": "tok",
+          "target": "tok"
+        }
+      ],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "data",
+          "target": "/var/lib/registry",
+          "volume": {}
+        },
+        {
+          "type": "volume",
+          "target": "/anon-vol",
+          "volume": {}
+        }
+      ],
+      "post_start": [
+        {
+          "command": [
+            "/bin/sh",
+            "-c",
+            "echo hooked \u003e /tmp/hook.txt"
+          ]
+        }
+      ]
+    }
+  },
+  "volumes": {
+    "data": {
+      "name": "dockmin-e2e-sample_data"
+    }
+  }
+}

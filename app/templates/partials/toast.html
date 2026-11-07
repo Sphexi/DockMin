@@ -1,0 +1,7 @@
+{% macro toast(level, message) %}
+{% set level = choice(level, ["info", "ok", "warn", "danger"]) %}
+<div class="toast" data-toast data-level="{{ level }}" role="{{ 'alert' if level in ('warn', 'danger') else 'status' }}">
+  <span class="toast__message" data-toast-message>{{ message }}</span>
+  <button type="button" class="toast__close" data-toast-close aria-label="Dismiss notification">&times;</button>
+</div>
+{% endmacro %}

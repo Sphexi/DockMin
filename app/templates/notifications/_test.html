@@ -1,0 +1,18 @@
+{# Always renders the target element, so a swap and the first load share one id. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/check_status.html" import check_status %}
+
+{% macro channel_test_result(result) %}
+{{ check_status("notification-test-status", (("Test message accepted. " if result.ok else "Test message failed. ") ~ result.message) if result is not none else "") }}
+<div id="notification-test">
+  <p class="loading" role="status">Sending&hellip;</p>
+  {% if result is not none %}
+  <p class="test-result{% if not result.ok %} test-result--failed{% endif %}">
+    {% if result.ok %}{{ badge("Accepted", "ok") }}{% else %}{{ badge("Failed", "danger") }}{% endif %}
+    <span class="cell-wrap">{{ result.message }}</span>
+  </p>
+  {% else %}
+  <p class="field__help">Not tested since this page was opened.</p>
+  {% endif %}
+</div>
+{% endmacro %}

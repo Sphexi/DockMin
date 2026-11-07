@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "swarm/_parts.html" import category_list %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Roll back {{ impact.name }} - dockmin{% endblock %}
+{% set crumb_object = impact.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Roll back" %}
+{% block content %}
+{% call page_header("Roll back", "Review the service below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the service</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="rollback-heading">
+  <h2 id="rollback-heading">Return <span class="mono">{{ impact.name }}</span> to its previous configuration?</h2>
+  {{ confirm_targets([{"name": impact.name, "detail": "on " ~ impact.environment_name}], "service") }}
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ impact.environment_name }}</dd>
+    <dt>Changes</dt>
+    <dd>
+      {% if impact.categories %}
+      {{ category_list(impact.categories) }}
+      {% else %}
+      No setting differs from the previous configuration.
+      {% endif %}
+    </dd>
+    <dt>Image now</dt>
+    <dd class="mono cell-wrap">{{ impact.image_before or "—" }}</dd>
+    <dt>Image after</dt>
+    <dd class="mono cell-wrap">{{ impact.image_after or "—" }}</dd>
+  </dl>
+  <div class="panel panel--alert" role="note">
+    <h3>The running tasks are replaced</h3>
+    <p>{{ impact.running_tasks }} running {{ "task is" if impact.running_tasks == 1 else "tasks are" }} replaced as the previous configuration rolls out, following the rollback configuration of the service. The configuration that is running now becomes the previous one.</p>
+  </div>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_version" value="{{ impact.version }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Roll back service</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,43 @@
+{# Content without hx-swap-oob replaces the request's target; row_removed has no other content, so the swap empties the row. Import with context. #}
+{% from "containers/_actions.html" import action_past with context %}
+{% from "containers/_detail.html" import container_summary, removed_summary with context %}
+{% from "containers/_tables.html" import container_row with context %}
+{% from "partials/toast.html" import toast %}
+
+{% macro feedback(action, name, result, stale=false) %}
+{% if stale %}
+{% set level = "warn" %}
+{% set message = action_past(action) ~ " " ~ name ~ ", but its current state could not be read. Reload to see it." %}
+{% elif result == "unchanged" %}
+{% set level = "info" %}
+{% set message = name ~ " was already in that state. No change was needed." %}
+{% else %}
+{% set level = "ok" %}
+{% set message = action_past(action) ~ " " ~ name ~ "." %}
+{% endif %}
+<div id="action-region" hx-swap-oob="innerHTML"></div>
+<div id="toasts" hx-swap-oob="beforeend">{{ toast(level, message) }}</div>
+{% endmacro %}
+
+{% macro row_updated(row, action, result, may_create=false) %}
+{{ container_row(row, true, may_create) }}
+{{ feedback(action, row.name, result) }}
+{% endmacro %}
+
+{% macro row_removed(name, action, result) %}
+{{ feedback(action, name, result) }}
+{% endmacro %}
+
+{% macro summary_updated(detail, action, result, instance_href=none) %}
+{{ container_summary(detail, instance_href) }}
+{{ feedback(action, detail.name, result) }}
+{% endmacro %}
+
+{% macro summary_removed(name, environment_id, action, result) %}
+{{ removed_summary(name, environment_id) }}
+{{ feedback(action, name, result) }}
+{% endmacro %}
+
+{% macro unread(name, action) %}
+{{ feedback(action, name, "done", true) }}
+{% endmacro %}

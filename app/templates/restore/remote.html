@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Archives in object storage - dockmin{% endblock %}
+{% set crumb_page = "Archives in object storage" %}
+{% block content %}
+{% call page_header("Archives in object storage", "Target: " ~ listing.target_name|visible_text) %}
+<a class="btn" href="{{ route_path('restore_remote') }}?target_id={{ listing.target_id }}&amp;refresh=1">Refresh list</a>
+<a class="btn" href="{{ route_path('restore') }}">Back to the restore</a>
+{% endcall %}
+
+{% if errors.get("archive") %}
+{{ error_state("That archive cannot be fetched", errors["archive"]) }}
+{% endif %}
+
+{% if listing.failure %}
+{{ error_state("The archives could not be listed", listing.failure) }}
+{% if listing.note %}<p class="field__help">{{ listing.note }}</p>{% endif %}
+{% else %}
+<section class="section" aria-labelledby="archives-heading">
+  <h2 id="archives-heading">Archives, newest first</h2>
+  {% if listing.truncated %}
+  <div class="panel panel--notice" role="note">
+    <p>The folder holds more objects than were read. Only the first part of the listing is shown.</p>
+  </div>
+  {% endif %}
+  {% if listing.archives %}
+  <div class="data-table__scroll" role="region" aria-labelledby="archives-heading" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Backup archives in the bucket</caption>
+    <thead>
+      <tr>
+        <th scope="col">Archive</th>
+        <th scope="col">Folder</th>
+        <th scope="col" class="is-numeric">Size</th>
+        <th scope="col">Last modified</th>
+        <th scope="col">Pushed by this instance</th>
+        <th scope="col"><span class="visually-hidden">Action</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for archive in listing.archives %}
+      <tr>
+        <th scope="row" class="mono cell-wrap">{{ archive.key.rpartition("/")[2] }}</th>
+        <td class="mono cell-wrap">{{ archive.folder|visible_text }}</td>
+        <td class="is-numeric">{{ archive.size|filesize }}</td>
+        <td>{{ when(archive.last_modified, "") }}</td>
+        <td>{{ "Yes" if archive.recorded else "No record" }}</td>
+        <td>
+          <form class="inline-form" method="post" action="{{ route_path('restore_remote_fetch') }}" data-submit-once>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="target_id" value="{{ listing.target_id }}">
+            <input type="hidden" name="object_path" value="{{ archive.key }}">
+            <button type="submit" class="btn btn--primary">Use this archive<span class="visually-hidden"> {{ archive.key.rpartition("/")[2] }}</span></button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <nav class="pagination" aria-label="Pagination">
+    <p class="pagination__summary">Page {{ listing.page }} of {{ listing.page_count }}, {{ listing.total }} archives</p>
+    <ul class="pagination__links">
+      <li>
+        {% if listing.page > 1 %}
+        <a class="pagination__link" href="{{ route_path('restore_remote') }}?target_id={{ listing.target_id }}&amp;page={{ listing.page - 1 }}" rel="prev">Previous page</a>
+        {% else %}
+        <span class="pagination__link" aria-disabled="true">Previous page</span>
+        {% endif %}
+      </li>
+      <li>
+        {% if listing.page < listing.page_count %}
+        <a class="pagination__link" href="{{ route_path('restore_remote') }}?target_id={{ listing.target_id }}&amp;page={{ listing.page + 1 }}" rel="next">Next page</a>
+        {% else %}
+        <span class="pagination__link" aria-disabled="true">Next page</span>
+        {% endif %}
+      </li>
+    </ul>
+  </nav>
+  {% else %}
+  <p>No backup archives were found under this target's backup folder.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

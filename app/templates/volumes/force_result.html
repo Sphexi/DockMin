@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Force removal result - dockmin{% endblock %}
+{% set crumb_page = "Force removal result" %}
+{% block content %}
+{% set labels = {
+  "removed": ("Removed", "ok"),
+  "gone": ("Already gone", "neutral"),
+  "not_found": ("Not found", "neutral"),
+  "forbidden": ("Not permitted", "danger"),
+  "busy": ("Busy", "warn"),
+  "conflict": ("Refused: the container is not in a state that allows it", "warn"),
+  "unreachable": ("The host could not be reached", "danger"),
+  "failed": ("Failed", "danger"),
+} %}
+{% call page_header("Force removal result", environment_name) %}
+<a class="btn btn--primary" href="{{ list_href }}">Back to volumes</a>
+{% endcall %}
+
+{% if result.volume is not none %}
+<div class="panel" role="status">
+  <p>Volume <span class="mono">{{ result.name }}</span> removed, after {{ result.containers_removed }} {{ "container" if result.containers_removed == 1 else "containers" }}.</p>
+</div>
+{% else %}
+<div class="panel panel--alert" role="note">
+  <p>{{ result.failure or "The volume was not removed." }}</p>
+  <p>Containers listed as removed stay removed. The volume was kept.</p>
+</div>
+{% endif %}
+
+{% if result.steps %}
+<h2>Containers</h2>
+<ul class="step-list">
+  {% for step in result.steps %}
+  {% set shown = labels[step.status] %}
+  <li class="step-list__item">
+    <span class="mono cell-wrap">{{ step.name }}</span>
+    <span class="cell-note mono">{{ step.short_id }}</span>
+    {{ badge(shown[0], shown[1]) }}
+    {% if step.message %}<span class="cell-note">{{ step.message }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

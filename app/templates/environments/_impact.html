@@ -1,0 +1,65 @@
+{# Import with context. #}
+{% from "environments/_parts.html" import grantee_names, kind_badge with context %}
+
+{% macro record_rows(records) %}
+{% for record in records %}
+<tr>
+  <th scope="row">{{ record.label }}</th>
+  <td class="is-numeric">{{ record.count }}</td>
+</tr>
+{% endfor %}
+{% endmacro %}
+
+{% macro records_table(records, caption) %}
+<div class="data-table__scroll" role="region" aria-label="{{ caption }}" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">Record</th>
+        <th scope="col" class="is-numeric">Deleted</th>
+      </tr>
+    </thead>
+    <tbody>{{ record_rows(records) }}</tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro deletion_impact(item) %}
+<section class="panel impact" aria-labelledby="impact-{{ item.environment_id }}">
+  <h2 id="impact-{{ item.environment_id }}">{{ item.name }}</h2>
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{% if item.is_local %}{{ kind_badge(true, none, none) }}{% else %}<span class="badge" data-tone="neutral">TLS</span>{% endif %}</dd>
+    <dt>Endpoint</dt>
+    <dd class="mono">{{ item.endpoint }}</dd>
+  </dl>
+
+  <h3>Who loses access</h3>
+  <dl class="facts">
+    <dt>Direct grants</dt>
+    <dd>{{ grantee_names(item.direct) }}</dd>
+    <dt>Through the group</dt>
+    <dd>
+      {% if item.group is none %}
+      Not in a group.
+      {% else %}
+      <a href="{{ route_path('group_detail', group_id=item.group.group.id) }}">{{ item.group.group.name }}</a>
+      {{ grantee_names(item.group.grants) }}
+      {% endif %}
+    </dd>
+    <dt>Standard users affected</dt>
+    <dd>{{ item.standard_users_affected }}</dd>
+  </dl>
+  <p>{{ item.administrators_note }}</p>
+
+  <h3>Records deleted with it</h3>
+  {{ records_table(item.records, "Records deleted with " ~ item.name) }}
+
+  <h3>What is kept</h3>
+  <p>{{ item.activity_note }}</p>
+
+  <h3>On the host</h3>
+  <p>{{ item.host_note }}</p>
+</section>
+{% endmacro %}

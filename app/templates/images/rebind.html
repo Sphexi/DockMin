@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "images/_parts.html" import binding_text, credential_fieldset with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Change credential set on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Change credential set" %}
+{% block content %}
+{% call page_header("Change credential set", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("The credential set was not changed", error) }}
+{% endif %}
+
+<p>The chosen credential set is checked against the registry first. The binding changes only if the registry accepts it, and the image is not pulled.</p>
+
+<form class="form form--wide" method="post" action="{{ post_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="reference" value="{{ offer.reference.familiar }}">
+  <input type="hidden" name="expected_binding_id" value="{{ '' if seen.binding_id is none else seen.binding_id }}">
+  <input type="hidden" name="expected_state" value="{{ seen.state }}">
+  <input type="hidden" name="expected_set" value="{{ '' if seen.set_id is none else seen.set_id }}">
+  <dl class="facts">
+    <dt>Reference</dt>
+    <dd class="mono cell-wrap">{{ offer.reference.familiar }}</dd>
+    <dt>Registry</dt>
+    <dd class="mono">{{ offer.reference.registry_address }}</dd>
+    <dt>Current binding</dt>
+    <dd>{{ binding_text(offer.binding) }}</dd>
+  </dl>
+  {{ credential_fieldset(offer, selected, fields.get("credential_choice"), catalogue, true) }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Verify and rebind</button>
+    <a class="btn" href="{{ pull_href }}">Pull the image instead</a>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

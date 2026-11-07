@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "containers/_detail.html" import container_summary, container_tabs with context %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/toast.html" import toast %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}{{ detail.name }} - dockmin{% endblock %}
+{% set crumb_object = detail.name %}
+{% block content %}
+{% call page_header(detail.name, "Container on " ~ detail.environment_name) %}
+{% if may_create %}
+<a class="btn" href="{{ route_path('environment_container_new', environment_id=detail.environment_id) }}?from={{ detail.id }}">Duplicate</a>
+{% endif %}
+{% if detail.can_write and detail.is_self %}
+<button type="button" class="btn" disabled>Recreate</button>
+{% elif detail.can_write %}
+<a class="btn" href="{{ route_path('environment_container_recreate_confirm', environment_id=detail.environment_id, container_id=detail.id) }}">Recreate</a>
+{% endif %}
+{% if terminal and not terminal.refusal %}
+<a class="btn" href="{{ route_path('environment_container_terminal', environment_id=detail.environment_id, container_id=detail.id) }}?mode=exec">Open terminal</a>
+{% if terminal.attach_available %}
+<a class="btn" href="{{ route_path('environment_container_terminal', environment_id=detail.environment_id, container_id=detail.id) }}?mode=attach">Attach</a>
+{% endif %}
+{% endif %}
+{{ back_actions(route_path('environment_container_list', environment_id=detail.environment_id), "Back to containers", origin) }}
+{% endcall %}
+
+{% for notice in notices %}
+{{ toast(notice.level, notice.message) }}
+{% endfor %}
+{% if terminal and terminal.refusal and terminal.refusal.code == "restricted_container" %}
+<p class="field__help" role="note">{{ terminal.refusal.message }}</p>
+{% endif %}
+<div id="action-region" class="action-region"></div>
+<p class="loading" role="status">Loading&hellip;</p>
+{{ container_summary(detail, instance_href) }}
+{{ container_tabs(detail, tab, tab_keys, sample, stats_failure, panel, values, fields, logs, automation, activity_log, last_output, show_last_exit) }}
+{% endblock %}

@@ -1,0 +1,258 @@
+# Security
+
+Roles, the authorisation model and the restrictions on standard users: [Access control](Usage-Access-Control).
+
+## Authentication
+
+| Item | Fact |
+|---|---|
+| Browser | A session cookie. Lifetime and idle timeout: `DOCKMIN_SESSION_LIFETIME`, `DOCKMIN_SESSION_IDLE_TIMEOUT` ([Configuration](Reference-Configuration#accounts-and-sessions)). Cookie attributes: [Cookies](#cookies) |
+| Forms | Every state-changing request from a browser carries a CSRF token ([Frontend conventions](Contributing-Frontend-Conventions)) |
+| API | A bearer token that acts as its user ([JSON API](Reference-JSON-API#authentication)) |
+| Access platform | Off by default. A signed token in a configured header, verified against an operator-supplied key and mapped to a linked account, opens a session that is checked against the token on every request ([Teams and users](Usage-Teams-and-Users), [Access platform tokens](#access-platform-tokens)) |
+| Webhook calls | A webhook token, in the URL path or as the bearer credential. It starts one run of one automation, with that automation's owner's authority, and reads nothing else. Stored as a SHA-256 hash and shown once; revoked by a password change, a password reset and `End all sessions`; refused while the owner is disabled ([JSON API](Reference-JSON-API#webhook-calls)) |
+| Passwords | Hashed with Argon2id. Length and character-class rules and hash costs: [Configuration](Reference-Configuration#accounts-and-sessions) |
+| Sign-in lock | After repeated failures a username is locked ([Teams and users](Usage-Teams-and-Users#sign-in-lock)) |
+| Rate limit | Requests with no signed-in user are limited per address when the limit is enforced ([Rate limit](Reference-Deployment#rate-limit)) |
+| Outbound addresses | Endpoints an administrator names may not be on this server or a link-local network unless `DOCKMIN_PERMITTED_INTERNAL_NETWORKS` permits it ([Address policy](#address-policy)) |
+
+## Outbound contacts
+
+| Contact | Destination | Started by | Detail |
+|---|---|---|---|
+| Template catalogue fetch | The address an administrator saved for the catalogue, and its redirects | An administrator choosing `Enable and fetch` or `Refresh`. Never at start, on a page load or on a schedule | [Template catalogues](Administration-Template-Catalogues) |
+| Registry connection test, Amazon ECR token, image update check | The registry address of a credential set or image, and its token service | An administrator's connection test, a token needed for an ECR set, a user's update check, or a run of a `container-updater` automation | [Registries](Administration-Registries#registry-connections) |
+| dockmin update check | The registry of dockmin's own image reference: a manifest `HEAD` and a tag list `GET` | An administrator's update check ([Instance](Administration-Instance)) | [Registries](Administration-Registries#registry-connections) |
+| Object storage, notification receivers, environment hosts, access platform key URL | The address an administrator saved | The feature that names it | [Address policy](#address-policy) |
+
+- A fresh installation contacts no catalogue.
+- Every destination passes the [address policy](#address-policy).
+
+## Address policy
+
+Connections to operator-named hosts are refused when the address is internal, unless `DOCKMIN_PERMITTED_INTERNAL_NETWORKS` permits it.
+
+| Applies to | Where |
+|---|---|
+| Object storage endpoints | Save, connection test, backup upload and retention, activity export, container log export |
+| Notification receivers | Save, test message and delivery, for webhook, ntfy, Gotify, Discord, Slack, Teams and email servers ([Notifications](Administration-Notifications)) |
+| Registry addresses | Save, connection test, update checks |
+| Template catalogue addresses | Save, each fetch and each redirect ([Template catalogues](Administration-Template-Catalogues)) |
+| A registry's token service | The `realm` the registry names |
+| The Amazon ECR endpoint | Token exchange |
+| Environment TCP hosts | Save, connection test, Engine requests, container terminals and other raw streams |
+| Access platform key URL | Each fetch of `DOCKMIN_JWT_JWKS_URL` ([Configuration](Reference-Configuration#access-platform)) |
+| Compose's Docker host | Checked before Compose starts, for a TCP environment |
+| Not applied to | The local Unix socket |
+
+| Internal address class | Range |
+|---|---|
+| Unspecified | `0.0.0.0/8`, `::` |
+| Loopback | `127.0.0.0/8`, `::1` |
+| Link-local | `169.254.0.0/16`, `fe80::/10` |
+| AWS IPv6 metadata | `fd00:ec2::/64` |
+| Embedded IPv4 | An internal IPv4 address inside an IPv4-mapped (`::ffff:0:0/96`), IPv4-compatible (`::/96`), IPv4-translated (`::ffff:0:0:0/96`), NAT64 (`64:ff9b::/96`), NAT64 local-use (`64:ff9b:1::/48`, every prefix placement) or 6to4 (`2002::/16`) address |
+| Names | `localhost`, `*.localhost`, `metadata`, `metadata.goog`, `metadata.google.internal`, `instance-data`, `instance-data.ec2.internal`, and numeric spellings of an internal IPv4 address. Names are compared in lower case, without brackets or a trailing dot |
+
+Private ranges (RFC 1918, `fc00::/7` outside `fd00:ec2::/64`) are not internal.
+
+| Setting | Value |
+|---|---|
+| `DOCKMIN_PERMITTED_INTERNAL_NETWORKS` | IP addresses or networks, such as `127.0.0.1/32` or `10.0.0.0/8`. Empty permits nothing. Format: [Configuration](Reference-Configuration#listeners-and-network) |
+
+- An embedded address is allowed when the address itself is permitted, or when every internal IPv4 address it embeds is permitted.
+- Each entry lets an administrator's session reach that address from the server, including a cloud metadata service on `169.254.169.254`.
+- Checked twice: at save, for an IP literal or one of the internal names, as a field error; at connect, after name resolution, on every address dialled.
+
+| Connection | Resolved addresses |
+|---|---|
+| Object storage, registry, token service, ECR, Engine requests, notification receivers (HTTP and SMTP) | Refused addresses are skipped. The connection fails as refused only when no permitted address is left |
+| Compose's Docker host | Every resolved address must be permitted, else the operation fails before Compose starts. A name that does not resolve within 5 s fails the same way, with `The environment's host name could not be resolved from this server.` |
+
+| Surface | Result |
+|---|---|
+| Field error | `This address is on this server or a link-local network. Set DOCKMIN_PERMITTED_INTERNAL_NETWORKS to allow it.` |
+| Connection test, TCP stage | The same text |
+| Registry token service | `The token service is not used.` followed by the same text |
+| Update check | Unknown, reason `address_refused`: `The registry or its token service is on this server or a link-local network. Set DOCKMIN_PERMITTED_INTERNAL_NETWORKS to allow it.` |
+| Object storage | Failure reason `address_refused`. Not retried |
+| Notification receiver | Field error at save for an IP literal or an internal name. At send, the delivery fails with `address_refused` and the text above, and is tried again on the [retry schedule](Administration-Notifications#delivery). A test message fails with the same text |
+| Amazon ECR | The set's token exchange fails with the same text |
+| Engine requests | The environment is unreachable with the same text. The event stream reconnects with its longest delay |
+| Stack operations | Failure reasons `address_refused` and `host_unresolved` |
+| Log | `outbound_address_refused` with `address`, cut to 64 characters |
+
+What the policy does not cover:
+
+- An address that is not internal. Cloud metadata services at `100.100.100.200` (Alibaba Cloud), `168.63.129.16` (Azure) and `192.0.0.192` (Oracle Cloud) are reachable; restrict them at the network.
+- AWS instance metadata version 2 answers a container only when the instance's hop limit is 2 or more.
+- A host that is reachable through an address the policy does not classify as internal: a Docker bridge gateway address, or a LAN address that fronts a service bound to loopback.
+- Teredo and ISATAP addresses are not decoded.
+- A host name that resolves to a different address inside the Compose process than at the check.
+
+## Access platform tokens
+
+| Item | Fact |
+|---|---|
+| Verification | Every token is verified before any claim is read: algorithm allow-list (`none` and `HS*` never), key type matching the algorithm, signature, `iss`, `aud`, `exp`, `nbf`, and `iat` not more than 30 seconds in the future and no older than `DOCKMIN_JWT_MAX_AGE`. `exp` and `nbf` allow 30 seconds of skew |
+| Failure | A token that does not verify is treated as absent. Nothing falls back to another method |
+| Identity | One claim, matched to an account an administrator linked. Usernames are never matched. Roles, teams and groups are never read from a claim |
+| New accounts | Only with `DOCKMIN_JWT_CREATE_USERS`: a standard user with an unusable password, never an administrator |
+| Sessions | A session opened from a token ends at the first request whose token is absent, refused, or names another identity. Revocation at the platform applies at the next request |
+| Exchange | `GET` only |
+| Sign-out | Sets a marker cookie until the user chooses `Continue as` |
+| Password sign-in | Administrators can always sign in with a password. `DOCKMIN_JWT_PASSWORD_SIGN_IN` can refuse it for standard users and ends their existing password sessions |
+| `/api` | Never reads the header. A JWT in `Authorization` is an invalid API token |
+| Stored | No token is stored. A verified token is remembered in memory by its SHA-256 digest for at most 5 minutes, and never past its `exp` or `iat` plus `DOCKMIN_JWT_MAX_AGE`. At most 1,000 are remembered |
+| Logs | A token value is not written to a log line, an activity row or a page. The log scrubber replaces text shaped like a compact JWS, three base64url segments with the first beginning `eyJ`, with `[REDACTED]` |
+| Key fetch | `https` only, under the address policy, no redirects, 5 seconds, 64 KiB, 20 keys. Nothing is fetched while the feature is off |
+| Replay | A captured token works against dockmin until `exp` or `DOCKMIN_JWT_MAX_AGE` after `iat`, when presented directly to it |
+
+dockmin cannot tell which peer sent the header. Make it reachable only through the platform, over HTTPS or a network no other host shares, and shorten `DOCKMIN_JWT_MAX_AGE` where tokens live longer than needed ([Teams and users](Usage-Teams-and-Users)).
+
+## Cookies
+
+| Cookie | Name with `DOCKMIN_COOKIE_SECURE` at its default | Name with it `false` | Attributes |
+|---|---|---|---|
+| Session | `__Host-dockmin_session` | `dockmin_session` | `HttpOnly`, `SameSite=Lax`, path `/`, `Secure` by the setting, lifetime `DOCKMIN_SESSION_LIFETIME` |
+| CSRF | `__Host-dockmin_csrf` | `dockmin_csrf` | `HttpOnly`, `SameSite=Lax`, path `/`, `Secure` by the setting, a browser-session cookie |
+| Notice | `__Host-dockmin_flash` | `dockmin_flash` | `HttpOnly`, `SameSite=Lax`, path `/`, `Secure` by the setting, 120 seconds. Signed with a key generated at process start, so a restart drops any pending notice |
+| Access platform sign-out marker | `dockmin_signed_out` | `dockmin_signed_out` | `HttpOnly`, `SameSite=Lax`, path `/`, `Secure` by the setting. No `__Host-` prefix |
+| Theme | `dockmin_theme` | `dockmin_theme` | Written by the page script, one year, `SameSite=Lax`, `Secure` on an HTTPS page. Holds `light` or `dark` |
+
+The `__Host-` prefix and the `Secure` attribute make a browser send the cookie only over HTTPS and refuse a copy set by a sibling subdomain.
+
+- Serve HTTPS directly (a supplied or a self-signed certificate) or terminate TLS at the proxy, and leave `DOCKMIN_COOKIE_SECURE` at its default.
+- `DOCKMIN_COOKIE_SECURE` is the configured value, not the scheme the process sees: behind a TLS-terminating proxy the cookies still carry `Secure`.
+- `compose.yaml` passes `DOCKMIN_COOKIE_SECURE` and `DOCKMIN_SESSION_LIFETIME` through from `.env`.
+
+| While `DOCKMIN_COOKIE_SECURE` is `false` | Detail |
+|---|---|
+| Cookie attribute and prefix | The session, CSRF and notice cookies drop the `Secure` attribute and the `__Host-` prefix |
+| Passwords and session cookies | Travel over plain HTTP, readable by anyone on the network path |
+| Published address | Do not change the address `compose.yaml` publishes (`127.0.0.1`) |
+| Remote access | Forward the port over SSH ([Installation](Getting-Started-Installation)) |
+| Log | `cookie_secure_disabled`, at warning level, once at start |
+
+## dockmin's own container
+
+dockmin finds the container it runs in at start ([Instance](Administration-Instance)). The container, its volumes, its Compose project and its Swarm service stay visible. What would stop it, or take away what it runs on, is refused for every role, administrators included. The refusal is not a role restriction: no grant lifts it.
+
+| Surface | Result |
+|---|---|
+| `stop`, `restart`, `kill`, `pause`, `remove`, recreate, batch of these | Refused. `start` and `unpause` are allowed |
+| Terminal, attach | Refused |
+| Detach from a network | Refused |
+| Create, duplicate or recreate a container with `PidMode`, `IpcMode` or `NetworkMode` of the form `container:{name or id}` naming it, `VolumesFrom` naming it, or a named volume it has mounted | Refused, in every environment that reports the container |
+| Remove a volume it has mounted: single, with containers, bulk, prune, stack removal with volumes | Refused, or the volume is kept |
+| Deploy, redeploy, stop, restart or remove its Compose project | Refused |
+| Change or remove its Swarm service; change the Swarm stack that holds it; drain its node | Refused |
+| Restart | Only by an administrator, from the Instance page, through an environment on the local Docker socket |
+| Automation | The object is skipped |
+
+- A shell in the container can read the encryption key and the data volume and can stop the process. A terminal or attach to dockmin's container is refused to administrators too, and a second container may not join its namespaces or inherit its volumes.
+- A refused request answers `409` and records a failure with the reason `self_protected` where the refused action is recorded ([Activity](Administration-Activity#self-protection-refusals)).
+- The protection of the container's own id holds from start. The protection of its volumes, Compose project, Swarm service and node needs an environment that reports the container; until every environment has been read it may be incomplete ([Instance](Administration-Instance)).
+- An environment reached over TLS can report the container, and is then protected as well, but is never used to send a restart.
+- Per-object detail: [Containers](Usage-Containers#dockmins-own-container), [Volumes](Usage-Volumes#dockmins-volumes), [Stacks](Usage-Stacks#dockmins-own-stack), [Swarm](Usage-Swarm#dockmins-own-service), [Networks](Usage-Networks#detach).
+
+## Files read from a host
+
+Reading a Compose project's files from its host makes dockmin bind-mount a host directory into a helper container ([Stacks](Usage-Stacks#the-helper-container)).
+
+| Item | Value |
+|---|---|
+| Who | Administrators only. A standard user receives `404` |
+| Path | Only the working directory the project's containers record. It is refused when it is `/`, is relative or not normalised, holds control characters or `:`, or holds, lies inside or equals the source of a mount of dockmin's own container ([Stacks](Usage-Stacks#where-the-files-are)) |
+| Mount | The directory, read-only, at `/dockmin-read`. Nothing else is mounted |
+| Helper | Created from an image already on the host, never started, no network, read-only root file system, all capabilities dropped. Removed after the read |
+| Reads | Regular files only, each under a size limit, inside the working directory. Symbolic links, directories and archives that are not exactly one file are refused |
+| Output | A secret file's content and a secret variable's value are held in memory for 15 minutes, at most 8 reads for each user and 32 in all, stored encrypted when adopted, and never shown or recorded |
+| Recorded | `stack_files_read` names the project, the helper container and the reasons files were refused ([Activity](Administration-Activity#stack-rows)) |
+
+## Stack builds
+
+An administrator's Compose stack can build images on its host ([Stacks](Usage-Stacks#builds)). A `RUN` step of a Dockerfile executes on that host while the image builds.
+
+| Item | Value |
+|---|---|
+| Who | Administrators only. A build can use any image on the host as a base, and every build shares the host's build cache. Neither is covered by the access rules of images or stacks |
+| Residual | A `RUN` step can do anything an unprivileged container with default capabilities and the default network can do on that host, while it runs |
+| Confirmation | The redeploy confirmation names each service that builds, the image tag that is replaced and the base images, and states that the `RUN` steps execute on the host |
+| Context | Only an archive uploaded to the stack. It is read as a stream that accepts regular files and directories, at most 10,000 entries and 256 MiB, and is written to a private directory under the data directory, deleted when the build ends. Symbolic links, hard links, devices, absolute names, `..` and a name used as both a file and a directory are refused. At most 2 archives are processed at once |
+| Dockerfile | Read statically before any build. `ONBUILD` is refused. `ADD` of a URL or a Git repository needs `--checksum`. A quote, a backslash or a backtick in the flags of `RUN`, `COPY`, `ADD` and `FROM` is refused, so that no `--mount from=` is hidden from the check |
+| Server files | No `build` key names a path on the server: `context` names a stored archive and `dockerfile` a path inside it. `additional_contexts`, `secrets`, `ssh`, `cache_from`, `cache_to` and `dockerfile_inline` are refused, and so are `RUN --mount=type=ssh` and `type=secret` |
+| Credentials | buildx holds none: `DOCKER_CONFIG` holds `{}`, no stack variable and no proxy variable is in its environment, and `--pull=false` is set. dockmin pulls each base through the credential set the image is bound to, then checks that the base is on the host |
+| Frontend | `# syntax=` is refused. A frontend image would be pulled outside the binding and its code would run as the parser |
+| Sandbox | `RUN --network=host`, `RUN --security`, `build.network`, `build.privileged`, `build.entitlements` and `build.extra_hosts` are refused. Builds run in BuildKit's default sandbox with the daemon's default network |
+| Bases with triggers | A base image with `ONBUILD` triggers is refused, because its instructions are not read |
+| Bases replaced | The image id of each base is recorded when it is checked and compared after each build. A different id fails the build before `up` (`base_changed`) |
+| Concurrency | At most 2 builds run at once across the server, apart from the Compose process slots |
+| Build arguments | A resolved argument that holds a secret variable's value or a secret file's scrubbed term is refused. Build arguments are recorded in the image history |
+| Image names | A tag owned by another project is refused, never moved |
+| Binary | The buildx binary is held to the trust check of the Compose binary: owned by root or the dockmin user, writable by neither group nor others ([Buildx binary](Reference-Deployment#buildx-binary)) |
+| Output | Build output is scrubbed of secret values and of the data directory path, cut to 1 MiB, and never interpreted |
+| Automation | Never builds ([Stacks](Usage-Stacks#builds-and-automation)) |
+| Contexts at rest | Not encrypted. They are in the database and in every backup. Keep credentials in secret variables |
+
+## Revealing stack variables
+
+An administrator can show the value of a secret stack variable on the Variables tab of a Compose or a Swarm stack ([Stacks](Usage-Stacks#reveal-a-secret-variable)).
+
+| Item | Value |
+|---|---|
+| Who | Administrators on a session sign-in, password or access platform. A standard user and an API token cannot reveal. No JSON route returns a secret value |
+| Credential | The administrator's own dockmin password, entered again. A miss counts toward the sign-in lock ([Teams and users](Usage-Teams-and-Users#sign-in-lock)) |
+| Window | 5 minutes, held on the session, covering every secret variable of every stack the administrator can open |
+| Reveals | 20 for each window. Entering the password again opens a new window with none spent |
+| Display | The value is shown for 60 seconds. The page script hides it sooner when the page is left. Every answer is sent with `Cache-Control: no-store` and the page's history cache is off |
+| Standard users | See 16 `•` characters for every secret variable |
+| Access platform accounts | An account created at access platform sign-in has no dockmin password, so it cannot open a window until an administrator sets one ([Teams and users](Usage-Teams-and-Users)) |
+
+A window ends at the first of:
+
+| Cause | Mechanism |
+|---|---|
+| 5 minutes pass | The window carries its own end time |
+| The 20th reveal is spent | The count is kept on the session and the check refuses past 20 |
+| The session ends | Expiry, idle timeout, sign-out and revocation each remove the session from use |
+| The user's stored password hash changes | A password change, an administrator's reset, or a rehash of the password at sign-in |
+| The user's role changes | The same database trigger as the password hash |
+| The account is disabled or enabled | The same database trigger |
+
+The trigger closes the window of every session of the user in the same transaction that changes the user.
+
+| What the mask discloses | To whom |
+|---|---|
+| Whether a value has at least 24 printable characters on one line, with no leading or trailing whitespace, and when it does, its first 4 and last 4 characters | Administrators, on the Variables tab and on a notification channel's page ([Notifications](Administration-Notifications)). A value that does not qualify shows only 16 `•` characters |
+
+| What is recorded | Detail |
+|---|---|
+| `reveal_window_opened` | The user, the sign-in method and when the window ends. A refused password is a failure row with its reason |
+| `stack_variable_revealed` | The user, the stack, the variable's name, a random token that identifies the stored value, when the window ends and the reveals left. Never the value, and never the password ([Activity](Administration-Activity#reveal-and-dismissal-rows)) |
+| Notification | The event type `stack_variable_revealed` ([Notifications](Administration-Notifications)) |
+
+| Residual | Detail |
+|---|---|
+| An administrator's password and session | Together they read every secret stack variable. Each window allows 20, a further window needs the password, and every reveal is recorded |
+| A standard user with write access to a stack | They can deploy a file that copies a secret variable into a label, a readable service field or a Compose error, where they can read it ([Stacks](Usage-Stacks#secret-variables)) |
+| A browser without script | The reveal form posts to a page that holds the answer, not to a redirect. The browser keeps the posted password with that page so that it can offer to resend it. The value stays on the page until it is left |
+| Anyone with access to the host's Engine API | A value interpolated into a container's configuration is readable there ([Stacks](Usage-Stacks#secret-variables)) |
+
+## Reporting a vulnerability
+
+1. Open the repository at `https://github.com/Sphexi/DockMin` and choose the Security tab.
+2. Choose `Report a vulnerability`. The report goes to the repository's private vulnerability reporting, not to a public issue.
+3. Fill in the form with:
+
+   | Include | Detail |
+   |---|---|
+   | Version | The product version and the image tag |
+   | Description | What was done and what happened |
+   | Reproduction | The steps, or a minimal configuration |
+   | Impact | What an attacker gains, and what access they need |
+
+4. Submit the report. GitHub keeps it private and creates no public issue.
+
+- Do not open a public issue for a vulnerability.
+- Do not include a real encryption key, credential or archive in a report.

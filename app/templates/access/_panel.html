@@ -1,0 +1,180 @@
+{# control is a ControlView or none; resource is a ResourceKey (a stack's resource_id is its name); names is GranteeNames; digest posts back as expected_digest; values (keys visibility, access_level, owner_name, owner_user_id, owner_name_shown, keep_user_ids, keep_team_ids, add_users, add_teams) and fields redisplay a rejected submission. Import with context: the forms carry the CSRF token. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/disclosure.html" import disclosure with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/radio_field.html" import radio_field %}
+{% from "partials/select_field.html" import select_field %}
+
+{# A granted id whose account is gone keeps its box, so saving cannot drop a grant unseen. #}
+{% macro grantee_label(known, id, kind) -%}
+{{ known[id] if id in known else ("User " if kind == "user" else "Team ") ~ id ~ " (no longer exists)" }}
+{%- endmacro %}
+
+{% macro grant_list(ids, known, kind) %}
+{% if ids %}
+<ul class="chip-list">
+  {% for id in ids %}
+  <li>{{ grantee_label(known, id, kind) }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+None
+{% endif %}
+{% endmacro %}
+
+{% macro grant_checkboxes(name, legend, ids, kept, known, kind) %}
+{% set shown = ids|list %}
+{% for id in kept if id not in shown %}{% set _ = shown.append(id) %}{% endfor %}
+<fieldset class="choice-group">
+  <legend>{{ legend }}</legend>
+  {% if shown %}
+  <p class="field__help">Untick a name to remove its access when you save.</p>
+  <div class="choice-list">
+    {% for id in shown %}
+    {{ checkbox_field(name, grantee_label(known, id, kind), id, checked=id in kept) }}
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="field__help">{{ "No user" if kind == "user" else "No team" }} holds a grant yet.</p>
+  {% endif %}
+</fieldset>
+{% endmacro %}
+
+{% macro names_field(name, label, value, error, help) %}
+{% set field_id = "field-" ~ name %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ label }}</label>
+    <p class="field__help" id="{{ field_id }}-help">{{ help }} Up to 50 names. Each name is looked up when you save.</p>
+  </div>
+  <textarea class="field__input" id="{{ field_id }}" name="{{ name }}" rows="3" spellcheck="false" autocomplete="off" autocapitalize="off"
+            {%- if error %} aria-invalid="true"{% endif %}
+            aria-describedby="{{ field_id }}-help{% if error %} {{ field_id }}-error{% endif %}">{{ value }}</textarea>
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro access_panel(control, resource, names, digest, save_action, remove_action, values=none, fields=none) %}
+{% set f = fields if fields is not none else {} %}
+{% set field_errors = {} %}
+{% for key, message in f.items() if key != "resource" %}{% set _ = field_errors.update({key: message}) %}{% endfor %}
+{% if values is not none %}
+{% set v = values %}
+{% elif control is not none %}
+{% set v = {
+  "visibility": "public" if control.is_public else ("administrators_only" if control.is_administrators_only else "restricted"),
+  "access_level": control.access_level,
+  "owner_name": names.users.get(control.owner_user_id, "") if control.owner_user_id is not none else "",
+  "owner_user_id": control.owner_user_id|string if control.owner_user_id in names.users else "",
+  "owner_name_shown": names.users.get(control.owner_user_id, "") if control.owner_user_id is not none else "",
+  "keep_user_ids": control.user_ids,
+  "keep_team_ids": control.team_ids,
+  "add_users": "",
+  "add_teams": "",
+} %}
+{% else %}
+{% set v = {"visibility": "restricted", "access_level": "read", "owner_name": "", "owner_user_id": "", "owner_name_shown": "", "keep_user_ids": [], "keep_team_ids": [], "add_users": "", "add_teams": ""} %}
+{% endif %}
+<section class="panel access-panel" aria-labelledby="access-heading">
+  <h2 id="access-heading">Ownership and access</h2>
+
+  {% if f.get("resource") %}
+  {{ error_state("That change was refused", f.get("resource")) }}
+  {% endif %}
+  {% if field_errors %}
+  {{ error_summary(field_errors) }}
+  {% endif %}
+
+  <dl class="facts">
+    <dt>Object</dt>
+    <dd><span class="mono">{{ resource.resource_type }}</span> <span class="mono">{{ resource.resource_id }}</span></dd>
+    <dt>Control</dt>
+    <dd>
+      {% if control is none %}
+      {{ badge("Uncontrolled", "warn") }}
+      {% elif control.is_administrators_only %}
+      {{ badge("Administrators only", "warn") }}
+      {% elif control.is_public %}
+      {{ badge("Public", "ok") }}
+      {% else %}
+      {{ badge("Restricted", "info") }}
+      {% endif %}
+    </dd>
+    {% if control is none %}
+    <dt>Effect</dt>
+    <dd>No control covers this object, so the default for uncontrolled objects decides who can reach it.</dd>
+    {% else %}
+    <dt>Access level</dt>
+    <dd>{{ control.access_level|capitalize }}</dd>
+    <dt>Owner</dt>
+    <dd>{% if control.owner_user_id is none %}None{% else %}{{ grantee_label(names.users, control.owner_user_id, "user") }}{% endif %}</dd>
+    <dt>Users</dt>
+    <dd>{{ grant_list(control.user_ids, names.users, "user") }}</dd>
+    <dt>Teams</dt>
+    <dd>{{ grant_list(control.team_ids, names.teams, "team") }}</dd>
+    <dt>Changed</dt>
+    <dd><time datetime="{{ control.updated_at|timestamp_iso }}">{{ control.updated_at|timestamp }}</time></dd>
+    {% endif %}
+  </dl>
+
+  {% if control is not none and control.sub_resource_ids %}
+  <details class="access-panel__members">
+    <summary>Covers {{ control.sub_resource_ids|length }} {{ "object" if control.sub_resource_ids|length == 1 else "objects" }}</summary>
+    <p class="field__help">Recorded the last time this stack was refreshed. It is shown for reference and does not decide access.</p>
+    <ul class="mono">
+      {% for member in control.sub_resource_ids %}
+      <li>{{ member }}</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% call disclosure("access-change", "Change ownership and access", open=(field_errors or f.get("resource")), level="h3") %}
+  <form class="form form--wide" method="post" action="{{ save_action }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_digest" value="{{ digest }}">
+
+    <fieldset class="choice-group"{% if field_errors.get("is_public") %} data-invalid{% endif %}>
+      <legend>Who can reach this object</legend>
+      {% set visibility_error = "visibility-error" if field_errors.get("is_public") else none %}
+      {{ radio_field("visibility", "Specific users and teams", "restricted", checked=v.visibility == "restricted", help="The owner, and the users and teams named below. Administrators always can.", group_error=visibility_error) }}
+      {{ radio_field("visibility", "Everyone who can sign in", "public", checked=v.visibility == "public", help="Named users and teams are ignored while this is selected.", group_error=visibility_error) }}
+      {{ radio_field("visibility", "Administrators only", "administrators_only", checked=v.visibility == "administrators_only", help="Overrides every grant below, and the owner.", group_error=visibility_error) }}
+      {% if field_errors.get("is_public") %}
+      <p class="field__error" id="visibility-error">{{ field_errors.get("is_public") }}</p>
+      {% endif %}
+    </fieldset>
+
+    {{ select_field("access_level", "Access level", ["read", "write"], value=v.access_level, error=field_errors.get("access_level"), help="What everyone who reaches it this way may do: read only, or read and change.") }}
+
+    <input type="hidden" name="owner_user_id" value="{{ v.owner_user_id }}">
+    <input type="hidden" name="owner_name_shown" value="{{ v.owner_name_shown }}">
+    {{ name_field("owner_name", "Owner", route_path("suggestions", kind="users"), value=v.owner_name, error=field_errors.get("owner_name"), help="A username. Leave empty for no owner. The owner keeps access unless the object is administrators-only.") }}
+
+    {{ grant_checkboxes("keep_user_ids", "Users with access", control.user_ids if control is not none else [], v.keep_user_ids, names.users, "user") }}
+    {{ names_field("add_users", "Add users", v.add_users, field_errors.get("add_users"), "Usernames separated by commas or new lines.") }}
+
+    {{ grant_checkboxes("keep_team_ids", "Teams with access", control.team_ids if control is not none else [], v.keep_team_ids, names.teams, "team") }}
+    {{ names_field("add_teams", "Add teams", v.add_teams, field_errors.get("add_teams"), "Team names, one per line. A team name may contain commas.") }}
+
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">{{ "Create control" if control is none else "Save control" }}</button>
+    </div>
+  </form>
+  {% endcall %}
+
+  {% if control is not none %}
+  {% call disclosure("access-remove", "Remove the control", level="h3") %}
+    <p>The object goes back to the default for uncontrolled objects, and every grant on it is dropped.</p>
+    {{ confirm_button("access-remove-dialog", "Remove control") }}
+    {{ confirmation_dialog("access-remove-dialog", "Remove this control?", "Every grant is dropped and the default for uncontrolled objects applies to the object this control covers.", remove_action, "Remove control", targets=[{"name": resource.resource_id, "detail": resource.resource_type}], noun="control", hidden={"expected_digest": digest}) }}
+  {% endcall %}
+  {% endif %}
+</section>
+{% endmacro %}

@@ -1,0 +1,18 @@
+{% from "images/_parts.html" import credential_fieldset with context %}
+
+{% macro image_choices(offer, selected, image_error, pull_policy, catalogue, choice_error=none, carried="") %}
+<div id="image-choices" class="image-choices">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if image_error %}
+  <p class="field__error" role="alert">{{ image_error }}</p>
+  {% elif offer is none %}
+  {% if choice_error %}<p class="field__error" role="alert">{{ choice_error }}</p>{% endif %}
+  {% if carried %}<input type="hidden" name="credential_choice" value="{{ carried }}">{% endif %}
+  {% elif pull_policy == "never" %}
+  <p class="field__help">The image is not pulled, so no credential set is used.</p>
+  {% else %}
+  <p class="field__help">If the image is pulled, the set chosen here pulls it. Nothing is pulled when the image is already on this host and the pull policy is Pull if missing.</p>
+  {{ credential_fieldset(offer, selected, choice_error, catalogue) }}
+  {% endif %}
+</div>
+{% endmacro %}

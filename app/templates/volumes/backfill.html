@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Assign volume owners on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Assign volume owners" %}
+
+{% block content %}
+{% macro containers_text(volume) -%}
+{%- set parts = [] -%}
+{%- for container in volume.containers -%}
+{%- set _ = parts.append(container.name ~ (" (" ~ container.owner.username ~ ")" if container.owner else " (owner unknown)")) -%}
+{%- endfor -%}
+{{ parts|join(", ") }}
+{%- endmacro %}
+
+{% call page_header("Assign volume owners", environment.name) %}
+<a class="btn" href="{{ list_href }}">Back to volumes</a>
+{% endcall %}
+
+{% set assign = plan.of("assign") %}
+{% set ambiguous = plan.of("ambiguous") %}
+{% set no_candidate = plan.of("no_candidate") %}
+{% set unreadable = plan.of("unreadable") %}
+
+<p>A volume is assigned only when every container that mounts it points to the same user: the owner of the container's own access settings or, without any, the user who created it. After the assignment a volume is visible to its owner and to administrators only.</p>
+
+{% if plan.truncated %}
+<div class="panel panel--notice" role="note">
+  <p>Showing the first {{ plan.volumes|length }} of {{ plan.uncontrolled_total }} volumes without access settings, by name. Run the assignment again for the rest.</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="assign-heading">
+  <h2 id="assign-heading">{{ assign|length }} {{ "volume" if assign|length == 1 else "volumes" }} to assign</h2>
+  {% if assign %}
+  {% set items = [] %}
+  {% for volume in assign %}
+  {% set _ = items.append({"name": volume.name, "detail": "owner " ~ volume.owner.username ~ " (" ~ ("container ownership" if volume.source == "container_control" else "creation record") ~ " of " ~ containers_text(volume) ~ ")"}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "volume") }}
+  <p>Each volume is checked again as it is assigned, and skipped if it has changed or gained access settings.</p>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_plan" value="{{ plan.digest }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Assign {{ assign|length }} {{ "volume" if assign|length == 1 else "volumes" }}</button>
+      <a class="btn" href="{{ list_href }}">Cancel</a>
+    </div>
+  </form>
+  {% else %}
+  <p>No volume has exactly one candidate owner.</p>
+  {% endif %}
+</section>
+
+{% if ambiguous %}
+<section class="section" aria-labelledby="ambiguous-heading">
+  <h2 id="ambiguous-heading">{{ ambiguous|length }} {{ "volume" if ambiguous|length == 1 else "volumes" }} left alone: more than one candidate</h2>
+  {% set items = [] %}
+  {% for volume in ambiguous %}
+  {% set names = [] %}
+  {% for candidate in volume.candidates %}{% set _ = names.append(candidate.username) %}{% endfor %}
+  {% set _ = items.append({"name": volume.name, "detail": "candidates " ~ names|join(", ") ~ "; containers " ~ containers_text(volume)}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "volume") }}
+</section>
+{% endif %}
+
+{% if no_candidate %}
+<section class="section" aria-labelledby="no-candidate-heading">
+  <h2 id="no-candidate-heading">{{ no_candidate|length }} {{ "volume" if no_candidate|length == 1 else "volumes" }} left alone: no candidate</h2>
+  {% set items = [] %}
+  {% for volume in no_candidate %}
+  {% set _ = items.append({"name": volume.name, "detail": ("containers " ~ containers_text(volume)) if volume.containers else "no container mounts it"}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "volume") }}
+</section>
+{% endif %}
+
+{% if unreadable %}
+<section class="section" aria-labelledby="unreadable-heading">
+  <h2 id="unreadable-heading">{{ unreadable|length }} {{ "volume" if unreadable|length == 1 else "volumes" }} left alone: unreadable</h2>
+  <p>The host's volume list did not give enough to judge these: a name dockmin cannot hold access settings for, or labels cut short.</p>
+  {% set items = [] %}
+  {% for volume in unreadable %}
+  {% set _ = items.append({"name": volume.name}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "volume") }}
+</section>
+{% endif %}
+{% endblock %}

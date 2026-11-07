@@ -1,0 +1,28 @@
+{# Import with context. #}
+{% from "activity/_parts.html" import actor_cell, result_badge, when with context %}
+
+{% macro activity_panel(title, panel) %}
+{% set events = panel.events|default([]) %}
+{% set all_href = panel.all_href|default("") %}
+<section class="panel section activity-panel" aria-labelledby="activity-heading">
+  <h2 id="activity-heading">{{ title }}</h2>
+  {% if events %}
+  <ul class="activity-list">
+    {% for view in events %}
+    {% set event = view.event %}
+    <li class="activity-list__item">
+      <a href="{{ route_path('activity_event_detail', event_id=event.id) }}">{{ when(event) }}</a>
+      <span class="mono cell-wrap">{{ event.action|visible_text }}</span>
+      <div class="activity-list__actor">{{ actor_cell(view) }}</div>
+      {{ result_badge(event.result) }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="field__help">Nothing has been recorded for this yet.</p>
+  {% endif %}
+  {% if all_href %}
+  <p><a class="btn btn--compact" href="{{ all_href }}">All activity</a></p>
+  {% endif %}
+</section>
+{% endmacro %}

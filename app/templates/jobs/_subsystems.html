@@ -1,0 +1,39 @@
+{% from "partials/badge.html" import badge %}
+
+{% macro subsystems_table(subsystems) %}
+<div class="data-table__scroll" role="region" aria-label="Subsystems" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Subsystems and whether their jobs may run</caption>
+    <thead>
+      <tr>
+        <th scope="col">Subsystem</th>
+        <th scope="col">Status</th>
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for name, enabled, available in subsystems %}
+      <tr>
+        <th scope="row" class="mono">{{ name }}</th>
+        <td>
+          <div class="cell-stack">
+            {% if enabled %}{{ badge("On", "ok") }}{% else %}{{ badge("Off", "neutral") }}{% endif %}
+            {% if not available %}<span class="cell-note">Not available in this build</span>{% endif %}
+          </div>
+        </td>
+        <td>
+          <div class="row-actions">
+            <a class="btn btn--compact" href="{{ route_path('jobs') }}?subsystem={{ name|urlencode }}">View jobs</a>
+            {% if enabled %}
+            <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('job_subsystem_disable_confirm', subsystem=name) }}">Switch off</a>
+            {% else %}
+            <a class="btn btn--compact" href="{{ route_path('job_subsystem_enable_confirm', subsystem=name) }}">Switch on</a>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}

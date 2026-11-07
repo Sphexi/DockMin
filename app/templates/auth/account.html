@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import password_rule, unplaced_errors %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Your account - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Your account", "Change your username or password.") %}
+<a class="btn" href="{{ route_path('tokens') }}">API tokens</a>
+{% endcall %}
+
+{{ unplaced_errors(fields, ["username", "current_password", "new_password", "new_password_confirm"]) }}
+
+<section class="section" aria-labelledby="account-profile-heading">
+  <h2 id="account-profile-heading">Profile</h2>
+  <form class="form" method="post" action="{{ route_path('account') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("username", "Username", value=username, error=fields.get("username"), required=true, autocomplete="username") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Save profile</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="account-password-heading">
+  <h2 id="account-password-heading">Password</h2>
+  <p>Changing your password signs you out everywhere else and revokes all of your API tokens and webhook URLs.</p>
+  <form class="form" method="post" action="{{ route_path('account_password') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("current_password", "Current password", type="password", error=fields.get("current_password"), required=true, autocomplete="current-password") }}
+    {{ form_field("new_password", "New password", type="password", error=fields.get("new_password"), help=password_rule(password_policy), required=true, autocomplete="new-password") }}
+    {{ form_field("new_password_confirm", "Confirm new password", type="password", error=fields.get("new_password_confirm"), required=true, autocomplete="new-password") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Change password</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

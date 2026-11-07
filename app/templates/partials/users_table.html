@@ -1,0 +1,24 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+
+{% macro users_table(rows, columns, pager, current_user_id) %}
+{% call data_table("users-table", "Users", columns, pager, empty_title="No users", empty_body="No account exists yet. Create one to let someone sign in.", empty_action_label="New user", empty_action_href=route_path("user_new")) %}
+{% for row in rows %}
+<tr>
+  <th scope="row">
+    <a href="{{ route_path('user_detail', user_id=row.id) }}">{{ row.username }}</a>
+    {% if row.id == current_user_id %}{{ badge("You", "info") }}{% endif %}
+  </th>
+  <td>{{ row.role|capitalize }}</td>
+  <td>{% if row.is_enabled %}{{ badge("Enabled", "ok") }}{% else %}{{ badge("Disabled") }}{% endif %}</td>
+  <td>
+    {% if row.last_login_at %}
+    <time datetime="{{ row.last_login_at|timestamp_iso }}">{{ row.last_login_at|timestamp }}</time>
+    {% else %}
+    Never
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

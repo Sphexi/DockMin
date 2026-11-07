@@ -1,0 +1,11 @@
+{% macro empty_state(title, body=none, action_label=none, action_href=none) %}
+<div class="state state--empty">
+  <h2 class="state__title">{{ title }}</h2>
+  {% if body %}
+  <p class="state__body">{{ body }}</p>
+  {% endif %}
+  {% if action_label and action_href %}
+  <p><a class="btn btn--primary" href="{{ action_href }}">{{ action_label }}</a></p>
+  {% endif %}
+</div>
+{% endmacro %}

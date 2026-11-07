@@ -1,0 +1,16 @@
+{# href and link_label are optional and used together; resume_action adds a POST form and needs csrf_token; live gives role="alert" for a banner inserted after the page loaded. #}
+{% macro restore_banner(message, tone="warn", href=none, link_label=none, resume_action=none, csrf_token=none, live=false) %}
+{% set tone = choice(tone, ["neutral", "ok", "warn", "danger", "info"]) %}
+<div class="panel {{ 'panel--alert' if tone == 'danger' else 'panel--notice' }} restore-banner" data-tone="{{ tone }}"{% if live %} role="alert"{% else %} role="region" aria-label="Instance status"{% endif %}>
+  <p>{{ message }}</p>
+  {% if href and link_label %}
+  <a class="btn" href="{{ href }}">{{ link_label }}</a>
+  {% endif %}
+  {% if resume_action and csrf_token %}
+  <form class="inline-form" method="post" action="{{ resume_action }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn">Resume automation</button>
+  </form>
+  {% endif %}
+</div>
+{% endmacro %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/pem_field.html" import pem_field %}
+{% from "registries/_parts.html" import ca_certificates with context %}
+{% block title %}{{ ("Edit " ~ target.name) if editing else "Add object storage target" }} - dockmin{% endblock %}
+{% set crumb_object = target.name if editing else none %}
+{% set crumb_object_href = route_path('object_storage_target_detail', target_id=target.id) if editing else none %}
+{% set crumb_page = "Edit" if editing else "Add object storage target" %}
+{% block content %}
+{% call page_header("Edit target" if editing else "Add object storage target", target.name if editing else "An S3-compatible bucket for backup archives and the exported activity log.") %}
+<a class="btn" href="{{ route_path('object_storage_target_detail', target_id=target.id) if editing else route_path('object_storage_targets') }}">Cancel</a>
+{% endcall %}
+
+{{ unplaced_errors(errors, ["name", "endpoint_url", "region", "bucket", "access_key_id", "secret_access_key", "use_path_style", "verify_tls", "ca_bundle", "backup_prefix", "activity_log_prefix", "retention_count", "confirm_retention"]) }}
+
+{% for warning in warnings %}
+<div class="panel panel--notice" role="note">
+  <p>{{ warning }}</p>
+</div>
+{% endfor %}
+
+<form id="target-form" class="form form--wide target-form" method="post" enctype="multipart/form-data" data-submit-once
+      action="{{ route_path('object_storage_target_update', target_id=target.id) if editing else route_path('object_storage_target_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if editing %}
+  <input type="hidden" name="expected_updated_at" value="{{ target.updated_at }}">
+  {% endif %}
+
+  {{ form_field("name", "Name", value=state.name, error=errors.get("name"), help="1 to 64 characters. Names are unique, ignoring case.", required=true) }}
+
+  <fieldset class="choice-group"{% if errors.get("endpoint_url") or errors.get("region") or errors.get("bucket") or errors.get("use_path_style") %} data-invalid{% endif %}>
+    <legend>Endpoint and bucket</legend>
+    {{ form_field("endpoint_url", "Endpoint address", value=state.endpoint_url, type="url", error=errors.get("endpoint_url"), help="An http or https address with a host name and optional port, such as https://s3.example.com. An http address sends the credential and the archives over the network unencrypted.", required=true) }}
+    {{ form_field("region", "Region", value=state.region, error=errors.get("region"), help="Used to sign requests. Most S3-compatible servers accept the default.", required=true) }}
+    {{ form_field("bucket", "Bucket", value=state.bucket, error=errors.get("bucket"), help="The name of an existing bucket.", required=true) }}
+    {{ checkbox_field("use_path_style", "Use path-style addressing", checked=state.use_path_style, help="The bucket name goes in the request path. Turn it off only for a server that needs the bucket name in the host name, which cannot be used with an IP address.", error=errors.get("use_path_style")) }}
+  </fieldset>
+
+  <fieldset class="choice-group"{% if errors.get("access_key_id") or errors.get("secret_access_key") %} data-invalid{% endif %}>
+    <legend>Credential</legend>
+    {{ form_field("access_key_id", "Access key ID", value=state.access_key_id, error=errors.get("access_key_id"), help="1 to 128 letters, digits and . _ @ + = -.", required=true) }}
+    {% if editing %}
+    {% set secret_help = ("Secrets and certificates are never sent back to the browser. " if errors else "") ~ "A secret is stored; leave blank to keep it. Changing the endpoint, bucket, addressing style, certificate verification or CA certificates requires entering it again. " ~ advice %}
+    {% else %}
+    {% set secret_help = ("Secrets and certificates are never sent back to the browser. Enter them again. " if errors else "") ~ advice %}
+    {% endif %}
+    {{ form_field("secret_access_key", "Secret access key", type="password", error=errors.get("secret_access_key"), help=secret_help, autocomplete="new-password", required=not editing) }}
+  </fieldset>
+
+  <fieldset class="choice-group"{% if errors.get("verify_tls") or errors.get("ca_bundle") %} data-invalid{% endif %}>
+    <legend>Server certificate</legend>
+    {{ checkbox_field("verify_tls", "Verify the server's TLS certificate", checked=state.verify_tls, help="Turn this off only for a server on a network you control.", error=errors.get("verify_tls")) }}
+    <div class="panel panel--alert tls-warning" role="note">
+      <p><strong>Certificate verification is off.</strong> The server's certificate is not checked, so anything between this server and the bucket can impersonate it and read the credential and the archives.</p>
+    </div>
+    {% if editing and target.ca_certificates %}
+    <h2>Stored CA certificates</h2>
+    {{ ca_certificates(target.ca_certificates) }}
+    {{ checkbox_field("remove_ca_bundle", "Remove the stored CA certificates", checked=state.remove_ca_bundle, help="The certificates are not shown again. Paste or upload new ones to replace them, or leave empty to keep them.") }}
+    {% endif %}
+    {{ pem_field("ca_bundle", "Additional CA certificates", "PEM certificates, up to 64 KiB, trusted for this server in addition to the system store. A self-signed server certificate can be supplied here. Changing them requires entering the secret again.", error=errors.get("ca_bundle")) }}
+  </fieldset>
+
+  <fieldset class="choice-group"{% if errors.get("activity_log_prefix") %} data-invalid{% endif %}>
+    <legend>Activity logs</legend>
+    {{ form_field("activity_log_prefix", "Activity log folder", value=state.activity_log_prefix, error=errors.get("activity_log_prefix"), help="The folder that holds exported activity log files. Exported container logs go under container-logs/ in this folder. It must differ from the backup folder, and neither may be inside the other.") }}
+  </fieldset>
+
+  <fieldset class="choice-group"{% if errors.get("backup_prefix") or errors.get("retention_count") or errors.get("confirm_retention") %} data-invalid{% endif %}>
+    <legend>Backups</legend>
+    {{ form_field("backup_prefix", "Backup folder", value=state.backup_prefix, error=errors.get("backup_prefix"), help="The folder in the bucket that holds backup archives. Letters, digits and . _ - with / between folders. Empty uses the top of the bucket.") }}
+    {{ form_field("retention_count", "Archives to keep", value=state.retention_count, type="number", error=errors.get("retention_count"), help="After each upload, a backup rule deletes its own older archives from the bucket and keeps this many, from 1 to 1000. Leave empty to keep every archive.") }}
+    {{ checkbox_field("confirm_retention", "Delete older backup archives in this bucket", checked=state.confirm_retention, help="Required when you set a number or lower it. A rule deletes only objects named " ~ retention_files ~ " inside its own folder " ~ retention_folder ~ ". Nothing else in the bucket is touched.", error=errors.get("confirm_retention")) }}
+  </fieldset>
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">{{ "Save changes" if editing else "Add target" }}</button>
+    <a class="btn" href="{{ route_path('object_storage_target_detail', target_id=target.id) if editing else route_path('object_storage_targets') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

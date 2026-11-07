@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}New group - dockmin{% endblock %}
+{% set crumb_page = "New group" %}
+{% block content %}
+{% call page_header("New group", "Name the group, then add environments to it.") %}
+<a class="btn" href="{{ route_path('groups') }}">Back to groups</a>
+{% endcall %}
+
+{{ unplaced_errors(fields, ["name", "description"]) }}
+
+<form class="form" method="post" action="{{ route_path('group_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ form_field("name", "Group name", value=name, error=fields.get("name"), help="1 to 64 characters. Names are unique, ignoring case.", required=true, autocomplete="off") }}
+  {{ form_field("description", "Description", value=description, error=fields.get("description"), help="Optional. Up to 256 characters.", autocomplete="off") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Create group</button>
+  </div>
+</form>
+{% endblock %}

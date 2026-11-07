@@ -1,0 +1,62 @@
+{# Import with context: rows link to routes. #}
+{% from "environments/_parts.html" import status_cell, tag_chips with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/data_table.html" import data_table %}
+
+{% macro groups_table(rows, columns, pager) %}
+{% call data_table("groups-table", "Groups", columns, pager, empty_title="No groups", empty_body="Create a group to organise environments and grant access to several at once.", empty_action_label="New group", empty_action_href=route_path('group_new')) %}
+{% for row in rows %}
+<tr>
+  <th scope="row"><a href="{{ route_path('group_detail', group_id=row.id) }}">{{ row.name }}</a></th>
+  <td>{{ row.description or "" }}</td>
+  <td class="is-numeric">{{ row.environment_count }}</td>
+  <td><time datetime="{{ row.created_at|timestamp_iso }}">{{ row.created_at|timestamp }}</time></td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{% macro group_members_table(rows, columns, pager) %}
+{% call data_table("group-members-table", "Environments in the group", columns, pager, empty_title="No environments", empty_body="Add environments from the search below.", empty_action_label="Find environments to add", empty_action_href="#group-assign-heading") %}
+{% for row in rows %}
+<tr>
+  <th scope="row"><a href="{{ route_path('environment_detail', environment_id=row.id) }}">{{ row.name }}</a></th>
+  <td>{{ status_cell(row) }}</td>
+  <td>{{ tag_chips(row.tags) }}</td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{% macro group_candidates(group, candidates, search, search_error, limit) %}
+<div id="group-candidates">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if search_error %}
+  <p class="field__error" role="alert">{{ search_error }}</p>
+  {% endif %}
+  {% if candidates %}
+  <form class="form form--wide" method="post" action="{{ route_path('group_environments', group_id=group.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <fieldset class="choice-group">
+      <legend>Environments to move into this group</legend>
+      <p class="field__help">An environment belongs to one group, so choosing one that is in another group moves it. Each move is recorded on its own.</p>
+      <div class="choice-list">
+        {% for candidate in candidates %}
+        {{ checkbox_field("environment", candidate.name ~ (" (now in " ~ candidate.group.name ~ ")" if candidate.group else ""), candidate.id) }}
+        {% endfor %}
+      </div>
+      {% if candidates|length >= limit %}
+      <p class="field__help">Showing the first {{ limit }} matches. Search by name to narrow the list.</p>
+      {% endif %}
+    </fieldset>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Add to group</button>
+    </div>
+  </form>
+  {% elif search %}
+  <p>No environment outside this group matches that name.</p>
+  {% elif not search_error %}
+  <p>Every environment is already in this group.</p>
+  {% endif %}
+</div>
+{% endmacro %}

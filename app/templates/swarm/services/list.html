@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "swarm/services/_tables.html" import results_summary, services_results with context %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/list_bar.html" import list_bar %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Services on {{ environment.name }} - dockmin{% endblock %}
+{% block content %}
+{% set list_href = route_path("environment_swarm_service_list", environment_id=environment.id) %}
+{% call page_header("Services", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ route_path('environment_detail', environment_id=environment.id) }}">Back to environment</a>
+{% endcall %}
+
+
+<form id="service-filters" class="filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter services"
+      hx-get="{{ list_href }}" hx-target="#services-results" hx-swap="innerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#service-filters select, #service-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-mode">Mode</label>
+    </div>
+    <select class="field__input" id="field-mode" name="mode">
+      <option value="">Any mode</option>
+      {% for value in mode_options %}
+      <option value="{{ value }}"{% if mode == value %} selected{% endif %}>{{ value|capitalize }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {{ name_field("stack", "Stack", route_path("environment_suggestions", environment_id=environment.id, kind="stacks") ~ "?stack_kind=swarm", value=stack, type="search") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply filters</button>
+    <a class="btn" href="{{ list_href }}">Reset</a>
+  </div>
+</form>
+
+{% call list_bar(results_summary(none if (errors or failure) else total, visible, filtered)) %}
+{% if can_create %}
+<a class="btn btn--primary" href="{{ route_path('environment_swarm_service_new', environment_id=environment.id) }}">Create service</a>
+{% endif %}
+{% endcall %}
+<div id="services-results">
+  {{ services_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, environment_id=environment.id, can_create=can_create) }}
+</div>
+{% endblock %}

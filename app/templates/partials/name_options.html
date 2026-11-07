@@ -1,0 +1,10 @@
+{# options: one name, or names and objects with `value` and an optional `label`. #}
+{% macro name_options(options) -%}
+{% for option in ([options] if options is string else options) -%}
+{% if option is string -%}
+<option value="{{ option }}"></option>
+{% else -%}
+<option value="{{ option.value }}"{% if option.label %} label="{{ option.label }}"{% endif %}></option>
+{% endif -%}
+{% endfor -%}
+{%- endmacro %}

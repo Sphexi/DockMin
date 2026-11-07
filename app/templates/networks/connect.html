@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "networks/_attach.html" import connect_page_form with context %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Attach {{ offer.container_name }} to a network - dockmin{% endblock %}
+{% set crumb_object = offer.container_name %}
+{% set crumb_object_href = route_path('environment_container_detail', environment_id=offer.environment_id, container_id=offer.container_id) %}
+{% set crumb_page = "Attach to a network" %}
+{% block content %}
+{% call page_header("Attach to a network", offer.container_name ~ " on " ~ offer.environment_name) %}
+<a class="btn" href="{{ route_path('environment_container_detail', environment_id=offer.environment_id, container_id=offer.container_id) }}?tab=networks">Back to the container</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="connect-heading">
+  <h2 id="connect-heading">Attach <span class="mono">{{ offer.container_name }}</span></h2>
+  <p>{{ container_state_badge(offer.state) }} <span class="mono">{{ offer.short_id }}</span></p>
+  <p class="field__help">Works on a stopped container too: Docker records the attachment and applies it when the container starts.</p>
+  {{ connect_page_form(offer, values, errors) }}
+</section>
+{% endblock %}

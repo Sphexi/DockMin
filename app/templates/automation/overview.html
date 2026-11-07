@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "automation/_table.html" import rules_table with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Automation - dockmin{% endblock %}
+{% block content %}
+{% set list_href = route_path("automation") %}
+{% call page_header("Automation", "Automations that run on a schedule. Every automation starts disabled." if principal.is_administrator else "Your automations. Every automation starts disabled.") %}
+{% endcall %}
+
+{% for text in errors.values() %}
+{{ error_state("Check the filter", text) }}
+{% endfor %}
+
+<form class="filters" id="rule-filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter automations"
+      hx-get="{{ list_href }}" hx-target="#rules-table" hx-swap="outerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#rule-filters select, #rule-filters input[type=checkbox])" hx-sync="this:replace">
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-subsystem">Type</label>
+    </div>
+    <select class="field__input" id="field-subsystem" name="subsystem">
+      <option value="">All types</option>
+      {% for name in subsystems %}
+      <option value="{{ name }}"{% if subsystem == name %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-environment">Environment</label>
+    </div>
+    <select class="field__input" id="field-environment" name="environment_id">
+      <option value="">All environments</option>
+      {% for option in environments %}
+      <option value="{{ option.id }}"{% if environment_id == option.id|string %} selected{% endif %}>{{ option.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply filter</button>
+    <a class="btn" href="{{ list_href }}">Reset</a>
+  </div>
+</form>
+
+{% call list_bar(list_count(total|default(none), "automation", filtered=filtered)) %}
+<a class="btn btn--primary" href="{{ route_path('automation_rule_new') }}">New automation</a>
+{% endcall %}
+{{ rules_table(rows, columns, pager, filtered) }}
+{% endblock %}

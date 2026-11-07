@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Server certificate - dockmin{% endblock %}
+{% block content %}
+{{ page_header("Server certificate", "The certificate dockmin serves HTTPS with.") }}
+
+{% if not tls_enabled %}
+<section class="section" aria-labelledby="plain-heading">
+  <h2 id="plain-heading">TLS is not configured</h2>
+  <p>dockmin serves plain HTTP. TLS is terminated in front of it.</p>
+  <dl class="facts">
+    <dt>HTTP port</dt>
+    <dd class="mono">{{ port }}</dd>
+    <dt>Trusted proxies</dt>
+    <dd>{% if trusted_proxies %}{% for proxy in trusted_proxies %}<span class="mono">{{ proxy }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}None{% endif %}</dd>
+    <dt>Trusted origins</dt>
+    <dd>{% if trusted_origins %}{% for origin in trusted_origins %}<span class="mono">{{ origin }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}None{% endif %}</dd>
+  </dl>
+</section>
+{% else %}
+{% set certificate = view.served %}
+{% set state = view.state %}
+{% set days_left = view.days_left %}
+
+{% if view.replaced %}
+<div class="panel panel--notice" role="note">
+  <p><strong>Restart dockmin to serve the replaced certificate.</strong></p>
+  <p>The certificate file on disk is not the certificate loaded at start.</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="source-heading">
+  <h2 id="source-heading">Source</h2>
+  <dl class="facts">
+    <dt>Source</dt>
+    <dd>{% if tls_source == "self_signed" %}Generated self-signed certificate{% else %}Supplied file{% endif %}</dd>
+    {% if certificate_file %}
+    <dt>File</dt>
+    <dd class="mono">{{ certificate_file }}</dd>
+    {% endif %}
+  </dl>
+  {% if tls_source == "self_signed" %}
+  <div class="panel panel--notice" role="note">
+    <p><strong>Browsers warn about this certificate until it is trusted or replaced.</strong></p>
+    <p>Compare the fingerprint below with the <span class="mono">sha256_fingerprint</span> field of the <span class="mono">tls_certificate_self_signed</span> log line before trusting it. To remove the warning, supply a certificate with <span class="mono">DOCKMIN_TLS_CERT_FILE</span> and <span class="mono">DOCKMIN_TLS_KEY_FILE</span>.</p>
+    <p>dockmin generates a new certificate at start when this one is expiring or expired. Restart dockmin before the expiry date below.</p>
+  </div>
+  {% endif %}
+</section>
+
+{% if certificate is none %}
+<div class="panel panel--alert" role="note">
+  <p><strong>This process does not serve HTTPS.</strong></p>
+  <p>No certificate was loaded by this process.</p>
+</div>
+{% else %}
+{% if state == "expiring" %}
+<div class="panel panel--notice" role="note">
+  <p><strong>The certificate expires in {% if days_left < 1 %}less than a day{% else %}{{ days_left }} day{% if days_left != 1 %}s{% endif %}{% endif %}.</strong></p>
+  <p>{% if tls_source == "self_signed" %}Restart dockmin to generate a new certificate.{% else %}Replace the certificate file, then restart dockmin.{% endif %}</p>
+</div>
+{% elif state == "expired" %}
+<div class="panel panel--alert" role="note">
+  <p><strong>The certificate expired on <time datetime="{{ certificate.not_after|timestamp_iso }}">{{ certificate.not_after|timestamp }}</time>.</strong></p>
+  <p>{% if tls_source == "self_signed" %}Restart dockmin to generate a new certificate.{% else %}Replace the certificate file, then restart dockmin.{% endif %}</p>
+</div>
+{% elif state == "not_yet_valid" %}
+<div class="panel panel--alert" role="note">
+  <p><strong>The certificate is not valid until <time datetime="{{ certificate.not_before|timestamp_iso }}">{{ certificate.not_before|timestamp }}</time>.</strong></p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="certificate-heading">
+  <h2 id="certificate-heading">Certificate loaded at start</h2>
+  <dl class="facts">
+    <dt>Status</dt>
+    <dd>{{ badge(state_label, state_tone) }}</dd>
+    <dt>Subject</dt>
+    <dd class="mono">{{ certificate.subject|visible_text }}</dd>
+    <dt>Issuer</dt>
+    <dd class="mono">{{ certificate.issuer|visible_text }}</dd>
+    <dt>Self-signed</dt>
+    <dd>{% if certificate.self_signed %}Yes{% else %}No{% endif %}</dd>
+    <dt>Subject alternative names</dt>
+    <dd>
+      {% if certificate.subject_alt_names %}
+      <ul class="certificate-names mono">
+        {% for name in certificate.subject_alt_names %}
+        <li>{{ name|visible_text }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}None{% endif %}
+    </dd>
+    <dt>Valid from</dt>
+    <dd><time datetime="{{ certificate.not_before|timestamp_iso }}">{{ certificate.not_before|timestamp }}</time></dd>
+    <dt>Valid until</dt>
+    <dd><time datetime="{{ certificate.not_after|timestamp_iso }}">{{ certificate.not_after|timestamp }}</time></dd>
+    <dt>SHA-256 fingerprint</dt>
+    <dd class="mono">{{ certificate.sha256_fingerprint }}</dd>
+    <dt>Serial number</dt>
+    <dd class="mono">{{ certificate.serial_hex }}</dd>
+    <dt>Public key</dt>
+    <dd>{{ certificate.key_type }}{% if certificate.key_bits %}, {{ certificate.key_bits }} bits{% endif %}</dd>
+    <dt>Certificates in the file</dt>
+    <dd>{{ certificate.chain_length }}</dd>
+  </dl>
+</section>
+{% endif %}
+
+{% if view.on_disk is not none %}
+<section class="section" aria-labelledby="disk-heading">
+  <h2 id="disk-heading">Certificate file on disk now</h2>
+  <dl class="facts">
+    <dt>Subject</dt>
+    <dd class="mono">{{ view.on_disk.subject|visible_text }}</dd>
+    <dt>Valid until</dt>
+    <dd><time datetime="{{ view.on_disk.not_after|timestamp_iso }}">{{ view.on_disk.not_after|timestamp }}</time></dd>
+    <dt>SHA-256 fingerprint</dt>
+    <dd class="mono">{{ view.on_disk.sha256_fingerprint }}</dd>
+  </dl>
+</section>
+{% elif view.disk_problem %}
+<div class="panel panel--notice" role="note">
+  <p>{{ view.disk_problem }}</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="listeners-heading">
+  <h2 id="listeners-heading">Listeners</h2>
+  <dl class="facts">
+    <dt>HTTPS port</dt>
+    <dd class="mono">{{ https_port }}{% if https_public_port %} (published as {{ https_public_port }}){% endif %}</dd>
+    <dt>HTTP port</dt>
+    <dd><span class="mono">{{ port }}</span>: {{ http_mode }}</dd>
+  </dl>
+</section>
+{% endif %}
+{% endblock %}

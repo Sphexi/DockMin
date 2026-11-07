@@ -1,0 +1,95 @@
+{# Import with context: rows link to routes and the Delete selected checkboxes belong to a form the dashboard page declares. #}
+{% from "environments/_parts.html" import age, environment_badge, status_cell, tag_chips with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/list_bar.html" import list_count %}
+
+{% macro count_cell(total, running) %}
+<td class="is-numeric">
+  {%- if total is not none -%}
+  {{ total }}
+  {%- if running is not none %} <span class="cell-note">{{ running }} running</span>{% endif %}
+  {%- else -%}
+  &mdash;
+  {%- endif -%}
+</td>
+{% endmacro %}
+
+{% macro environments_table(rows, columns, pager, is_admin, filtered) %}
+{% set empty_body = "Add an environment to start managing a Docker host." if is_admin else "No environment has been shared with you yet. Ask an administrator for access to an environment." %}
+{% call data_table("environments-table", "Environments", columns, pager, empty_title="No environments", empty_body=empty_body, empty_action_label=("Add environment" if is_admin else none), empty_action_href=(route_path('environment_new') if is_admin else none), filtered=filtered, clear_href=route_path('index')) %}
+{% for row in rows %}
+{% set snapshot = row.snapshot %}
+{% set counts = snapshot.counts if snapshot is not none else none %}
+<tr>
+  {% if is_admin %}
+  <td>
+    <input class="choice__input" type="checkbox" form="batch-delete" name="id" value="{{ row.id }}" aria-label="Select {{ row.name }}">
+  </td>
+  {% endif %}
+  <th scope="row">
+    <div class="cell-stack cell-stack--inline">
+      <a href="{{ route_path('environment_detail', environment_id=row.id) }}">{{ row.name }}</a>
+      {% set badge_html = environment_badge(row) %}
+      {% if badge_html|trim %}
+      <span>{{ badge_html }}</span>
+      {% endif %}
+      {% if row.type or row.engine_version or row.compose_cli_version %}
+      <span class="cell-note">
+        {{- "Docker Swarm" if row.type == "swarm" else ("Docker Standalone" if row.type == "standalone" else "") -}}
+        {%- if row.type and row.engine_version %} &middot; {% endif -%}
+        {%- if row.engine_version %}Engine {{ row.engine_version }}{% endif -%}
+        {%- if (row.type or row.engine_version) and row.compose_cli_version %} &middot; {% endif -%}
+        {%- if row.compose_cli_version %}Compose {{ row.compose_cli_version }}{% endif -%}
+      </span>
+      {% endif %}
+      {% if snapshot is not none %}
+      {% if snapshot.captured_at is none %}
+      <span class="cell-note">Counts not yet refreshed</span>
+      {% elif snapshot.error %}
+      <span class="cell-note">Counts unavailable: the last refresh failed</span>
+      {% else %}
+      {% if snapshot.stale %}
+      <span>{{ badge("Stale", "warn") }}</span>
+      {% endif %}
+      <span class="cell-note">Counts updated {{ age(snapshot.captured_at, "") }}</span>
+      {% endif %}
+      {% endif %}
+    </div>
+  </th>
+  <td>{{ status_cell(row) }}</td>
+  <td>
+    {% if row.group %}
+    {% if is_admin %}<a href="{{ route_path('group_detail', group_id=row.group.id) }}">{{ row.group.name }}</a>{% else %}{{ row.group.name }}{% endif %}
+    {% else %}
+    <span class="cell-note">Ungrouped</span>
+    {% endif %}
+  </td>
+  <td>{{ tag_chips(row.tags) }}</td>
+  {% if is_admin %}
+  {{ count_cell(counts.container_count if counts is not none else none, counts.container_running_count if counts is not none else none) }}
+  {{ count_cell(counts.image_count if counts is not none else none, none) }}
+  {{ count_cell(counts.volume_count if counts is not none else none, none) }}
+  {{ count_cell(counts.network_count if counts is not none else none, none) }}
+  {{ count_cell(counts.stack_count if counts is not none else none, none) }}
+  {% endif %}
+  <td>{{ age(row.last_contacted_at, "Never") }}</td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{# Filter errors replace the table, so a bad filter never leaves the previous results looking like the answer. #}
+{% macro environments_results(rows, columns, pager, is_admin, filtered, errors, total=none, oob=false) %}
+{% if oob %}
+{{ list_count(none if errors else total, "environment", filtered=filtered, oob=true) }}
+{% endif %}
+{% if errors %}
+{% for message in errors %}
+{{ error_state("Check the filters", message) }}
+{% endfor %}
+{% else %}
+{{ environments_table(rows, columns, pager, is_admin, filtered) }}
+{% endif %}
+{% endmacro %}

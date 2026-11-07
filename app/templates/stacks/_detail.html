@@ -1,0 +1,209 @@
+{% from "access/_panel.html" import access_panel with context %}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/activity_panel.html" import activity_panel with context %}
+{% from "partials/automation_panel.html" import automation_panel with context %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/stack_logs.html" import stack_logs %}
+{% from "partials/stack_variable_row.html" import stack_variable_row with context %}
+{% from "stacks/_contexts.html" import contexts_section with context %}
+{% from "stacks/_files.html" import files_tab with context %}
+{% from "stacks/_parts.html" import changed_chip, container_link, last_operation, lifecycle_form, origin_text, status_badge with context %}
+
+{% macro stack_summary(detail) %}
+{% set row = detail.row %}
+{% set environment_id = row.environment_id %}
+<section id="stack-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span>{{ status_badge(row) }} {{ changed_chip(row) }}</span>
+      <span class="cell-note">{{ origin_text(row.origin) }} on {{ detail.environment_name }}</span>
+    </div>
+    <div class="row-actions">
+      {% if detail.can_write %}
+      <a class="btn btn--compact" href="{{ route_path('environment_stack_edit', environment_id=environment_id, stack_name=row.name) }}">Edit</a>
+      <a class="btn btn--compact btn--primary" href="{{ route_path('environment_stack_redeploy', environment_id=environment_id, stack_name=row.name) }}">Redeploy</a>
+      {% if row.status != "unknown" and row.status != "active" %}
+      {{ lifecycle_form(route_path('environment_stack_start', environment_id=environment_id, stack_name=row.name), "Start") }}
+      {% endif %}
+      {% if row.status != "unknown" and row.status != "inactive" %}
+      {{ lifecycle_form(route_path('environment_stack_stop', environment_id=environment_id, stack_name=row.name), "Stop") }}
+      {% endif %}
+      {% if row.status in ("active", "partial") and not own_stack %}
+      <a class="btn btn--compact" href="{{ route_path('environment_stack_restart', environment_id=environment_id, stack_name=row.name) }}">Restart</a>
+      {% endif %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_stack_remove', environment_id=environment_id, stack_name=row.name) }}">Remove</a>
+      {% endif %}
+      {% if detail.can_manage %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_stack_forget', environment_id=environment_id, stack_name=row.name) }}">Forget</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro digest(value) -%}
+{% if value %}<span class="mono" title="{{ value }}">{{ value[:12] }}</span>{% else %}<span class="cell-note">None</span>{% endif %}
+{%- endmacro %}
+
+{% macro overview_tab(detail) %}
+{% set row = detail.row %}
+{% set here = "stack:" ~ row.environment_id ~ ":" ~ row.name %}
+<h2 id="tab-heading">Overview</h2>
+{% if row.changed_since_deploy %}
+<div class="panel panel--notice" role="note">
+  <p>The file, the variables or the files changed after the last deploy. Redeploy the stack to apply them.</p>
+</div>
+{% endif %}
+<dl class="facts">
+  <dt>Status</dt>
+  <dd>{{ status_badge(row) }}</dd>
+  <dt>Last operation</dt>
+  <dd>{{ last_operation(row) }}</dd>
+  <dt>Last deployed</dt>
+  <dd>{{ when(row.last_deployed_at, "Never") }}</dd>
+  <dt>Origin</dt>
+  <dd>{{ origin_text(row.origin) }}</dd>
+  <dt>File digest</dt>
+  <dd>{{ digest(detail.compose_file_digest) }}</dd>
+  <dt>Deployed file digest</dt>
+  <dd>{{ digest(detail.deployed_file_digest) }}</dd>
+  <dt>Resolved configuration digest</dt>
+  <dd>{{ digest(detail.resolved_digest) }}</dd>
+</dl>
+
+<h3>Services</h3>
+{% if not detail.containers_available %}
+<p class="field__help">The host could not be read, so containers are not shown. The services below are the ones the file declares.</p>
+{% endif %}
+{% if detail.services %}
+<div class="data-table__scroll" role="region" aria-label="Services" tabindex="0">
+  <table class="table" data-optional="2">
+    <caption class="visually-hidden">Services of the stack and their containers</caption>
+    <thead>
+      <tr><th scope="col">Service</th><th scope="col" class="col-optional">Image</th><th scope="col">Containers</th></tr>
+    </thead>
+    <tbody>
+      {% for service in detail.services %}
+      <tr>
+        <th scope="row">
+          <div class="cell-stack">
+            <span class="mono cell-wrap">{{ service.name }}</span>
+            {% if not service.declared %}<span class="cell-note">Not in the file</span>{% endif %}
+          </div>
+        </th>
+        <td class="mono cell-wrap">{{ service.image or "—" }}</td>
+        <td>
+          {% if service.containers %}
+          <ul class="stack-containers">
+            {% for container in service.containers %}
+            <li>{{ container_link(container, row.environment_id, here) }} {{ container_state_badge(container.state) }} <span class="cell-note">{{ container.status }}</span> <a href="{{ with_origin(route_path('environment_container_detail', environment_id=row.environment_id, container_id=container.id) ~ '?tab=logs', here) }}" aria-label="Logs of {{ container.name }}">Logs</a></li>
+            {% endfor %}
+          </ul>
+          {% elif not service.hidden %}
+          <span class="cell-note">No container</span>
+          {% endif %}
+          {% if service.hidden %}
+          <span class="cell-note">{{ "and " if service.containers else "" }}{{ service.hidden }} {{ "container" if service.hidden == 1 else "containers" }} you cannot see</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>The file declares no service.</p>
+{% endif %}
+{% if detail.hidden_containers %}
+<p class="field__help">{{ detail.hidden_containers }} {{ "container" if detail.hidden_containers == 1 else "containers" }} of this stack {{ "is" if detail.hidden_containers == 1 else "are" }} hidden from you.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro file_tab(detail) %}
+<h2 id="tab-heading">Compose file</h2>
+<p class="field__help">Digest {{ digest(detail.compose_file_digest) }}.
+  {% if detail.can_write %}<a href="{{ route_path('environment_stack_edit', environment_id=detail.row.environment_id, stack_name=detail.row.name) }}">Edit the file</a>.{% endif %}</p>
+<pre class="code-block" tabindex="0">{{ detail.compose_file }}</pre>
+{% endmacro %}
+
+{% macro variables_tab(detail) %}
+<h2 id="tab-heading">Variables</h2>
+{% if detail.variables %}
+<div class="data-table__scroll" role="region" aria-label="Variables" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Variables the file is filled in from</caption>
+    <thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for variable in detail.variables %}
+      {% if variable.secret %}
+      {% set link_args = {"environment_id": detail.row.environment_id, "stack_name": detail.row.name, "variable_id": variable.id} %}
+      {{ stack_variable_row(variable, detail.row.environment_id, "compose", detail.row.name, "variable-row-" ~ variable.id, route_path("environment_stack_variable_reveal", **link_args), route_path("environment_stack_variable_row", **link_args), route_path("environment_stack_detail", environment_id=detail.row.environment_id, stack_name=detail.row.name) ~ "?tab=variables") }}
+      {% else %}
+      <tr>
+        <th scope="row" class="mono cell-wrap">{{ variable.name }}</th>
+        <td class="mono cell-wrap">{{ variable.value }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>The stack has no variables.</p>
+{% endif %}
+{% if detail.can_write %}
+<p><a class="btn" href="{{ route_path('environment_stack_edit', environment_id=detail.row.environment_id, stack_name=detail.row.name) }}">Edit variables</a></p>
+{% endif %}
+{% endmacro %}
+
+{% macro files_panel(detail) %}
+{{ files_tab(detail.files, detail.can_write, "environment_stack_file", {"environment_id": detail.row.environment_id, "stack_name": detail.row.name}) }}
+{% if detail.can_manage %}{{ contexts_section(detail) }}{% endif %}
+{% endmacro %}
+
+{% macro access_tab(detail, panel, values, fields) %}
+{% set save_href = route_path("environment_stack_access_save", environment_id=detail.row.environment_id, stack_name=detail.row.name) %}
+{% set delete_href = route_path("environment_stack_access_delete", environment_id=detail.row.environment_id, stack_name=detail.row.name) %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, save_href, delete_href, values=values, fields=fields) }}
+{% endmacro %}
+
+{% macro automation_tab(detail, automation) %}
+<h2 id="tab-heading">Automation</h2>
+{% if automation is not none %}
+{{ automation_panel(automation, route_path("automation_rule_new") ~ "?" ~ {"environment_id": detail.row.environment_id, "target_kind": "stack", "target": detail.row.name}|urlencode, "stack:" ~ detail.row.name) }}
+{% else %}
+<p class="field__help">Automation is not available.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro stack_tabs(detail, tab, tab_keys, panel, values, fields, automation=none, activity_log=none, logs=none) %}
+{% set detail_href = route_path("environment_stack_detail", environment_id=detail.row.environment_id, stack_name=detail.row.name) %}
+{% set labels = {"overview": "Overview", "file": "Compose file", "variables": "Variables", "files": "Files", "logs": "Logs", "automation": "Automation", "access": "Access"} %}
+<div id="stack-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Stack sections">
+    <ul class="tabs__list">
+      {% for key in tab_keys %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#stack-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% elif tab == "file" %}{{ file_tab(detail) }}
+    {% elif tab == "variables" %}{{ variables_tab(detail) }}
+    {% elif tab == "files" %}{{ files_panel(detail) }}
+    {% elif tab == "logs" and logs is not none %}{{ stack_logs(logs) }}
+    {% elif tab == "automation" %}{{ automation_tab(detail, automation) }}
+    {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
+    {% endif %}
+    {% if activity_log is not none %}
+    {{ activity_panel(activity_log.title, activity_log) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

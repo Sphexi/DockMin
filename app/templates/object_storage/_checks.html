@@ -1,0 +1,56 @@
+{# Always renders the target element, so a swap and the first load share one id. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/check_status.html" import check_status %}
+
+{% macro target_test_result(checks, error, note) %}
+{% set failed = checks|rejectattr("passed")|list|length if checks is not none else 0 %}
+{{ check_status("object-storage-test-status", ("Connection test " ~ ("passed. Every stage passed." if failed == 0 else "failed. " ~ failed ~ " of " ~ checks|length ~ " stages failed.")) if checks is not none else "") }}
+<div id="object-storage-test">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if error %}
+  <p class="field__error" role="alert">{{ error }}</p>
+  {% endif %}
+  {% if checks is not none %}
+  <section class="panel test-report" aria-labelledby="object-storage-test-heading">
+    <h3 id="object-storage-test-heading">Connection test</h3>
+    <p class="test-report__summary">
+      {% if failed == 0 %}{{ badge("Passed", "ok") }}{% else %}{{ badge("Failed", "danger") }}{% endif %}
+      <span>{% if failed == 0 %}Every stage passed.{% else %}{{ failed }} of {{ checks|length }} {{ "stage" if checks|length == 1 else "stages" }} failed. Each stage ran whatever the others reported.{% endif %}</span>
+    </p>
+    <div class="data-table__scroll" role="region" aria-label="Connection test stages" tabindex="0">
+      <table class="table">
+        <caption class="visually-hidden">Connection test stages</caption>
+        <thead>
+          <tr>
+            <th scope="col">Stage</th>
+            <th scope="col">Outcome</th>
+            <th scope="col">Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for check in checks %}
+          <tr>
+            <th scope="row">{{ check.label }}</th>
+            <td>{% if check.passed %}{{ badge("Passed", "ok") }}{% else %}{{ badge("Failed", "danger") }}{% endif %}</td>
+            <td>
+              {{ check.message }}
+              {% if check.http %}
+              <ul class="inline-list">
+                <li class="mono">{{ check.http|visible_text }}</li>
+              </ul>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if note %}
+    <p class="field__help">{{ note }}</p>
+    {% endif %}
+  </section>
+  {% elif not error %}
+  <p class="field__help">Not tested since this page was opened.{% if note %} {{ note }}{% endif %}</p>
+  {% endif %}
+</div>
+{% endmacro %}

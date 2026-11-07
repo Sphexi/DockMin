@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% set rekeying = purpose == "rekey" %}
+{% set heading = "Offline while stored secrets are re-encrypted" if rekeying else "Offline for a restore" %}
+{% block title %}{{ heading }} - dockmin{% endblock %}
+{% set crumb_page = "Offline" %}
+{% block content %}
+{{ page_header(heading) }}
+<div class="state state--error">
+  <p class="state__body">{{ message }}</p>
+  {% for path in paths %}
+  <p class="state__meta mono">{{ path }}</p>
+  {% endfor %}
+</div>
+{% if phase == "engaged" and rekeying %}
+<p>Reload this page in a few seconds.</p>
+{% elif phase == "engaged" %}
+<p>An administrator can finish or cancel the restore from the <a href="/restore">restore page</a>.</p>
+{% elif phase == "swapping" %}
+<p>Follow the restore on its progress page, or reload this page in a few seconds.</p>
+{% endif %}
+{% endblock %}

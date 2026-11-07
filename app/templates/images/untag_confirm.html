@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "images/_impact.html" import image_facts with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ "Force remove" if forcing else "Remove" }} reference {{ impact.reference }} - dockmin{% endblock %}
+{% set crumb_object = impact.short_id %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Force remove reference" if forcing else "Remove reference" %}
+{% block content %}
+{% call page_header("Force remove reference" if forcing else "Remove reference", "Review the reference below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the image</a>
+{% endcall %}
+
+{% set blocked = impact.is_last and impact.in_use and not forcing %}
+<section class="panel" aria-labelledby="untag-heading">
+  <h2 id="untag-heading">{{ "Force remove" if forcing else "Remove" }} <span class="mono">{{ impact.reference }}</span> from image <span class="mono">{{ impact.short_id }}</span>?</h2>
+  {{ confirm_targets([{"name": impact.reference, "detail": "on image " ~ impact.short_id}], "reference") }}
+  {{ image_facts(impact) }}
+  {% if impact.deletes_image %}
+  <div class="panel panel--notice" role="note">
+    <p>This is the image's last reference. Removing it removes the image and any layers no other image shares.</p>
+  </div>
+  {% elif impact.is_last %}
+  <div class="panel panel--notice" role="note">
+    <p>This is the image's last reference. {{ impact.in_use }} {{ "container uses" if impact.in_use == 1 else "containers use" }} the image, so it is not removed. It stays on the host with no reference.</p>
+  </div>
+  {% else %}
+  <p>The image keeps its other references and stays on the host.</p>
+  {% endif %}
+  {% if blocked %}
+  <div class="panel panel--alert" role="note">
+    <h3>This image is in use</h3>
+    <p>{{ impact.in_use }} {{ "container uses" if impact.in_use == 1 else "containers use" }} it, so Docker refuses to remove its last reference unless the removal is forced. Forcing is confirmed on the next page.</p>
+  </div>
+  <div class="form__actions">
+    <a class="btn btn--danger-quiet" href="{{ force_href }}">Continue to force removal</a>
+    <a class="btn" href="{{ detail_href }}">Cancel</a>
+  </div>
+  {% else %}
+  {% if forcing %}
+  <div class="panel panel--alert" role="note">
+    <h3>What forcing does</h3>
+    <ul>
+      <li>The reference is removed even though {{ impact.in_use }} {{ "container uses" if impact.in_use == 1 else "containers use" }} the image.</li>
+      <li>The image is not removed. It stays on the host with no reference, and the containers keep using it.</li>
+      <li>A recreate of those containers has to pull the image again.</li>
+    </ul>
+  </div>
+  {% endif %}
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="reference" value="{{ reference }}">
+    <input type="hidden" name="expected_last" value="{{ 'yes' if impact.is_last else 'no' }}">
+    <input type="hidden" name="expected_in_use" value="{{ impact.in_use if impact.is_last else 0 }}">
+    {% if forcing %}<input type="hidden" name="force" value="yes">{% endif %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">{{ "Force remove reference" if forcing else ("Remove reference and image" if impact.deletes_image else "Remove reference") }}</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

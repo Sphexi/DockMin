@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "containers/_actions.html" import action_label with context %}
+{% from "containers/_batch.html" import batch_context, batch_fields, batch_noun, batch_nothing, batch_targets, batch_volumes with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ action_label(action) }} containers - dockmin{% endblock %}
+{% set crumb_page = action_label(action) ~ " containers" %}
+{% block content %}
+{% set list_href = route_path("environment_container_list", environment_id=environment_id) %}
+{% call page_header(action_label(action) ~ " containers", "Review the containers below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ list_href }}">Back to containers</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("Check the selection", message) }}
+{% endfor %}
+
+{% if confirmation is not none %}
+{% set count = confirmation.targets|length - (protected_ids|length if protected_ids else 0) %}
+{{ batch_context(confirmation) }}
+
+{% if confirmation.targets %}
+{{ batch_targets(confirmation, protected_ids, instance_href) }}
+{% if action == "remove" %}
+{{ batch_volumes(confirmation, volumes) }}
+{% endif %}
+
+<form class="form form--wide" method="post" action="{{ route_path('environment_container_batch_run', environment_id=environment_id) }}" data-submit-once>
+  {{ batch_fields(confirmation, action, volumes, unread_token) }}
+  {% if action == "remove" %}
+  {% set force_query %}action=remove{% for target in confirmation.targets %}&amp;container={{ target.container_id|urlencode }}{% endfor %}&amp;force=1{% endset %}
+  <p>Removing deletes each container above and its writable layer. This cannot be undone. Volumes are kept, and a container that is running cannot be removed here.
+    <a href="{{ route_path('environment_container_batch_confirm', environment_id=environment_id) }}?{{ force_query|trim }}">Force remove these containers instead</a>.</p>
+  {% endif %}
+  <div class="form__actions">
+    {% if count > 0 %}<button type="submit" class="btn {{ 'btn--danger' if action in ('kill', 'remove') else 'btn--primary' }}">{{ action_label(action) }} {{ count }} {{ batch_noun(count) }}</button>{% endif %}
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% else %}
+{{ batch_nothing(list_href) }}
+{% endif %}
+{% endif %}
+{% endblock %}

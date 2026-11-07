@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied.</Message><Resource>/dockmin-e2e/backups/stream/refused.tar.gz</Resource><RequestId>18E187179C70009422D4E485</RequestId><Key>backups/stream/refused.tar.gz</Key><BucketName>dockmin-e2e</BucketName></Error>

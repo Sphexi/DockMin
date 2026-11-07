@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ title }} - dockmin{% endblock %}
+{% block content %}
+{{ page_header(title, "Error " ~ status_code) }}
+<p>{{ message }}
+  {%- if request_id %} Reference <span class="mono">{{ request_id }}</span>.{% endif %}</p>
+<p><a class="btn" href="{{ back_href if back_href is defined and back_href else route_path('index') }}">{{ back_label if back_label is defined and back_label else "Back to environments" }}</a></p>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% from "images/_parts.html" import update_results with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Update check - dockmin{% endblock %}
+{% set crumb_page = "Update check" %}
+{% block content %}
+{% call page_header("Update check", "Compared with the registry now") %}
+<a class="btn" href="{{ back_href }}">Back</a>
+{% endcall %}
+{{ update_results(statuses, failure) }}
+{% endblock %}

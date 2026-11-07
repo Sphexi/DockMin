@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "automation/_parts.html" import rule_state with context %}
+{% from "automation/_run_region.html" import run_region with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Run {{ row.run.id }} - dockmin{% endblock %}
+{% set crumb_object = view.rule.name %}
+{% set crumb_object_href = route_path('automation_rule_detail', rule_id=view.rule.id) %}
+{% set crumb_page = "Run " ~ row.run.id %}
+{% block head_extra %}
+{% if not finished %}
+<noscript><meta http-equiv="refresh" content="5"></noscript>
+{% endif %}
+{% endblock %}
+{% block content %}
+{% set run = row.run %}
+{% set rule = view.rule %}
+{% call page_header("Run " ~ run.id, rule.name) %}
+<a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Back to the automation</a>
+{% if not finished %}
+<span data-nojs-only><a class="btn" href="{{ region_href }}">Refresh</a></span>
+{% endif %}
+{% endcall %}
+
+{% if run.trigger == "dry_run" %}
+<div class="panel panel--notice" role="note">
+  <p>Dry run: no container, stack or automation was changed. The detail below lists what the run would have done.</p>
+</div>
+{% endif %}
+
+{{ run_region(view, row, detail, finished, region_href) }}
+
+<section class="section" aria-labelledby="rule-heading">
+  <h2 id="rule-heading">Automation</h2>
+  <dl class="facts">
+    <dt>Name</dt>
+    <dd><a href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">{{ rule.name }}</a></dd>
+    <dt>Type</dt>
+    <dd class="mono">{{ rule.subsystem }}</dd>
+    <dt>State now</dt>
+    <dd>{{ rule_state(view) }}</dd>
+  </dl>
+</section>
+{% endblock %}

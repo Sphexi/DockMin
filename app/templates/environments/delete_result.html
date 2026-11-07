@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Deletion result - dockmin{% endblock %}
+{% set crumb_page = "Deletion result" %}
+{% block content %}
+{% call page_header("Deletion result", result.deleted ~ " of " ~ result.items|length ~ " deleted. Each environment was deleted on its own.") %}
+<a class="btn btn--primary" href="{{ route_path('index') }}">Back to environments</a>
+{% endcall %}
+
+<div class="data-table__scroll" role="region" aria-label="Deletion results" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Deletion results</caption>
+    <thead>
+      <tr>
+        <th scope="col">Environment</th>
+        <th scope="col">Outcome</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in result.items %}
+      <tr>
+        <th scope="row">{{ item.name if item.name else "Environment " ~ item.environment_id }}</th>
+        <td>
+          {% if item.outcome == "deleted" %}{{ badge("Deleted", "ok") }}
+          {% elif item.outcome == "not_found" %}{{ badge("Not found", "neutral") }}
+          {% elif item.outcome == "changed" %}{{ badge("Changed", "warn") }}
+          {% else %}{{ badge("Failed", "danger") }}{% endif %}
+        </td>
+        <td>{{ item.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

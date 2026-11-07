@@ -1,0 +1,19 @@
+{
+  "version": "2",
+  "templates": [
+    {
+      "title": "Redis",
+      "description": "In-memory data store",
+      "categories": ["database"],
+      "image": "redis:7",
+      "ports": ["6379/tcp"],
+      "volumes": [{"container": "/data"}]
+    },
+    {
+      "type": 1,
+      "title": "Admin tool",
+      "image": "alpine",
+      "administrator-only": true
+    }
+  ]
+}

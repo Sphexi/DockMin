@@ -1,0 +1,89 @@
+{
+  "name": "shop",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "shop_default"
+    }
+  },
+  "services": {
+    "b": {
+      "command": null,
+      "deploy": {
+        "placement": {},
+        "resources": {
+          "limits": {
+            "cpus": 0.333,
+            "memory": "64"
+          }
+        }
+      },
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "c": {
+      "command": null,
+      "entrypoint": null,
+      "healthcheck": {
+        "interval": "1h0m0s",
+        "test": [
+          "CMD",
+          "x"
+        ],
+        "timeout": "100ms"
+      },
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "stop_grace_period": "1h2m3.5s"
+    },
+    "d": {
+      "command": null,
+      "deploy": {
+        "endpoint_mode": "VIP",
+        "mode": "replicated",
+        "placement": {},
+        "resources": {
+          "limits": {
+            "cpus": 0.1
+          }
+        }
+      },
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "web": {
+      "command": null,
+      "deploy": {
+        "placement": {},
+        "replicas": 1,
+        "resources": {
+          "limits": {
+            "cpus": 0.1,
+            "memory": "1610612736"
+          },
+          "reservations": {
+            "cpus": 1.5,
+            "memory": "100000000"
+          }
+        },
+        "update_config": {
+          "parallelism": 1
+        }
+      },
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "stop_grace_period": "0s"
+    }
+  }
+}

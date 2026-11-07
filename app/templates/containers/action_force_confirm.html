@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "containers/_confirm.html" import force_form, return_href with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Force remove {{ confirmation.name }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.name %}
+{% set crumb_object_href = route_path('environment_container_detail', environment_id=confirmation.environment_id, container_id=confirmation.container_id) %}
+{% set crumb_page = "Force remove" %}
+{% block content %}
+{% call page_header("Force remove container", "Review the container below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ return_href(confirmation.environment_id, confirmation.container_id, view) }}">Back to {{ "the container" if view == "detail" else "containers" }}</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="confirm-heading">
+  <h2 id="confirm-heading">Force remove <span class="mono">{{ confirmation.name }}</span>?</h2>
+  {{ force_form(confirmation, view) }}
+</section>
+{% endblock %}

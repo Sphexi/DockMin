@@ -1,0 +1,16 @@
+{% from "images/_parts.html" import credential_fieldset with context %}
+
+{% macro image_choices(offer, selected, image_error, catalogue, choice_error=none, carried="") %}
+<div id="image-choices" class="image-choices">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if image_error %}
+  <p class="field__error" role="alert">{{ image_error }}</p>
+  {% elif offer is none %}
+  {% if choice_error %}<p class="field__error" role="alert">{{ choice_error }}</p>{% endif %}
+  {% if carried %}<input type="hidden" name="credential_choice" value="{{ carried }}">{% endif %}
+  {% else %}
+  <p class="field__help">The nodes pull the image with the set chosen here, which Swarm keeps with the service.</p>
+  {{ credential_fieldset(offer, selected, choice_error, catalogue) }}
+  {% endif %}
+</div>
+{% endmacro %}

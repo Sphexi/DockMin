@@ -1,0 +1,471 @@
+{# Import with context: the form reads the form view and the role from the page context. #}
+{% from "swarm/services/_choices.html" import image_choices with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_cell, name_field %}
+{% from "partials/radio_field.html" import radio_field %}
+
+{% set heads = {
+  "env": ["Name", "Value"],
+  "labels": ["Key", "Value"],
+  "networks": ["Network", "Aliases"],
+  "ports": ["Container port", "Published port", "Protocol", "Mode"],
+  "mounts": ["Type", "Source", "Target", "Read-only", "Tmpfs size"],
+  "configs": ["Config", "File path", "UID", "GID", "Mode"],
+  "secrets": ["Secret", "File path", "UID", "GID", "Mode"],
+  "ulimits": ["Limit", "Soft limit", "Hard limit"],
+  "log_options": ["Option", "Value"],
+} %}
+{% set prefixes = {"env": "env", "labels": "label", "networks": "network", "ports": "port", "mounts": "mount", "configs": "config", "secrets": "secret", "ulimits": "ulimit", "log_options": "logopt"} %}
+{% set subjects = {"env": "Environment variable", "labels": "Label", "networks": "Network", "ports": "Published port", "mounts": "Mount", "configs": "Config", "secrets": "Secret", "ulimits": "Resource limit", "log_options": "Log option"} %}
+{% set data_groups = {"env": "env", "labels": "labels", "networks": "service-networks", "ports": "ports", "mounts": "mounts", "configs": "service-files", "secrets": "service-files", "ulimits": "devices", "log_options": "log_options"} %}
+{% set group_names = {"env": "Environment variables", "labels": "Labels", "networks": "Networks", "ports": "Published ports", "mounts": "Mounts", "configs": "Configs", "secrets": "Secrets", "ulimits": "Resource limits", "log_options": "Log options"} %}
+{% set health_modes = [("", "Inherit from the image"), ("none", "Disabled"), ("cmd", "CMD (exec form)"), ("shell", "CMD-SHELL (shell form)")] %}
+{% set init_modes = [("", "Default"), ("true", "On"), ("false", "Off")] %}
+{% set field_names = {
+  "name": "Name", "image": "Image", "mode": "Mode", "replicas": "Replicas", "command": "Command",
+  "constraints": "Placement constraints", "preferences": "Placement preferences",
+  "max_replicas_per_node": "Most replicas per node", "cpu_limit": "CPU limit",
+  "memory_limit": "Memory limit", "cpu_reservation": "CPU reservation",
+  "memory_reservation": "Memory reservation", "pids_limit": "PIDs limit",
+  "restart_condition": "Restart condition", "restart_delay": "Restart delay",
+  "restart_max_attempts": "Restart attempts", "restart_window": "Restart window",
+  "update_parallelism": "Update parallelism", "update_delay": "Update delay",
+  "update_failure_action": "Update failure action", "update_monitor": "Update monitor",
+  "update_max_failure_ratio": "Update failure ratio", "update_order": "Update order",
+  "rollback_parallelism": "Rollback parallelism", "rollback_delay": "Rollback delay",
+  "rollback_failure_action": "Rollback failure action", "rollback_monitor": "Rollback monitor",
+  "rollback_max_failure_ratio": "Rollback failure ratio", "rollback_order": "Rollback order",
+  "endpoint_mode": "Endpoint mode", "run_on_manager": "Run on this manager node",
+  "health_test": "Health check test", "health_command": "Health check command",
+  "health_interval": "Health check interval", "health_timeout": "Health check timeout",
+  "health_retries": "Health check retries", "health_start_period": "Health check start period",
+  "health_start_interval": "Health check start interval",
+  "user": "User", "groups": "Groups", "working_dir": "Working directory", "init": "Init",
+  "stop_signal": "Stop signal", "stop_grace_period": "Stop grace period",
+  "hostname": "Host name", "hosts": "Host entries", "dns_nameservers": "Name servers",
+  "dns_search": "Search domains", "dns_options": "Resolver options",
+  "cap_drop": "Dropped capabilities", "cap_add": "Added capabilities", "sysctls": "Kernel parameters",
+  "log_driver": "Log driver",
+} %}
+
+{% macro text(name, label, help=none, required=false, type="text") %}
+{{ form_field(name, label, value=view.get(name), error=view.errors.get(name), help=help, required=required, type=type) }}
+{% endmacro %}
+
+{% macro image_field(help) %}
+{{ name_field("image", "Image", route_path("environment_suggestions", environment_id=environment.id, kind="images"), value=view.get("image"), error=view.errors.get("image"), help=help, required=true, choices_href=choices_href) }}
+{% endmacro %}
+
+{% macro lines(name, label, help, rows=3) %}
+{% set error = view.errors.get(name) %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-{{ name }}">{{ label }}</label>
+    <p class="field__help" id="field-{{ name }}-help">{{ help }}</p>
+  </div>
+  <textarea class="field__input field__input--code" id="field-{{ name }}" name="{{ name }}" rows="{{ rows }}" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"
+            {%- if error %} aria-invalid="true"{% endif %}
+            aria-describedby="field-{{ name }}-help{% if error %} field-{{ name }}-error{% endif %}">
+{{ view.get(name) }}</textarea>
+  {% if error %}
+  <p class="field__error" id="field-{{ name }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro pick(name, label, options, help=none, blank=none) %}
+{% set current = view.get(name) %}
+{% set error = view.errors.get(name) %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-{{ name }}">{{ label }}</label>
+    {% if help %}
+    <p class="field__help" id="field-{{ name }}-help">{{ help }}</p>
+    {% endif %}
+  </div>
+  <select class="field__input" id="field-{{ name }}" name="{{ name }}"
+          {%- if error %} aria-invalid="true"{% endif %}
+          {%- if help or error %} aria-describedby="{% if help %}field-{{ name }}-help{% endif %}{% if error %} field-{{ name }}-error{% endif %}"{% endif %}>
+    {% if blank is not none %}
+    <option value=""{% if not current %} selected{% endif %}>{{ blank }}</option>
+    {% endif %}
+    {% for value in options %}
+    <option value="{{ value }}"{% if value == current %} selected{% endif %}>{{ value }}</option>
+    {% endfor %}
+  </select>
+  {% if error %}
+  <p class="field__error" id="field-{{ name }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# Options are (value, label) pairs. #}
+{% macro choose(name, label, options, help=none) %}
+{% set current = view.get(name) %}
+{% set error = view.errors.get(name) %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-{{ name }}">{{ label }}</label>
+    {% if help %}
+    <p class="field__help" id="field-{{ name }}-help">{{ help }}</p>
+    {% endif %}
+  </div>
+  <select class="field__input" id="field-{{ name }}" name="{{ name }}"
+          {%- if error %} aria-invalid="true"{% endif %}
+          {%- if help or error %} aria-describedby="{% if help %}field-{{ name }}-help{% endif %}{% if error %} field-{{ name }}-error{% endif %}"{% endif %}>
+    {% for value, text in options %}
+    <option value="{{ value }}"{% if value == current %} selected{% endif %}>{{ text }}</option>
+    {% endfor %}
+  </select>
+  {% if error %}
+  <p class="field__error" id="field-{{ name }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# A stored value the viewer may not change: shown as it is and sent back unchanged. #}
+{% macro locked(label, text) %}
+<dl class="facts">
+  <dt>{{ label }}</dt>
+  <dd class="mono cell-wrap">{% for line in text.splitlines() %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %} <span class="cell-note">Set by an administrator</span></dd>
+</dl>
+{% endmacro %}
+
+{% macro panel(section, title) %}
+<section class="panel create-section" id="section-{{ section }}" aria-labelledby="section-{{ section }}-title">
+  <h2 class="create-section__title" id="section-{{ section }}-title">{{ title }}</h2>
+  <div class="create-section__body">{{ caller() }}</div>
+</section>
+{% endmacro %}
+
+{% macro details(section, title, open) %}
+<details class="panel create-section" id="section-{{ section }}"{% if open %} open{% endif %}>
+  <summary class="create-section__title">{{ title }}</summary>
+  <div class="create-section__body">{{ caller() }}</div>
+</details>
+{% endmacro %}
+
+{% macro filled(names, groups=[]) -%}
+{% for name in names if view.get(name) or name in view.errors %}1{% endfor %}
+{%- for group in groups %}{% if view.indices(group)|length > 1 or view.adding == group or group in view.errors %}1{% else %}{% for key in view.errors if key.startswith(prefixes[group] ~ "-") %}1{% endfor %}{% endif %}{% endfor %}
+{%- endmacro %}
+
+{% macro cell(source, group, index, number, column, label, placeholder=none, suggest=none) %}
+{% set name = prefixes[group] ~ "-" ~ index ~ "-" ~ column %}
+{% set field_id = "field-" ~ name %}
+{% set error = source.errors.get(name) %}
+{% if suggest %}
+{{ name_cell(name, label, subjects[group] ~ " " ~ number ~ ": ", route_path("environment_suggestions", environment_id=environment.id, kind=suggest), value=source.get(name), error=error, placeholder=placeholder) }}
+{% else %}
+<div class="field repeat__cell"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subjects[group] }} {{ number }}: </span>{{ label }}</label>
+  </div>
+  <input class="field__input" id="{{ field_id }}" name="{{ name }}" type="text" value="{{ source.get(name) }}"
+         {%- if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+         {%- if error %} aria-invalid="true" aria-describedby="{{ field_id }}-error"{% endif %}
+         autocomplete="off" spellcheck="false">
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro choice_cell(source, group, index, number, column, label, options) %}
+{% set name = prefixes[group] ~ "-" ~ index ~ "-" ~ column %}
+{% set field_id = "field-" ~ name %}
+{% set error = source.errors.get(name) %}
+{% set current = source.get(name) or options[0] %}
+<div class="field repeat__cell"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subjects[group] }} {{ number }}: </span>{{ label }}</label>
+  </div>
+  <select class="field__input" id="{{ field_id }}" name="{{ name }}"
+          {%- if error %} aria-invalid="true" aria-describedby="{{ field_id }}-error"{% endif %}>
+    {% for option in options %}
+    <option value="{{ option }}"{% if option == current %} selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+    {% if current not in options %}
+    <option value="{{ current }}" selected>{{ current }}</option>
+    {% endif %}
+  </select>
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro check_cell(source, group, index, number, column, label) %}
+{% set name = prefixes[group] ~ "-" ~ index ~ "-" ~ column %}
+{% set field_id = "field-" ~ name %}
+<div class="repeat__cell repeat__cell--check">
+  <input class="choice__input" type="checkbox" id="{{ field_id }}" name="{{ name }}" value="on"{% if source.checked(name) %} checked{% endif %}>
+  <label class="repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subjects[group] }} {{ number }}: </span>{{ label }}</label>
+</div>
+{% endmacro %}
+
+{% macro row(source, group, index, number) %}
+<div class="repeat__row" data-repeat-row="{{ index }}">
+  {% if group == "env" %}
+  {{ cell(source, group, index, number, "key", "Name") }}
+  {{ cell(source, group, index, number, "value", "Value") }}
+  {% elif group == "labels" %}
+  {{ cell(source, group, index, number, "key", "Key") }}
+  {{ cell(source, group, index, number, "value", "Value") }}
+  {% elif group == "networks" %}
+  {{ cell(source, group, index, number, "name", "Network", placeholder="Name or ID", suggest="networks") }}
+  {{ cell(source, group, index, number, "aliases", "Aliases", placeholder="Space separated") }}
+  {% elif group == "ports" %}
+  {{ cell(source, group, index, number, "target", "Container port", placeholder="80") }}
+  {{ cell(source, group, index, number, "published", "Published port", placeholder="Assigned") }}
+  {{ choice_cell(source, group, index, number, "protocol", "Protocol", ["tcp", "udp", "sctp"]) }}
+  {{ choice_cell(source, group, index, number, "mode", "Mode", ["ingress", "host"]) }}
+  {% elif group == "mounts" %}
+  {{ choice_cell(source, group, index, number, "type", "Type", mount_types) }}
+  {{ cell(source, group, index, number, "source", "Source", placeholder="Volume name" ~ (" or host path" if administrator else ""), suggest="volumes") }}
+  {{ cell(source, group, index, number, "target", "Target", placeholder="/data") }}
+  {{ check_cell(source, group, index, number, "read_only", "Read-only") }}
+  {{ cell(source, group, index, number, "tmpfs_size", "Tmpfs size", placeholder="64m") }}
+  {% elif group == "ulimits" %}
+  {{ choice_cell(source, group, index, number, "name", "Limit", ulimit_names) }}
+  {{ cell(source, group, index, number, "soft", "Soft limit", placeholder="1024") }}
+  {{ cell(source, group, index, number, "hard", "Hard limit", placeholder="Same as soft") }}
+  {% elif group == "log_options" %}
+  {% if administrator %}
+  {{ cell(source, group, index, number, "key", "Option", placeholder="max-size") }}
+  {% else %}
+  {{ choice_cell(source, group, index, number, "key", "Option", log_option_keys) }}
+  {% endif %}
+  {{ cell(source, group, index, number, "value", "Value", placeholder="10m") }}
+  {% elif group == "configs" or group == "secrets" %}
+  {{ cell(source, group, index, number, "name", heads[group][0], suggest=group) }}
+  {{ cell(source, group, index, number, "target", "File path", placeholder="Name") }}
+  {{ cell(source, group, index, number, "uid", "UID", placeholder="0") }}
+  {{ cell(source, group, index, number, "gid", "GID", placeholder="0") }}
+  {{ cell(source, group, index, number, "mode", "Mode", placeholder="0444") }}
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro repeat_group(group, help=none) %}
+{% set error = view.errors.get(group) %}
+<fieldset class="choice-group repeat" id="group-{{ group }}" data-group="{{ choice(data_groups[group], ['env', 'labels', 'ports', 'mounts', 'service-networks', 'service-files', 'devices', 'log_options']) }}" data-repeat data-repeat-cap="{{ row_caps[group] }}"{% if error %} data-invalid{% endif %}>
+  <legend class="visually-hidden">{{ group_names[group] }}</legend>
+  {% if help %}
+  <p class="field__help">{{ help }}</p>
+  {% endif %}
+  {% if error %}
+  <p class="field__error">{{ error }}</p>
+  {% endif %}
+  <div class="repeat__head" aria-hidden="true">
+    {% for head in heads[group] %}<span>{{ head }}</span>{% endfor %}
+  </div>
+  <div class="repeat__rows" data-repeat-rows>
+    {% for index in view.indices(group) %}
+    {{ row(view, group, index, index + 1) }}
+    {% endfor %}
+  </div>
+  <template data-repeat-template>{{ row(blank, group, "__INDEX__", "__NUMBER__") }}</template>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--compact" name="rows" value="{{ group }}" formaction="{{ submit_href }}#group-{{ group }}" formnovalidate data-repeat-more>Add rows</button>
+    <button type="button" class="btn btn--compact" data-repeat-add hidden>Add row</button>
+  </div>
+</fieldset>
+{% endmacro %}
+
+{% macro form_errors(errors) %}
+<div class="state state--error error-summary" role="alert">
+  <h2 class="state__title">Check the form</h2>
+  <p class="state__body">Fix the items below; every value you entered is kept.</p>
+  <ul>
+    {% for key, message in errors.items() %}
+    {% set parts = key.split("-") %}
+    <li>
+      {%- if key in field_names %}<a href="#field-{{ key }}">{{ field_names[key] }}</a>: {{ message }}
+      {%- elif key in group_names %}<a href="#group-{{ key }}">{{ group_names[key] }}</a>: {{ message }}
+      {%- elif parts|length == 3 and parts[1].isdigit() %}<a href="#field-{{ key }}">{{ parts[0]|capitalize }} {{ parts[1]|int + 1 }}, {{ parts[2]|replace("_", " ") }}</a>: {{ message }}
+      {%- else %}{{ message }}
+      {%- endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}
+
+{% macro service_form(editing, submit_label) %}
+{% set global_mode = view.get("mode") == "global" %}
+<form class="form create-form" method="post" action="{{ submit_href }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if editing %}<input type="hidden" name="form_version" value="{{ view.get('form_version') or offered.version }}">{% endif %}
+  <button type="submit" class="visually-hidden" name="step" value="review" tabindex="-1" aria-hidden="true">{{ submit_label }}</button>
+
+  {% call panel("image", "Image and mode") %}
+  {% if editing %}
+  <dl class="facts">
+    <dt>Name</dt>
+    <dd class="mono">{{ offered.name }}</dd>
+    <dt>Mode</dt>
+    <dd>{{ offered.mode|capitalize }}{% if offered.mode in ("replicated", "global") %} <span class="cell-note">A service cannot change between replicated and global mode.</span>{% endif %}</dd>
+  </dl>
+  {% if offered.mode in ("replicated", "global") %}
+  <input type="hidden" name="mode" value="{{ offered.mode }}">
+  {% endif %}
+  {% else %}
+  {{ text("name", "Name", help="Letters, digits, hyphens and underscores. It names the service on this cluster and cannot be changed.", required=true) }}
+  {% endif %}
+  {{ image_field("A repository with an optional tag or digest, such as nginx:1.27. The tag is pinned to its digest when the service is saved.") }}
+  {{ image_choices(offer, selected, none, catalogue, choice_error) }}
+  {% if not editing %}
+  <fieldset class="choice-group" id="field-mode">
+    <legend>Mode</legend>
+    {{ radio_field("mode", "Replicated", "replicated", checked=(view.get("mode") or "replicated") == "replicated", help="Runs the number of tasks below, spread across the nodes.") }}
+    {{ radio_field("mode", "Global", "global", checked=view.get("mode") == "global", help="Runs one task on every node.") }}
+    {% if view.errors.get("mode") %}<p class="field__error">{{ view.errors.get("mode") }}</p>{% endif %}
+  </fieldset>
+  {% endif %}
+  {% if not editing or offered.mode == "replicated" %}
+  {{ text("replicas", "Replicas", help="Used in replicated mode. " ~ ("Up to 1000." if administrator else "Up to 100."), type="number") }}
+  {% endif %}
+  {{ text("command", "Command", help="Replaces the image's default command. Quote arguments that contain spaces.") }}
+  {% endcall %}
+
+  {% call panel("env", "Environment variables") %}
+  {{ repeat_group("env", help=("A value left empty keeps the stored value when its value is not shown: every variable for a standard user, and names that look like secrets for an administrator." if editing else "Added to the image's own variables.")) }}
+  {% endcall %}
+
+  {% call panel("labels", "Labels") %}
+  {{ repeat_group("labels", help="Service labels. The stack membership labels are set by the product and cannot be entered here.") }}
+  {% endcall %}
+
+  {% call panel("ports", "Published ports") %}
+  {{ repeat_group("ports", help="Leave the published port blank to let Swarm choose one. A port published in ingress mode is reachable on every node.") }}
+  {{ pick("endpoint_mode", "Endpoint mode", ["vip", "dnsrr"], help="vip load-balances behind one address; dnsrr answers with the address of each task. Ingress ports need vip.", blank="Default (vip)") }}
+  {% endcall %}
+
+  {% call details("networks", "Networks", filled([], ["networks"])|trim) %}
+  {{ repeat_group("networks", help="Overlay networks the tasks join. Name them or give their ID.") }}
+  {% endcall %}
+
+  {% call details("mounts", "Mounts", filled([], ["mounts"])|trim) %}
+  {{ repeat_group("mounts", help=("A volume source is a volume name; leave it blank for an anonymous volume. A bind source is an absolute host path on the node. A tmpfs mount has no source." if administrator else "A volume source is a volume name; leave it blank for an anonymous volume. A named volume needs the placement option below, because only this manager's volumes can be checked. A tmpfs mount has no source.")) }}
+  {% endcall %}
+
+  {% call details("configs", "Configs", filled([], ["configs"])|trim) %}
+  {{ repeat_group("configs", help="Configs shown to the tasks as files. The file path defaults to the config's name.") }}
+  {% endcall %}
+
+  {% call details("secrets", "Secrets", filled([], ["secrets"])|trim) %}
+  {{ repeat_group("secrets", help="Secrets shown to the tasks as files, readable by the service. Attaching one needs write access to it.") }}
+  {% endcall %}
+
+  {% call details("placement", "Placement", filled(["constraints", "preferences", "max_replicas_per_node", "run_on_manager"])|trim) %}
+  {{ lines("constraints", "Constraints", "One per line, such as node.role==worker or node.labels.zone!=b.") }}
+  {{ lines("preferences", "Preferences", "One per line, such as spread=node.labels.zone.", rows=2) }}
+  {{ text("max_replicas_per_node", "Most replicas per node", help="Leave blank for no limit.", type="number") }}
+  {{ checkbox_field("run_on_manager", "Run on this manager node", checked=view.checked("run_on_manager"), help="Pins the service to the manager dockmin is connected to.", error=view.errors.get("run_on_manager")) }}
+  {% endcall %}
+
+  {% call details("resources", "Resources", filled(["cpu_limit", "memory_limit", "cpu_reservation", "memory_reservation", "pids_limit"])|trim) %}
+  {{ text("cpu_limit", "CPU limit", help="A number of CPUs, such as 0.5 or 2.") }}
+  {{ text("memory_limit", "Memory limit", help="A size such as 512m or 2g.") }}
+  {{ text("cpu_reservation", "CPU reservation", help="CPUs set aside for each task.") }}
+  {{ text("memory_reservation", "Memory reservation", help="Memory set aside for each task.") }}
+  {{ text("pids_limit", "PIDs limit", help="The most processes each task may run.", type="number") }}
+  {% endcall %}
+
+  {% call details("restart", "Restart policy", filled(["restart_condition", "restart_delay", "restart_max_attempts", "restart_window"])|trim) %}
+  {{ pick("restart_condition", "Restart when", ["any", "on-failure", "none"], blank="Default (any)") }}
+  {{ text("restart_delay", "Delay", help="A duration such as 5s.") }}
+  {{ text("restart_max_attempts", "Maximum attempts", help="Leave blank for no limit.", type="number") }}
+  {{ text("restart_window", "Window", help="How long to wait before deciding a restart worked.") }}
+  {% endcall %}
+
+  {% call details("update", "Update configuration", filled(["update_parallelism", "update_delay", "update_failure_action", "update_monitor", "update_max_failure_ratio", "update_order"])|trim) %}
+  {{ text("update_parallelism", "Parallelism", help="Tasks replaced at a time; 0 replaces all at once.", type="number") }}
+  {{ text("update_delay", "Delay between batches", help="A duration such as 10s.") }}
+  {{ pick("update_failure_action", "On failure", ["continue", "pause", "rollback"], blank="Default (pause)") }}
+  {{ text("update_monitor", "Monitor", help="How long to watch each task after it starts.") }}
+  {{ text("update_max_failure_ratio", "Failure ratio", help="The share of tasks that may fail, from 0 to 1.") }}
+  {{ pick("update_order", "Order", ["stop-first", "start-first"], blank="Default (stop-first)") }}
+  {% endcall %}
+
+  {% call details("rollback", "Rollback configuration", filled(["rollback_parallelism", "rollback_delay", "rollback_failure_action", "rollback_monitor", "rollback_max_failure_ratio", "rollback_order"])|trim) %}
+  {{ text("rollback_parallelism", "Parallelism", help="Tasks restored at a time; 0 restores all at once.", type="number") }}
+  {{ text("rollback_delay", "Delay between batches", help="A duration such as 10s.") }}
+  {{ pick("rollback_failure_action", "On failure", ["continue", "pause"], blank="Default (pause)") }}
+  {{ text("rollback_monitor", "Monitor", help="How long to watch each task after it starts.") }}
+  {{ text("rollback_max_failure_ratio", "Failure ratio", help="The share of tasks that may fail, from 0 to 1.") }}
+  {{ pick("rollback_order", "Order", ["stop-first", "start-first"], blank="Default (stop-first)") }}
+  {% endcall %}
+
+  {% call details("healthcheck", "Health check", filled(["health_test", "health_command", "health_interval", "health_timeout", "health_retries", "health_start_period", "health_start_interval"])|trim) %}
+  {{ choose("health_test", "Test", health_modes + ([("keep", "Keep the stored test")] if view.get("health_test") == "keep" else []), help="Inherit uses the health check of the image. CMD runs the command directly; CMD-SHELL runs it in the shell of the container.") }}
+  {{ text("health_command", "Command", help="For CMD, quote arguments that contain spaces. For CMD-SHELL, a command line.") }}
+  {{ text("health_interval", "Interval", help="Time between checks, such as 30s.") }}
+  {{ text("health_timeout", "Timeout", help="How long one check may run.") }}
+  {{ text("health_retries", "Retries", help="Failures in a row before the task is unhealthy, from 0 to 100.", type="number") }}
+  {{ text("health_start_period", "Start period", help="Failures are not counted while the task starts; 0s for none.") }}
+  {{ text("health_start_interval", "Start interval", help="Time between checks during the start period.") }}
+  {% endcall %}
+
+  {% call details("process", "Process", filled(["user", "groups", "working_dir", "init", "stop_signal", "stop_grace_period", "tty", "open_stdin"])|trim) %}
+  {{ text("user", "User", help="A name or id, optionally with a group, such as 1000:1000.") }}
+  {{ text("groups", "Groups", help="Extra groups, separated by spaces.") }}
+  {{ text("working_dir", "Working directory", help="An absolute path inside the container.") }}
+  {{ choose("init", "Init", init_modes, help="Runs an init process that reaps zombies and forwards signals.") }}
+  {{ text("stop_signal", "Stop signal", help="A signal name such as SIGTERM, or a number from 1 to 64.") }}
+  {{ text("stop_grace_period", "Stop grace period", help="How long a task may take to stop before it is killed, such as 30s.") }}
+  {{ checkbox_field("tty", "Allocate a terminal", checked=view.checked("tty"), error=view.errors.get("tty")) }}
+  {{ checkbox_field("open_stdin", "Keep standard input open", checked=view.checked("open_stdin"), error=view.errors.get("open_stdin")) }}
+  {% endcall %}
+
+  {% call details("host", "Host and DNS", filled(["hostname", "hosts", "dns_nameservers", "dns_search", "dns_options"])|trim) %}
+  {{ text("hostname", "Host name", help="The host name of each task.") }}
+  {{ lines("hosts", "Host entries", "One per line, as a host name and an address separated by a colon, such as db:10.0.0.5.", rows=2) }}
+  {{ text("dns_nameservers", "Name servers", help="IP addresses, separated by spaces.") }}
+  {{ text("dns_search", "Search domains", help="Domains, separated by spaces.") }}
+  {{ text("dns_options", "Resolver options", help="Options such as ndots:2, separated by spaces.") }}
+  {% endcall %}
+
+  {% set locked_caps = offered.values.get("locked_cap_add") if editing and not administrator else "" %}
+  {% set locked_sysctls = offered.values.get("locked_sysctls") if editing and not administrator else "" %}
+  {% call details("security", "Security", (filled(["read_only", "no_new_privileges", "cap_drop", "cap_add", "sysctls"])|trim) or locked_caps or locked_sysctls) %}
+  {{ checkbox_field("read_only", "Read-only root file system", checked=view.checked("read_only"), error=view.errors.get("read_only")) }}
+  {{ checkbox_field("no_new_privileges", "No new privileges", checked=view.checked("no_new_privileges"), help="Processes cannot gain privileges through setuid binaries.", error=view.errors.get("no_new_privileges")) }}
+  {{ text("cap_drop", "Dropped capabilities", help="Names such as NET_RAW, or ALL, separated by spaces.") }}
+  {% if administrator %}
+  {{ text("cap_add", "Added capabilities", help="Names such as NET_ADMIN, separated by spaces.") }}
+  {{ lines("sysctls", "Kernel parameters", "One per line as name=value, with a net.* or kernel.* name, such as net.core.somaxconn=1024.", rows=2) }}
+  {% else %}
+  {% if locked_caps %}{{ locked("Added capabilities", locked_caps) }}{% endif %}
+  {% if locked_sysctls %}{{ locked("Kernel parameters", locked_sysctls) }}{% endif %}
+  {% endif %}
+  {% endcall %}
+
+  {% call details("ulimits", "Resource limits", filled([], ["ulimits"])|trim) %}
+  {{ repeat_group("ulimits", help="Limits on each task's processes, such as nofile for open files. -1 is unlimited; a blank hard limit equals the soft limit.") }}
+  {% endcall %}
+
+  {% set locked_log = offered.values.get("locked_log") if editing and not administrator else "" %}
+  {% call details("logging", "Logging", (filled(["log_driver"], ["log_options"])|trim) or locked_log) %}
+  {% if locked_log %}
+  {{ locked("Log driver", offered.values.get("locked_log_driver", "") or "Default") }}
+  {% if offered.values.get("locked_log_options") %}{{ locked("Log options", offered.values.get("locked_log_options")) }}{% endif %}
+  {% else %}
+  {% if administrator %}
+  {{ text("log_driver", "Log driver", help="A driver name such as json-file, local or syslog. Leave blank for the default of each node.") }}
+  {% else %}
+  {{ pick("log_driver", "Log driver", log_drivers, help="Standard users may choose from these drivers.", blank="Default") }}
+  {% endif %}
+  {{ repeat_group("log_options", help="Options of the driver, such as max-size and max-file for json-file. They need a driver.") }}
+  {% endif %}
+  {% endcall %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary" name="step" value="review">{{ submit_label }}</button>
+    <a class="btn" href="{{ cancel_href }}">Cancel</a>
+  </div>
+</form>
+{% endmacro %}

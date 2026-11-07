@@ -1,0 +1,20 @@
+PUT /dockmin-e2e-autocreate/exports/rule-1/2026/01/01/00000000000000000001.csv.gz HTTP/1.1
+Host: 127.0.0.1:29000
+Authorization: AWS4-HMAC-SHA256 Credential=<redacted>/20261024/us-east-1/s3/aws4_request, SignedHeaders=content-md5;content-type;host;x-amz-content-sha256;x-amz-date, Signature=<redacted>
+X-Amz-Date: 20261024T142923Z
+User-Agent: curl/8.18.0
+Accept: */*
+Content-Type: application/gzip
+Content-MD5: Z08L190ptsty/N5xTXWLrw==
+x-amz-content-sha256: fab13701487253cae6169529ccf0609461e84e219231792560fc5bfa9c114101
+Content-Length: 55
+
+HTTP/1.1 500 Internal Server Error
+Accept-Ranges: bytes
+Content-Length: 406
+Content-Type: application/xml
+Server: SeaweedFS 30GB 4.48
+Vary: Origin
+X-Amz-Request-Id: 18E17D8B1D560942DEA86AE8
+Date: Sat, 24 Oct 2026 14:29:23 GMT
+

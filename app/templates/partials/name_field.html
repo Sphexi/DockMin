@@ -1,0 +1,53 @@
+{# `include` adds an hx-include selector; `id_suffix` replaces the name in a cell's ids; `choices_href` adds the image field's change post, whose hx-include="this" stops it inheriting the wrapper's. #}
+
+{% macro name_field(name, label, suggest_href, value=none, error=none, help=none, required=false, placeholder=none, type="text", include=none, choices_href=none) %}
+{% set type = choice(type, ["text", "search"]) %}
+{% set field_id = "field-" ~ name %}
+{% set described_by = (field_id ~ "-help " if help else "") ~ (field_id ~ "-error" if error else "") %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ label }}{% if required %} <span class="field__required" aria-hidden="true">*</span>{% endif %}</label>
+    {% if help %}
+    <p class="field__help" id="{{ field_id }}-help">{{ help }}</p>
+    {% endif %}
+  </div>
+  <div class="suggest" hx-get="{{ suggest_href }}{{ '&' if '?' in suggest_href else '?' }}field={{ name }}"
+       hx-trigger="keyup changed delay:250ms from:find input" hx-include="find input{% if include %}, {{ include }}{% endif %}"
+       hx-target="find datalist" hx-swap="innerHTML" hx-sync="this:replace" hx-push-url="false">
+    <input class="field__input" id="{{ field_id }}" name="{{ name }}" type="{{ type }}" list="suggest-{{ name }}"
+           {%- if value is not none %} value="{{ value }}"{% endif %}
+           {%- if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+           {%- if required %} required{% endif %}
+           {%- if error %} aria-invalid="true"{% endif %}
+           {%- if described_by|trim %} aria-describedby="{{ described_by|trim }}"{% endif %}
+           autocomplete="off" spellcheck="false"
+           {%- if choices_href %} hx-post="{{ choices_href }}" hx-trigger="change" hx-include="this" hx-target="#image-choices" hx-swap="outerHTML" hx-sync="closest form:replace"{% endif %}>
+    <datalist id="suggest-{{ name }}"></datalist>
+  </div>
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro name_cell(name, label, subject, suggest_href, value=none, error=none, placeholder=none, include=none, id_suffix=none) %}
+{% set field_id = "field-" ~ (id_suffix or name) %}
+<div class="field repeat__cell"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subject }}</span>{{ label }}</label>
+  </div>
+  <div class="suggest" hx-get="{{ suggest_href }}{{ '&' if '?' in suggest_href else '?' }}field={{ name }}"
+       hx-trigger="keyup changed delay:250ms from:find input" hx-include="find input{% if include %}, {{ include }}{% endif %}"
+       hx-target="find datalist" hx-swap="innerHTML" hx-sync="this:replace" hx-push-url="false">
+    <input class="field__input" id="{{ field_id }}" name="{{ name }}" type="text" list="suggest-{{ id_suffix or name }}"
+           {%- if value is not none %} value="{{ value }}"{% endif %}
+           {%- if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+           {%- if error %} aria-invalid="true" aria-describedby="{{ field_id }}-error"{% endif %}
+           autocomplete="off" spellcheck="false">
+    <datalist id="suggest-{{ id_suffix or name }}"></datalist>
+  </div>
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}

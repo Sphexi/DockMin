@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "swarm/stacks/_form.html" import swarm_stack_form with context %}
+{% block title %}Create Swarm stack on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Create Swarm stack" %}
+{% block content %}
+{% call page_header("Create Swarm stack", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ cancel_href }}">Cancel</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if form.failure %}
+{{ error_state(form.failure.title, form.failure.message) }}
+{% endif %}
+{% if form.errors %}
+{{ error_summary(form.errors) }}
+{% endif %}
+<div class="panel panel--notice" role="note">
+  <p>Creating stores the file and variables, then deploys the stack to the cluster as services, networks, configs and secrets. Docker Compose only reads and resolves the file; the cluster is changed through the Engine. Keys with no Swarm form, such as <span class="mono">depends_on</span> and <span class="mono">container_name</span>, are refused with their place in the file.</p>
+</div>
+{{ swarm_stack_form(form, kind, stack_name, post_href, validate_href, cancel_href, compose, variable_cap, catalogue, file_cap=file_cap) }}
+{% endblock %}

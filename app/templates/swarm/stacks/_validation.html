@@ -1,0 +1,56 @@
+{% from "partials/check_status.html" import check_status %}
+{% from "stacks/_parts.html" import credential_choices with context %}
+{% from "stacks/_validation.html" import collision_notice, service_table, valid_status, validation_result with context %}
+
+{# A valid file reads differently from a Compose stack's: nothing is pulled by this check, and volumes belong to the nodes. #}
+{% macro swarm_validation_result(report, rejection, failure, errors=none, offers=(), catalogue=none, lines=none) %}
+{% if report and not (rejection or errors or failure) %}
+{{ check_status("validation-status", valid_status(report)) }}
+<div id="validation" class="validation">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <div>
+    <div class="panel">
+      <h2>The file is valid</h2>
+      <p>Docker Compose resolved the file and every service it produces passed the checks for your role. Nothing was stored or run.</p>
+      <dl class="facts">
+        <dt>Services</dt>
+        <dd>{{ report.services|length }}</dd>
+        <dt>Images</dt>
+        <dd class="mono cell-wrap">{{ report.images|join(", ") or "—" }}</dd>
+        <dt>Networks to create</dt>
+        <dd class="mono cell-wrap">{{ report.networks|join(", ") or "—" }}</dd>
+        <dt>Volumes</dt>
+        <dd class="mono cell-wrap">{{ report.volumes|join(", ") or "—" }}</dd>
+      </dl>
+      <p class="field__help">A volume is created on each node that runs a task using it, and is never removed by a stack operation.</p>
+      {{ collision_notice(report.warnings, "validation-warnings") }}
+      {{ service_table(report.services) }}
+      {% if report.restricted_options or report.restricted %}
+      <div class="panel panel--notice" role="note">
+        <p>This file uses options that are restricted for standard users. They are allowed for you because you are an administrator.</p>
+        <ul>
+          {% for item in report.restricted_options %}
+          <li>{{ item.label }}</li>
+          {% else %}
+          {% for option in report.restricted %}
+          <li class="mono">{{ option }}</li>
+          {% endfor %}
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% if offers %}
+  <section class="panel create-section" aria-labelledby="credentials-title">
+    <h2 class="create-section__title" id="credentials-title">Credentials for image pulls</h2>
+    <div class="create-section__body">
+      {{ credential_choices(offers, catalogue) }}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% else %}
+{{ validation_result(none, rejection, failure, errors, offers, catalogue, lines) }}
+{% endif %}
+{% endmacro %}

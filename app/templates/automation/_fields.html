@@ -1,0 +1,61 @@
+{% macro number_param(key, label, state, help, minimum, maximum, placeholder="") %}
+{% set name = "param_" ~ key %}
+{% set field_id = "field-" ~ name %}
+<div class="field">
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ label }}</label>
+    <p class="field__help" id="{{ field_id }}-help">{{ help }}</p>
+  </div>
+  <input class="field__input" id="{{ field_id }}" name="{{ name }}" type="number" inputmode="numeric" min="{{ minimum }}" max="{{ maximum }}" step="1" value="{{ state.parameters.get(key, '') }}" placeholder="{{ placeholder }}" aria-describedby="{{ field_id }}-help" autocomplete="off">
+</div>
+{% endmacro %}
+
+{% macro choice_select(name, label, options, selected, help=none, error=none) %}
+{% set field_id = "field-" ~ name %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ label }}</label>
+    {% if help %}
+    <p class="field__help" id="{{ field_id }}-help">{{ help }}</p>
+    {% endif %}
+  </div>
+  <select class="field__input" id="{{ field_id }}" name="{{ name }}"
+          {%- if help or error %} aria-describedby="{% if help %}{{ field_id }}-help{% endif %}{% if help and error %} {% endif %}{% if error %}{{ field_id }}-error{% endif %}"{% endif %}
+          {%- if error %} aria-invalid="true"{% endif %}>
+    {% for value, text in options %}
+    <option value="{{ value }}"{% if value == selected %} selected{% endif %}>{{ text }}</option>
+    {% endfor %}
+  </select>
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro storage_target_param(state, errors, storage_targets, help) %}
+{% set chosen_target = state.parameters.get("object_storage_target_id", "") %}
+{% set target_error = errors.get("object_storage_target_id") %}
+{% if storage_targets %}
+<div class="field"{% if target_error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-param_object_storage_target_id">Object storage target <span class="field__required" aria-hidden="true">*</span></label>
+    <p class="field__help" id="field-param_object_storage_target_id-help">{{ help }}{% if chosen_target and chosen_target not in storage_targets|map("first")|map("string")|list %} The target the automation named is deleted; choose another.{% endif %}</p>
+  </div>
+  <select class="field__input" id="field-param_object_storage_target_id" name="param_object_storage_target_id" required aria-describedby="field-param_object_storage_target_id-help{% if target_error %} field-param_object_storage_target_id-error{% endif %}"
+          {%- if target_error %} aria-invalid="true"{% endif %}>
+    {% if not chosen_target %}<option value="">Choose a target</option>{% endif %}
+    {% for target_id, target_name in storage_targets %}
+    <option value="{{ target_id }}"{% if chosen_target == target_id|string %} selected{% endif %}>{{ target_name }}</option>
+    {% endfor %}
+  </select>
+  {% if target_error %}
+  <p class="field__error" id="field-param_object_storage_target_id-error">{{ target_error }}</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="panel panel--notice" role="note">
+  <p>No object storage target exists yet. Add one first, then create the automation.</p>
+</div>
+<p><a class="btn" href="{{ route_path('object_storage_target_new') }}">Add a target</a></p>
+{% endif %}
+{% endmacro %}

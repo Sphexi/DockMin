@@ -1,0 +1,23 @@
+{# more counts users the display limit cut; hidden counts users the viewer may not see. #}
+{% macro users_overflow(more, hidden, noun="container") -%}
+{%- if more %}and {{ more }} more{% endif -%}
+{%- if more and hidden %}; {% endif -%}
+{%- if hidden %}{{ hidden }} {{ noun if hidden == 1 else noun ~ "s" }} you cannot see{% endif -%}
+{%- endmacro %}
+
+{% macro object_users(rows, more, hidden, total, link_base, empty="Not used", suffix="") %}
+{% if total == 0 %}
+<span class="cell-note">{{ empty }}</span>
+{% else %}
+{% if rows %}
+<ul class="chip-list">
+  {% for user in rows %}
+  <li><a href="{{ link_base }}/{{ user.id }}{{ suffix }}">{{ user.name }}</a></li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if more or hidden %}
+<span class="cell-note">{{ users_overflow(more, hidden) }}</span>
+{% endif %}
+{% endif %}
+{% endmacro %}

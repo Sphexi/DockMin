@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import wait_message %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Sign in - dockmin{% endblock %}
+{% block content %}
+{% set ns = namespace(offered=false) %}
+<div class="auth-card">
+  {{ page_header("Sign in", "Use your dockmin account.") }}
+
+  {% if error %}
+  {% if retry_after %}
+  {{ error_state("Sign-in is paused", error ~ " " ~ wait_message(retry_after)) }}
+  {% else %}
+  {{ error_state("Could not sign in", error) }}
+  {% endif %}
+  {% endif %}
+
+  {% if continue_as %}
+  <form class="form" method="post" action="{{ route_path('login_continue') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <p>The access platform identifies you as an account here.</p>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Continue as {{ continue_as }}</button>
+    </div>
+  </form>
+  {% endif %}
+
+  {% for method in methods %}
+  {% if method == "internal" %}
+  {% set ns.offered = true %}
+  <form class="form" method="post" action="{{ route_path('login') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    {{ form_field("username", "Username", value=username, required=true, autocomplete="username") }}
+    {{ form_field("password", "Password", type="password", required=true, autocomplete="current-password") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Sign in</button>
+    </div>
+  </form>
+  {% endif %}
+  {% endfor %}
+
+  {% if not ns.offered %}
+  {{ error_state("No sign-in method is available", "Ask an administrator to enable one.") }}
+  {% endif %}
+</div>
+{% endblock %}

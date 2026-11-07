@@ -1,0 +1,17 @@
+{% macro stack_variable_revealed(variable, environment_id, stack_kind, stack_name, row_id, reveal_href, row_href, back_href, error=none, revealed=none, window_expires_at=none, reveals_left=none) %}
+<tr id="{{ row_id }}">
+  <th scope="row" class="mono cell-wrap">{{ variable.name }}</th>
+  <td>
+    <span class="chip">Secret</span>
+    {% if revealed is not none %}<code class="mono secret-value" data-revealed>{{ revealed.reveal() }}</code>{% endif %}
+    <p class="cell-note">
+      {%- if window_expires_at %}Reveals stay open until <time datetime="{{ window_expires_at|timestamp_iso }}">{{ window_expires_at|timestamp(seconds=true) }}</time>.{% endif %}
+      {%- if reveals_left is not none %} {{ reveals_left }} {{ "reveal" if reveals_left == 1 else "reveals" }} left in this window.{% endif -%}
+    </p>
+    <div class="row-actions">
+      <a class="btn btn--compact" href="{{ row_href }}" hx-get="{{ row_href }}" hx-target="#{{ row_id }}" hx-swap="outerHTML" hx-push-url="false" data-autofocus>Hide<span class="visually-hidden"> {{ variable.name }}</span></a>
+    </div>
+    <span hx-get="{{ row_href }}" hx-trigger="load delay:60s" hx-target="#{{ row_id }}" hx-swap="outerHTML" hx-push-url="false"></span>
+  </td>
+</tr>
+{% endmacro %}

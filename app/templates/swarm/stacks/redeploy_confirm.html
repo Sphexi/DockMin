@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "images/_parts.html" import binding_text %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "stacks/_validation.html" import collision_notice %}
+{% from "swarm/stacks/_parts.html" import plan_table %}
+{% block title %}Redeploy stack {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Redeploy" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Redeploy stack", "Review the stack below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+
+<section class="panel" aria-labelledby="redeploy-heading">
+  <h2 id="redeploy-heading">Redeploy stack <span class="mono cell-wrap">{{ review.stack }}</span> on {{ review.environment_name }}?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  {% if review.changed_since_deploy %}
+  <p>{{ badge("Changed since the last deploy", "warn") }} The file, the variables or the files differ from the last deployment. A redeploy applies them.</p>
+  {% endif %}
+  <p>Docker Compose resolves the file, and dockmin then makes the changes below on the cluster. Every service of the file is updated to the file's definition, which undoes changes made to it on its own page; Swarm replaces a service's running tasks where its task definition changed, rolling according to the service's update configuration. Objects the file still defines the same way are reused.</p>
+
+  {% if review.adopted_first_redeploy %}
+  <div class="panel panel--notice" role="note">
+    <h3>First redeploy of an adopted stack</h3>
+    <p>This stack was created outside dockmin. Its first redeploy replaces the running tasks of every service, and configs and secrets that the Docker command line named are replaced by the names below and removed afterwards.</p>
+  </div>
+  {% endif %}
+
+  {{ collision_notice(review.warnings, "redeploy-warnings") }}
+
+  {{ plan_table("Networks", [("Create", review.networks_create, "ok"), ("Remove", review.networks_remove, "danger")]) }}
+  {{ plan_table("Configs", [("Create", review.configs_create, "ok"), ("Remove", review.configs_remove, "danger"), ("Keep", review.objects_kept|selectattr("kind", "equalto", "config")|list, "neutral")]) }}
+  {{ plan_table("Secrets", [("Create", review.secrets_create, "ok"), ("Remove", review.secrets_remove, "danger"), ("Keep", review.objects_kept|selectattr("kind", "equalto", "secret")|list, "neutral")]) }}
+  {{ plan_table("Services", [("Create", review.services_create, "ok"), ("Update", review.services_update, "info"), ("Remove", review.services_remove, "danger"), ("Keep", review.services_kept, "neutral")]) }}
+  <p class="field__help">An old config or secret is removed only after every service has moved to the new one. One that a service outside the stack still uses is kept.</p>
+
+  {% if review.image_moves %}
+  <h3 class="confirm__subheading">Images that change</h3>
+  <div class="data-table__scroll" role="region" aria-label="Images that change" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Services whose image changes</caption>
+      <thead>
+        <tr><th scope="col">Service</th><th scope="col">Now</th><th scope="col">After</th></tr>
+      </thead>
+      <tbody>
+        {% for move in review.image_moves %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ move.service }}</th>
+          <td class="mono cell-wrap">{{ move.current or "—" }}</td>
+          <td class="mono cell-wrap">{{ move.target }}{% if not move.pinned %} <span class="cell-note">not pinned to a digest</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if review.unpinned %}
+  <div class="panel panel--notice" role="note">
+    <p>The digest of these images could not be looked up, so they deploy as written and nodes may run different images of the same tag:</p>
+    <ul>
+      {% for reference in review.unpinned %}
+      <li class="mono cell-wrap">{{ reference }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if review.offers %}
+  <h3 class="confirm__subheading">Registry credentials</h3>
+  <ul class="review__values">
+    {% for offer in review.offers %}
+    <li><span class="mono cell-wrap">{{ offer.reference.familiar }}</span>: {{ binding_text(offer.binding) }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if review.services_kept and not review.remove_orphans %}
+  <p>These services carry the stack's name but the file no longer declares them, so they keep running. <a href="{{ with_orphans_href }}">Review removing them as well</a>.</p>
+  {% elif review.remove_orphans %}
+  <p>The services marked Remove above are no longer in the file and are removed. <a href="{{ without_orphans_href }}">Review keeping them instead</a>.</p>
+  {% endif %}
+
+  <form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_file_digest" value="{{ review.expected_file_digest }}">
+    <input type="hidden" name="expected_inputs_digest" value="{{ review.expected_inputs_digest }}">
+    <input type="hidden" name="expected_plan" value="{{ review.expected_plan }}">
+    {% if review.remove_orphans %}<input type="hidden" name="remove_orphans" value="yes">{% endif %}
+    {% for number, reference, choice in echo %}
+    <input type="hidden" name="credential-{{ number }}-reference" value="{{ reference }}">
+    <input type="hidden" name="credential-{{ number }}-choice" value="{{ choice }}">
+    {% endfor %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary"{% if compose %} disabled{% endif %}>Redeploy stack</button>
+      <a class="btn" href="{{ edit_href }}">Edit the file first</a>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ template.title }} - dockmin{% endblock %}
+{% set crumb_object = template.title %}
+{% block content %}
+{% call page_header(template.title, "Template from " ~ entry.catalogue_name) %}
+<a class="btn" href="{{ route_path('templates') }}">Back to templates</a>
+{% endcall %}
+
+{% if template.administrator_only %}
+<div class="panel panel--notice" role="note">
+  <p>This template is offered to administrators only.</p>
+</div>
+{% endif %}
+
+{% set description = template.description|catalogue_markup %}
+{% set note = template.note|catalogue_markup %}
+{% if description %}
+<div>{{ description }}</div>
+{% endif %}
+{% if note %}
+<section class="section" aria-labelledby="note-heading">
+  <h2 id="note-heading">Note</h2>
+  <div>{{ note }}</div>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="settings-heading">
+  <h2 id="settings-heading">What it sets</h2>
+  <dl class="facts">
+    <dt>Image</dt>
+    <dd class="mono cell-wrap">{{ template.image }}</dd>
+    {% if template.name %}
+    <dt>Container name</dt>
+    <dd class="mono cell-wrap">{{ template.name }}</dd>
+    {% endif %}
+    {% if template.categories %}
+    <dt>Categories</dt>
+    <dd>{{ template.categories|join(", ") }}</dd>
+    {% endif %}
+    {% if template.architectures %}
+    <dt>Published for</dt>
+    <dd class="mono">{{ template.architectures|join(", ") }}</dd>
+    {% endif %}
+    {% if template.restart_policy %}
+    <dt>Restart policy</dt>
+    <dd class="mono">{{ template.restart_policy }}</dd>
+    {% endif %}
+    {% if template.command %}
+    <dt>Command</dt>
+    <dd class="mono cell-wrap">{{ template.command }}</dd>
+    {% endif %}
+    {% if template.hostname %}
+    <dt>Host name</dt>
+    <dd class="mono cell-wrap">{{ template.hostname }}</dd>
+    {% endif %}
+    {% if template.shm_size %}
+    <dt>Shared memory</dt>
+    <dd class="mono">{{ template.shm_size }}</dd>
+    {% endif %}
+    {% if template.interactive %}
+    <dt>Interactive</dt>
+    <dd>Keeps standard input open and allocates a terminal.</dd>
+    {% endif %}
+    {% if template.setup_url %}
+    <dt>Setup guide</dt>
+    <dd class="cell-wrap"><a href="{{ template.setup_url }}" rel="noopener noreferrer nofollow">{{ template.setup_url }}</a></dd>
+    {% endif %}
+  </dl>
+</section>
+
+{% if template.ports %}
+<section class="section" aria-labelledby="ports-heading">
+  <h2 id="ports-heading">Ports</h2>
+  <div class="data-table__scroll" role="region" aria-label="Ports table" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Ports the template publishes</caption>
+      <thead>
+        <tr>
+          <th scope="col">Container port</th>
+          <th scope="col">Suggested host port</th>
+          <th scope="col">Description</th>
+          <th scope="col">Used</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for port in template.ports %}
+        <tr>
+          <th scope="row" class="mono">{{ port.container_port }}/{{ port.protocol }}</th>
+          <td class="mono">{{ port.host_port if port.host_port is not none else "Docker assigns one" }}</td>
+          <td class="cell-wrap">{{ port.description }}</td>
+          <td>{{ badge("Optional", "neutral") if port.optional else "Filled in" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if template.volumes %}
+<section class="section" aria-labelledby="volumes-heading">
+  <h2 id="volumes-heading">Volumes</h2>
+  <div class="data-table__scroll" role="region" aria-label="Volumes table" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Paths the template mounts</caption>
+      <thead>
+        <tr>
+          <th scope="col">Path in the container</th>
+          <th scope="col">Host path</th>
+          <th scope="col">Description</th>
+          <th scope="col">Used</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for volume in template.volumes %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ volume.container_path }}{% if volume.read_only %} (read-only){% endif %}</th>
+          <td class="mono cell-wrap">{{ volume.bind if volume.bind else "A named volume" }}</td>
+          <td class="cell-wrap">{{ volume.description }}</td>
+          <td>{{ badge("Optional", "neutral") if volume.optional else "Filled in" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if template.env %}
+<section class="section" aria-labelledby="env-heading">
+  <h2 id="env-heading">Environment variables</h2>
+  <div class="data-table__scroll" role="region" aria-label="Environment variables table" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Environment variables the template sets</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Value</th>
+          <th scope="col">Description</th>
+          <th scope="col">Used</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for variable in template.env %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ variable.name }}</th>
+          <td class="mono cell-wrap">{{ variable.default }}{% if variable.options %} (one of {{ variable.options|map(attribute="value")|join(", ") }}){% endif %}</td>
+          <td class="cell-wrap">{{ variable.description }}</td>
+          <td>{{ badge("Optional", "neutral") if variable.optional else "Filled in" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if template.labels %}
+<section class="section" aria-labelledby="labels-heading">
+  <h2 id="labels-heading">Labels</h2>
+  <dl class="facts">
+    {% for label in template.labels %}
+    <dt class="mono cell-wrap">{{ label.name }}</dt>
+    <dd class="mono cell-wrap">{{ label.value }}</dd>
+    {% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+{% if template.capabilities or template.devices or template.sysctls or template.security_options or template.host_network or template.privileged or template.volumes|selectattr("bind")|list %}
+<section class="section" aria-labelledby="admin-heading">
+  <h2 id="admin-heading">Settings only an administrator can set</h2>
+  <p class="field__help">{{ "These are filled in on the create form, except privileged mode and host bind mounts, which you set yourself." if is_administrator else "The create form leaves these out for your role." }}</p>
+  <dl class="facts">
+    {% if template.capabilities %}
+    <dt>Added capabilities</dt>
+    <dd class="mono">{{ template.capabilities|join(", ") }}</dd>
+    {% endif %}
+    {% if template.devices %}
+    <dt>Devices</dt>
+    <dd class="mono cell-wrap">{{ template.devices|join(", ") }}</dd>
+    {% endif %}
+    {% if template.sysctls %}
+    <dt>Kernel parameters</dt>
+    <dd class="mono cell-wrap">{{ template.sysctls|join(", ") }}</dd>
+    {% endif %}
+    {% if template.security_options %}
+    <dt>Security options</dt>
+    <dd class="mono cell-wrap">{{ template.security_options|join(", ") }}</dd>
+    {% endif %}
+    {% if template.host_network %}
+    <dt>Network</dt>
+    <dd>Host networking</dd>
+    {% endif %}
+    {% if template.privileged %}
+    <dt>Privileged</dt>
+    <dd>Privileged mode</dd>
+    {% endif %}
+    {% for volume in template.volumes if volume.bind %}
+    <dt>Host bind mount</dt>
+    <dd class="mono cell-wrap">{{ volume.bind }} to {{ volume.container_path }}</dd>
+    {% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="create-heading">
+  <h2 id="create-heading">Create</h2>
+  {% if targets %}
+  {% set noted = targets|map(attribute=1)|select|list|length > 0 %}
+  <div class="data-table__scroll" role="region" aria-label="Environments table" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Environments where you can create from this template</caption>
+      <thead>
+        <tr>
+          <th scope="col">Environment</th>
+          {% if noted %}
+          <th scope="col">Architecture</th>
+          {% endif %}
+          <th scope="col">Create</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for target, note in targets %}
+        <tr>
+          <th scope="row">{{ target.name }}</th>
+          {% if noted %}
+          <td>{{ note if note else "Published" }}</td>
+          {% endif %}
+          <td>
+            <div class="row-actions">
+              <a class="btn btn--compact" href="{{ route_path('environment_container_new', environment_id=target.id) }}?template={{ entry.ref|urlencode }}">Create container</a>
+              <a class="btn btn--compact" href="{{ route_path('environment_stack_new', environment_id=target.id) }}?template={{ entry.ref|urlencode }}">Create stack</a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if truncated %}
+  <p class="field__help">Only the first environments are listed. Open the create form from an environment's own page for the others.</p>
+  {% endif %}
+  {% else %}
+  <p class="field__help">You cannot create containers or stacks in any environment, so there is nowhere to create this template. Ask an administrator for access.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% from "automation/_fields.html" import number_param with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/radio_field.html" import radio_field %}
+{% set chosen_action = "update" if state.parameters.get("action", "report")|lower == "update" else "report" %}
+{% set healthy_text = state.parameters.get("require_healthy", "true")|lower %}
+<fieldset class="choice-group" aria-describedby="field-param_action-help">
+  <legend>Action</legend>
+  <p class="field__help" id="field-param_action-help">Report is the default. An automation that reports changes nothing and writes no activity events.</p>
+  {{ radio_field("param_action", "Report", "report", checked=(chosen_action == "report"), help="List the images that have a newer version at their registry. Nothing is pulled and no container is touched.") }}
+  {{ radio_field("param_action", "Update", "update", checked=(chosen_action == "update"), help="Pull newer images, then recreate the matching containers with them. A Compose or Swarm stack is redeployed from its deployed file, and a Swarm service is updated in place by its own rolling update.") }}
+</fieldset>
+<p class="field__help">The settings below apply to the Update action.</p>
+{{ number_param("verify_seconds", "Watch each recreated container, in seconds", state, "How long a recreated container is watched before the update counts as successful. A container that exits, restarts or stops reporting healthy in that time is restored to its previous image. A Swarm service is watched for the same time after its rolling update, and rolled back if the update pauses or leaves fewer tasks running. 0 to 300. Default 30.", 0, 300, "30") }}
+<input type="hidden" name="param_require_healthy" value="false">
+{{ checkbox_field("param_require_healthy", "Require a healthy container", "true", checked=(healthy_text in ["true", "1", "on", "yes", "t", "y"]), help="A container with a health check must report healthy before the update counts as successful. On by default. It does not apply to Swarm services.") }}
+{% if principal.is_administrator %}
+{% set prune_text = state.parameters.get("prune_replaced", "false")|lower %}
+<input type="hidden" name="param_prune_replaced" value="false">
+{{ checkbox_field("param_prune_replaced", "Remove replaced images", "true", checked=(prune_text in ["true", "1", "on", "yes", "t", "y"]), help="Remove the image each update replaces once the grace period below has passed. An image is kept while a container uses it, while it carries a tag or has dependent images, and while a Swarm service names it. Needs the Update action, and does not apply to a Swarm service target. Off by default.") }}
+{% if errors.get("prune_replaced") %}
+<p class="field__error" id="field-param_prune_replaced-error">{{ errors["prune_replaced"] }}</p>
+{% endif %}
+{{ number_param("prune_after_hours", "Grace period before removing a replaced image, in hours", state, "The image stays on the host for this long after the update, so a rollback by hand stays possible. 1 to 720. Default 24.", 1, 720, "24") }}
+{% endif %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_confirm.html" import hidden_containers, redeploy_conflicts, redeploy_form with context %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "stacks/_validation.html" import collision_notice, validation_result with context %}
+{% block title %}Redeploy stack {{ confirmation.stack }} and remove containers - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Redeploy and remove containers" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Redeploy stack and remove containers", "Review the stack below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if problem and problem.failure %}
+{{ error_state(problem.failure.title, problem.failure.message) }}
+{% endif %}
+{% if problem and problem.rejection %}
+{{ validation_result(none, problem.rejection, none, problem.errors) }}
+{% endif %}
+
+<section class="panel" aria-labelledby="redeploy-heading">
+  <h2 id="redeploy-heading">Redeploy stack <span class="mono cell-wrap">{{ review.stack }}</span> on {{ review.environment_name }} and remove containers?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  {% if review.changed_since_deploy %}
+  <p>{{ badge("Changed since the last deploy", "warn") }} The file, the variables or the files differ from the last deployment. A redeploy applies them.</p>
+  {% endif %}
+  <div class="panel panel--alert" role="note">
+    <h3>What forcing does</h3>
+    <p>The containers below belong to the stack, but no service in the file defines them. They are stopped and deleted. This cannot be undone.</p>
+  </div>
+
+  {% if not (problem and problem.rejection and problem.rejection.problems) %}
+  {{ redeploy_conflicts(review.conflicts) }}
+  {% endif %}
+  {{ collision_notice(review.warnings, "redeploy-warnings") }}
+
+  <h3 class="confirm__subheading">Containers that are deleted</h3>
+  {% if review.orphans or review.hidden_orphans %}
+  {% if review.orphans %}
+  {{ confirm_targets(review.orphans, "container", review.more_orphans) }}
+  {% endif %}
+  {{ hidden_containers(review.hidden_orphans) }}
+  {% else %}
+  <p>No container belongs to the stack without a service in the file.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Containers that may be recreated</h3>
+  {% if review.containers or review.hidden_containers %}
+  {% if review.containers %}
+  {{ confirm_targets(review.containers, "container", review.more_containers) }}
+  {% endif %}
+  {{ hidden_containers(review.hidden_containers) }}
+  {% else %}
+  <p>The stack has no containers yet. Compose creates them.</p>
+  {% endif %}
+
+  {{ redeploy_form(review, run_href, detail_href, edit_href, compose, pull, offers, catalogue, with_orphans=true, blocked=review.conflicts|length > 0, alternatives=[("Redeploy without removing them", plain_href)]) }}
+</section>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Scale {{ impact.name }} - dockmin{% endblock %}
+{% set crumb_object = impact.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Scale" %}
+{% block content %}
+{% call page_header("Scale service", "Review the change below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the service</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="scale-heading">
+  <h2 id="scale-heading">Scale <span class="mono">{{ impact.name }}</span> from {{ impact.current }} to {{ impact.requested }}?</h2>
+  {{ confirm_targets([{"name": impact.name, "detail": "on " ~ impact.environment_name}], "service") }}
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ impact.environment_name }}</dd>
+    <dt>Replicas</dt>
+    <dd>{{ impact.current }} now, {{ impact.requested }} after</dd>
+  </dl>
+  {% if impact.stops %}
+  <div class="panel panel--alert" role="note">
+    <h3>{{ impact.stops }} running {{ "task" if impact.stops == 1 else "tasks" }} will be stopped</h3>
+    <p>{% if impact.requested == 0 %}No task of this service runs afterwards. Its configuration is kept, and it can be scaled up again.{% else %}Swarm chooses which tasks to stop. Their containers are removed.{% endif %}</p>
+  </div>
+  {% elif impact.requested == impact.current %}
+  <p>The service already has this many replicas. Nothing changes.</p>
+  {% else %}
+  <p>{{ impact.requested - impact.current }} more {{ "task is" if impact.requested - impact.current == 1 else "tasks are" }} started on the nodes Swarm chooses.</p>
+  {% endif %}
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="replicas" value="{{ impact.requested }}">
+    <input type="hidden" name="expected_version" value="{{ impact.version }}">
+    <input type="hidden" name="expected_replicas" value="{{ impact.current }}">
+    <input type="hidden" name="confirmed" value="yes">
+    <div class="form__actions">
+      <button type="submit" class="btn {{ 'btn--danger' if impact.stops else 'btn--primary' }}">{{ "Scale down service" if impact.stops else "Scale service" }}</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

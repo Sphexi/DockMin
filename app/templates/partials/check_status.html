@@ -1,0 +1,3 @@
+{% macro check_status(status_id, text) %}
+<p id="{{ status_id }}" class="visually-hidden" role="status" hx-swap-oob="innerHTML">{{ text }}</p>
+{% endmacro %}

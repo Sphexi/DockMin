@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% from "environments/_parts.html" import when with context %}
+{% from "images/_parts.html" import credential_fieldset with context %}
+{% block title %}Instance - dockmin{% endblock %}
+{% block content %}
+{{ page_header("Instance", "The dockmin process and the container it runs in.") }}
+
+<section class="section" aria-labelledby="process-heading">
+  <h2 id="process-heading">Process</h2>
+  <dl class="facts">
+    <dt>Started</dt>
+    <dd>{{ when(view.boot.started_at, "—") }}</dd>
+    <dt>Run identifier</dt>
+    <dd class="mono">{{ view.boot.boot_id }}</dd>
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="container-heading">
+  <h2 id="container-heading">Container</h2>
+  {% if not view.containerised %}
+  <div class="panel panel--notice" role="note">
+    <p><strong>dockmin could not identify a container of its own.</strong></p>
+    <p>Nothing is protected and dockmin cannot restart itself. This is expected when dockmin does not run in a container.</p>
+  </div>
+  {% else %}
+  <dl class="facts">
+    <dt>Name</dt>
+    <dd class="mono">{{ view.container_name or "—" }}</dd>
+    <dt>ID</dt>
+    <dd class="mono">{{ view.container_id }}</dd>
+    <dt>Found through</dt>
+    <dd>{{ view.identified_by or "—" }}</dd>
+  </dl>
+  <p class="field__help">The container is listed with every other container but cannot be stopped, restarted, killed, paused, removed or recreated from dockmin. The same applies to its volumes, its Compose project and its Swarm service.</p>
+
+  <h3 id="homes-heading">Environments that report this container</h3>
+  {% if view.homes %}
+  <div class="data-table__scroll" role="region" aria-labelledby="homes-heading" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Environments whose Docker host reports the container dockmin runs in</caption>
+      <thead>
+        <tr>
+          <th scope="col">Environment</th>
+          <th scope="col">Connection</th>
+          <th scope="col">Container name</th>
+          <th scope="col">Restart</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for home in view.homes %}
+        <tr>
+          <th scope="row"><a href="{{ home_links[home.environment_id] }}">{{ home.environment_name }}</a></th>
+          <td>{{ "Local socket" if home.connection_kind == "unix_socket" else "TLS" }}</td>
+          <td class="mono">{{ home.container_name }}</td>
+          <td>{% if home.restarts_through %}{{ badge("Used for restart", "ok") }}{% else %}<span class="cell-note">Not used</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No environment reports this container. Its id is protected on every environment; its volumes, Compose project and Swarm service are not.</p>
+  {% endif %}
+  {% if view.incomplete %}
+  <div class="panel panel--notice" role="note">
+    <p>Some environments could not be read, so the protection of volumes, Compose projects and Swarm services may be incomplete there. dockmin keeps trying.</p>
+    {% if view.unreadable %}
+    <ul>
+      {% for item in view.unreadable %}
+      <li>{{ item.environment_name }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="update-heading">
+  <h2 id="update-heading">Update dockmin</h2>
+  {% set update = view.update %}
+  {% if update %}
+  {% if update.reference %}
+  <dl class="facts">
+    <dt>Image</dt>
+    <dd class="mono">{{ update.reference }}</dd>
+    <dt>Digest</dt>
+    <dd class="mono">{{ update.digest or "—" }}</dd>
+    <dt>Version</dt>
+    <dd class="mono">{{ update.version }}</dd>
+  </dl>
+  {% endif %}
+  {% if update.refusal %}
+  <div class="panel panel--notice" role="note" data-update-refusal="{{ update.refusal }}">
+    <p>{{ update.message }}</p>
+    {% if update.commands %}
+    <pre class="code-block" tabindex="0">{{ update.commands | join("\n") }}</pre>
+    {% endif %}
+  </div>
+  {% elif update.can_check %}
+  <p>Reads the registry for this image: the running tag at a new digest, and newer release tags of the same repository. Nothing contacts the registry until you check, and nothing changes until you confirm an update.</p>
+  <form class="form form--wide" method="post" action="{{ update_check_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ credential_fieldset(update.offer, update.offer.preselected_value, none, catalogue) }}
+    <div class="form__actions">
+      <button type="submit" class="btn">Check for updates</button>
+    </div>
+  </form>
+  {% endif %}
+
+  {% if update.outcome %}
+  {% set outcome = update.outcome %}
+  {% set tones = {"succeeded": ["ok", "Updated"], "rolled_back": ["warn", "Rolled back"], "rollback_failed": ["danger", "Rollback failed"], "not_started": ["warn", "Not started"]} %}
+  {% set tone = tones.get(outcome.outcome, ["neutral", "Finished"]) %}
+  <h3 id="outcome-heading">Latest update</h3>
+  <div class="update-outcome{% if outcome.outcome == 'rollback_failed' %} update-outcome--failed{% endif %}" role="group" aria-labelledby="outcome-heading" data-update-outcome="{{ outcome.outcome }}">
+    <p class="update-outcome__line">{{ badge(tone[1], tone[0]) }} <span>{{ outcome.message }}</span> <span class="cell-note">{{ when(outcome.finished_at, "—") }}</span></p>
+    {% if outcome.outcome == "rollback_failed" %}
+    <p>The previous container was not restored. It is named <span class="mono">{{ view.container_name or "dockmin" }}-previous</span>, or <span class="mono">{{ view.container_name or "dockmin" }}</span> if the update helper had already renamed it back. Start it from the Docker host:</p>
+    <pre class="code-block" tabindex="0">docker start {{ view.container_name or "dockmin" }}-previous</pre>
+    <p>The database copy taken before the update is kept in the data directory at <span class="mono break-anywhere">update/{{ outcome.update_id }}/db-before</span>.</p>
+    {% elif outcome.outcome == "not_started" and outcome.reason == "locked" %}
+    <p>Wait for the other update to finish, then check for updates again.</p>
+    {% elif outcome.reason == "helper_lost" %}
+    <p>The update may have stopped partway. If dockmin was not restored, the previous container is left stopped on the Docker host as <span class="mono">{{ view.container_name or "dockmin" }}-previous</span>, or as <span class="mono">{{ view.container_name or "dockmin" }}</span> if it was not yet renamed. Start it with <span class="mono">docker start</span> and that name.</p>
+    {% elif outcome.previous_container_left %}
+    <p>The previous container, <span class="mono">{{ view.container_name or "dockmin" }}-previous</span>, could not be removed. Remove it from the Docker host when it is no longer needed.</p>
+    {% endif %}
+    {% if outcome.excerpt %}
+    <details class="stderr">
+      <summary>Last log lines of the new container</summary>
+      <pre class="stderr__text" tabindex="0">{{ outcome.excerpt | join("\n") }}</pre>
+    </details>
+    {% endif %}
+    {% if outcome.request_event_id or outcome.event_id %}
+    <p class="update-outcome__links">
+      {% if outcome.request_event_id %}<a href="{{ route_path('activity_event_detail', event_id=outcome.request_event_id) }}">Update request</a>{% endif %}
+      {% if outcome.event_id %}<a href="{{ route_path('activity_event_detail', event_id=outcome.event_id) }}">Update outcome</a>{% endif %}
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="restart-heading">
+  <h2 id="restart-heading">Restart dockmin</h2>
+  {% if view.can_restart %}
+  <p>Stops the container and starts it again. dockmin is unavailable for a short time, and signed-in sessions are kept. Background work in progress is interrupted.</p>
+  <p><a class="btn btn--danger" href="{{ restart_confirm_href }}">Restart dockmin</a></p>
+  {% else %}
+  <div class="panel panel--notice" role="note">
+    <p>{{ view.restart_message }}</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

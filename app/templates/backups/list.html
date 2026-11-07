@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "backups/_table.html" import backups_table with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Backups - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Backups", "Archives of this instance's database and stack files.") %}
+<a class="btn" href="{{ route_path('object_storage_targets') }}">Object storage</a>
+<a class="btn btn--danger-quiet" href="{{ route_path('restore') }}">Restore from a backup</a>
+{% endcall %}
+
+<section class="section" aria-labelledby="download-heading">
+  <h2 id="download-heading">Download a backup</h2>
+  <form class="form" method="post" action="{{ route_path('backup_download') }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <ul>
+      <li>The archive holds the database and the Compose file of each stack.</li>
+      <li>Stored secrets stay encrypted in the database: registry and object storage credentials, TLS private keys and secret stack variables.</li>
+      <li>The encryption key is not in the archive. A restore asks for it, so keep it apart from the archive.</li>
+      <li>The download is recorded in the activity log.</li>
+    </ul>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Download a backup</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="key-heading">
+  <h2 id="key-heading">Encryption key</h2>
+  <dl class="facts">
+    <dt>Fingerprint</dt>
+    <dd class="mono">{{ key_fingerprint }}</dd>
+    <dt>Held in</dt>
+    <dd>
+      {%- if key_source == "generated" %}<span class="mono">{{ key_file }}</span> in the key volume
+      {%- elif key_source == "file" %}The file <span class="mono">{{ key_file }}</span>, named by <span class="mono">DOCKMIN_SECRET_KEY_FILE</span>
+      {%- else %}The <span class="mono">DOCKMIN_SECRET_KEY</span> environment variable{% endif -%}
+    </dd>
+  </dl>
+  {% if key_source == "generated" %}
+  <div class="panel panel--notice" role="note">
+    <p><strong>Copy the key file somewhere apart from the data volume.</strong></p>
+    <p>No archive contains the key. Without a copy, the stored credentials cannot be read after the volume is lost.</p>
+  </div>
+  {% else %}
+  <p>No archive contains the key. Keep a copy apart from the archives.</p>
+  {% endif %}
+  <p><a class="btn" href="{{ route_path('server_encryption') }}">Encryption: key versions, check and re-encrypt stored secrets</a></p>
+</section>
+
+<section class="section" aria-labelledby="scheduled-heading">
+  <h2 id="scheduled-heading">Scheduled backups</h2>
+  <p>A <span class="mono">backup-syncer</span> rule makes an archive on a schedule, uploads it to an object storage target and applies the target's retention.</p>
+  <div class="row-actions">
+    <a class="btn" href="{{ route_path('automation_rule_new') }}?{{ {'subsystem': 'backup-syncer'}|urlencode }}">Add a scheduled backup</a>
+    <a class="btn" href="{{ route_path('automation') }}?{{ {'subsystem': 'backup-syncer'}|urlencode }}">Scheduled backup rules</a>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="records-heading">
+  <h2 id="records-heading">Archives produced</h2>
+  {{ backups_table(rows, columns, pager, targets) }}
+</section>
+{% endblock %}

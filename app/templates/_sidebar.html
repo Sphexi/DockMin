@@ -1,0 +1,118 @@
+{# counts is none for a standard user. #}
+{% from "partials/icon.html" import icon with context %}
+{% from "partials/navigation_counts.html" import nav_link, navigation_counts with context %}
+{% set is_admin = principal.is_administrator %}
+{% set counts_active = "" if nav_environment_remembered else active %}
+{% set dots = {"reachable": "dot--ok", "version_unsupported": "dot--warn", "unreachable": "dot--danger"} %}
+{% set status_labels = {"reachable": "Reachable", "version_unsupported": "Version unsupported", "unreachable": "Unreachable"} %}
+
+{% macro link(key, icon_name, label, href, count=none) -%}
+{{ nav_link(key, icon_name, label, href, active, count) }}
+{%- endmacro %}
+
+{% macro group(key, icon_name, label, keys) -%}
+<li>
+  <details class="nav__group" data-nav-group="{{ key }}"{% if active in keys %} open{% endif %}>
+    <summary class="nav__heading">{{ icon(icon_name) }}<span>{{ label }}</span>{{ icon("chevron-right", "icon--sm nav__chevron") }}</summary>
+    <ul class="nav__list">{{ caller() }}</ul>
+  </details>
+</li>
+{%- endmacro %}
+
+{% macro status_dot(status) -%}
+<span class="dot {{ dots.get(status, 'dot--neutral') }}" role="img" aria-label="{{ status_labels.get(status, 'Status unknown') }}"></span>
+{%- endmacro %}
+
+<aside class="sidenav" id="sidenav">
+  <nav class="sidenav__nav" aria-label="Main">
+    <ul class="nav">
+
+      {% call group("environments", "server", "Environments", ["environments", "groups", "tags"]) %}
+        {{ link("environments", "list", "All environments", route_path("index"), nav_environments|length) }}
+        {% if is_admin %}
+        {{ link("groups", "folder-tree", "Groups", route_path("groups")) }}
+        {{ link("tags", "tag", "Tags", route_path("tags")) }}
+        {% endif %}
+      {% endcall %}
+
+      <li class="nav__env">
+        <details class="env-switch" data-menu>
+          {% if nav_environment %}
+          <summary class="env-switch__current" aria-label="Environment {{ nav_environment.name }}. Switch environment">
+            {{ icon("container") }}
+            <span class="env-switch__text">
+              <span class="env-switch__name"><span>{{ nav_environment.name }}</span>{{ status_dot(nav_environment.status) }}</span>
+              <span class="env-switch__meta">{{ nav_environment.connection }}{% if nav_environment.engine_version %} &middot; {{ nav_environment.engine_version }}{% endif %}</span>
+            </span>
+            {{ icon("chevrons-up-down", "icon--sm") }}
+          </summary>
+          {% else %}
+          <summary class="env-switch__current" aria-label="Choose an environment">
+            {{ icon("container") }}
+            <span class="env-switch__text">
+              <span class="env-switch__label">Environment</span>
+              <span class="env-switch__meta">Choose an environment</span>
+            </span>
+            {{ icon("chevrons-up-down", "icon--sm") }}
+          </summary>
+          {% endif %}
+          <div class="env-switch__panel">
+            <input class="field__input env-switch__filter" type="search" data-env-filter hidden placeholder="Filter environments" aria-label="Filter environments" autocomplete="off">
+            {% if nav_environments %}
+            <ul class="env-switch__list">
+              {% for item in nav_environments %}
+              <li><a class="env-switch__option" href="{{ route_path('environment_detail', environment_id=item.id) }}"{% if nav_environment and item.id == nav_environment.id %} aria-current="true"{% endif %}>
+                {{ status_dot(item.status) }}<span>{{ item.name }}</span><span class="cell-note">{{ item.connection }}</span>
+              </a></li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <p class="field__help">No environments yet.</p>
+            {% endif %}
+            <a class="env-switch__all" href="{{ route_path('index') }}">All environments</a>
+          </div>
+        </details>
+
+        {% if nav_environment %}
+        {{ navigation_counts(nav_environment, counts_active, nav_counts_pending) }}
+        {% endif %}
+      </li>
+
+      {% call group("operations", "activity", "Operations", ["automation", "templates"]) %}
+        {{ link("automation", "workflow", "Automation", route_path("automation")) }}
+        {{ link("templates", "boxes", "Templates", route_path("templates")) }}
+      {% endcall %}
+
+      {% call group("people", "users", "Teams and users", ["teams", "users"]) %}
+        {{ link("teams", "users-round", "Teams", route_path("teams")) }}
+        {% if is_admin %}
+        {{ link("users", "user", "Users", route_path("users")) }}
+        {% endif %}
+      {% endcall %}
+
+      {% if is_admin %}
+      {% call group("admin", "settings", "Administration", ["jobs", "activity", "registries", "template-catalogues", "storage", "backups", "certificate", "notifications", "encryption", "instance"]) %}
+        {{ link("jobs", "clock", "Jobs", route_path("jobs")) }}
+        {{ link("activity", "scroll-text", "Activity", route_path("activity")) }}
+        {{ link("registries", "key-round", "Registries", route_path("registries")) }}
+        {{ link("template-catalogues", "layers", "Template catalogues", route_path("template_catalogues")) }}
+        {{ link("storage", "database", "Object storage", route_path("object_storage_targets")) }}
+        {{ link("backups", "archive", "Backups", route_path("backups")) }}
+        {{ link("certificate", "shield-check", "Certificate", route_path("server_certificate")) }}
+        {{ link("notifications", "bell", "Notifications", route_path("notification_channels")) }}
+        {{ link("encryption", "lock", "Encryption", route_path("server_encryption")) }}
+        {{ link("instance", "container", "Instance", route_path("server_instance")) }}
+      {% endcall %}
+      {% endif %}
+
+      {% if request.app.state.settings.development_checks %}
+      <li>
+        <ul class="nav__list">
+          {{ link("ui-kit", "circle-help", "UI kit", route_path("ui_kit")) }}
+        </ul>
+      </li>
+      {% endif %}
+
+    </ul>
+  </nav>
+</aside>

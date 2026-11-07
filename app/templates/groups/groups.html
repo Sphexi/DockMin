@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "groups/_tables.html" import groups_table with context %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Groups - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Groups", "Collections of environments. Access granted on a group applies to every environment in it.") %}
+{% endcall %}
+
+{% call list_bar(list_count(total|default(none), "group")) %}
+<a class="btn btn--primary" href="{{ route_path('group_new') }}">New group</a>
+{% endcall %}
+{{ groups_table(rows, columns, pager) }}
+{% endblock %}

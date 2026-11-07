@@ -1,0 +1,67 @@
+{# The secret input is never given a value. #}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/pem_field.html" import pem_field %}
+{% from "registries/_parts.html" import ca_certificates with context %}
+
+{% macro provider_fields(state, presentation, fields) %}
+{% set shape = state.shape %}
+<div id="registry-provider-fields" class="form-group">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <input type="hidden" name="provider" value="{{ state.provider }}">
+  <p class="field__help">{{ presentation.summary }}</p>
+
+  {% if shape.address_editable %}
+  {{ form_field("address", presentation.address_label, value=state.address, error=fields.get("address"), help=presentation.address_help, required=true) }}
+  {% else %}
+  <dl class="facts">
+    <dt>{{ presentation.address_label }}</dt>
+    <dd class="mono">{{ shape.fixed_address }}</dd>
+  </dl>
+  {% endif %}
+
+  {% for extra in presentation.extras %}
+  {% if extra.input == "checkbox" %}
+  {{ checkbox_field(extra.name, extra.label, checked=state.extras[extra.name], help=extra.help, error=fields.get(extra.name)) }}
+  {% else %}
+  {{ form_field(extra.name, extra.label, value=state.extras[extra.name], error=fields.get(extra.name), type=extra.input, help=extra.help, required=extra.required) }}
+  {% endif %}
+  {% endfor %}
+
+  <fieldset class="choice-group"{% if fields.get("authentication_enabled") %} data-invalid{% endif %}>
+    <legend>Authentication</legend>
+    {% if shape.anonymous_allowed %}
+    {{ checkbox_field("authentication_enabled", "Authenticate to this registry", checked=state.authentication_enabled, help="Leave unchecked for a registry that allows anonymous pulls. No user name or secret is stored.", error=fields.get("authentication_enabled")) }}
+    {% else %}
+    <input type="hidden" name="authentication_enabled" value="on">
+    <p class="field__help">This provider always needs credentials.</p>
+    {% endif %}
+    <div class="form-group" data-auth-only>
+      {{ form_field("username", presentation.username_label, value=state.username, error=fields.get("username"), help=presentation.username_help, autocomplete="off") }}
+      {% set secret_help = presentation.secret_help %}
+      {% if state.secret_stored and not fields.get("secret") %}
+      {% set secret_help = "A secret is stored; leave blank to keep it. Changing the provider, address, region, GitLab instance URL, CA bundle or certificate verification requires entering it again. " ~ secret_help %}
+      {% elif fields %}
+      {% set secret_help = "Secrets and certificates are never sent back to the browser. Enter them again. " ~ secret_help %}
+      {% endif %}
+      {{ form_field("secret", presentation.secret_label, type="password", error=fields.get("secret"), help=secret_help, autocomplete="new-password") }}
+    </div>
+  </fieldset>
+
+  {% if shape.tls_options_allowed %}
+  <fieldset class="choice-group"{% if fields.get("verify_tls") or fields.get("ca_bundle") %} data-invalid{% endif %}>
+    <legend>Server certificate</legend>
+    {{ checkbox_field("verify_tls", "Verify the registry's TLS certificate", checked=state.verify_tls, help="Can be turned off only when authentication is off.", error=fields.get("verify_tls")) }}
+    <div class="panel panel--alert verify-warning" role="note">
+      <p><strong>Certificate verification is off.</strong> The registry's certificate is not checked, so anything between this server and the registry can impersonate it. Use this only for a registry without authentication on a network you control.</p>
+    </div>
+    {% if state.ca_bundle %}
+    <h2>Stored CA certificates</h2>
+    {{ ca_certificates(state.ca_bundle) }}
+    {{ checkbox_field("remove_ca_bundle", "Remove the stored CA certificates", help="The certificates are not shown again. Paste or upload new ones to replace them, or leave empty to keep them.") }}
+    {% endif %}
+    {{ pem_field("ca_bundle", "Additional CA certificates", "PEM certificates, up to 64 KiB, added to the system trust store for this registry. A self-signed server certificate can be supplied here. Changing them requires entering the secret again.", error=fields.get("ca_bundle")) }}
+  </fieldset>
+  {% endif %}
+</div>
+{% endmacro %}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/radio_field.html" import radio_field %}
+{% block title %}Prune volumes on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Prune volumes" %}
+{% block content %}
+{% call page_header("Prune volumes", environment.name) %}
+<a class="btn" href="{{ list_href }}">Back to volumes</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("Check the selection", message) }}
+{% endfor %}
+
+<form class="form form--wide" method="get" action="{{ prune_href }}">
+  <fieldset class="choice-group">
+    <legend>What to prune</legend>
+    {{ radio_field("mode", "Anonymous volumes", "anonymous", checked=(mode != "all"), help="Volumes no container mounts that Docker created without a name.") }}
+    {{ radio_field("mode", "All unused volumes", "all", checked=(mode == "all"), help="Every volume no container mounts, named ones included.") }}
+  </fieldset>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">List the volumes</button>
+  </div>
+</form>
+
+{% if plan %}
+<section class="section" aria-labelledby="prune-heading">
+  <h2 id="prune-heading">{{ plan.candidates|length }} {{ "volume" if plan.candidates|length == 1 else "volumes" }} would be removed</h2>
+  {% if plan.mode == "all" %}
+  <div class="panel panel--alert" role="note">
+    <p>Named volumes hold data that no container mounts right now. Removing one deletes that data for good.</p>
+  </div>
+  {% endif %}
+  {% if plan.candidates %}
+  {% set items = [] %}
+  {% for candidate in plan.candidates %}
+  {% set _ = items.append({"name": candidate.name, "detail": candidate.driver ~ (", anonymous" if candidate.kind == "anonymous" else "") ~ (", stack " ~ candidate.stack if candidate.stack else "")}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "volume") }}
+  {% if plan.truncated %}
+  <div class="panel panel--notice" role="note">
+    {% set left = plan.total - plan.candidates|length %}
+    <p>{{ left }} more {{ "volume is" if left == 1 else "volumes are" }} not in this prune. Run it again afterwards for the rest.</p>
+  </div>
+  {% endif %}
+  <p>Each volume is checked again as it is removed, and skipped if it has changed or a container mounts it now.</p>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="mode" value="{{ plan.mode }}">
+    {% for candidate in plan.candidates %}
+    <input type="hidden" name="target" value="{{ candidate.name }}:{{ candidate.created_at_text }}">
+    {% endfor %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Remove {{ plan.candidates|length }} {{ "volume" if plan.candidates|length == 1 else "volumes" }}</button>
+      <a class="btn" href="{{ list_href }}">Cancel</a>
+    </div>
+  </form>
+  {% else %}
+  <p>Nothing to prune.</p>
+  {% endif %}
+  {% if plan.kept %}
+  <div class="panel panel--notice" role="note">
+    <h3 class="confirm__subheading">Kept</h3>
+    <p>The container dockmin runs in has {{ "this volume" if plan.kept|length == 1 else "these volumes" }} mounted, so {{ "it is" if plan.kept|length == 1 else "they are" }} not pruned.</p>
+    <ul class="confirm-targets__list">
+      {% for volume in plan.kept %}
+      <li><span class="mono"{% if volume.short_name != volume.name %} title="{{ volume.name }}"{% endif %}>{{ volume.short_name }}</span> <span class="cell-note">kept: the container dockmin runs in has it mounted</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

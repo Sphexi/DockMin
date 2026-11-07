@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>BadDigest</Code><Message>The Content-Md5 you specified did not match what we received.</Message><Resource>/dockmin-e2e/backups/stream/three-badmd5.tar.gz</Resource><RequestId>18E186FDD0C12A367395116F</RequestId><Key>backups/stream/three-badmd5.tar.gz</Key><BucketName>dockmin-e2e</BucketName></Error>

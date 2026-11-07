@@ -1,0 +1,310 @@
+/*
+ * Design tokens; the only stylesheet that contains colour values.
+ * The dark values in [data-theme="dark"] and in the system-preference block must stay identical;
+ * the latter gives visitors with no stored choice a first paint that matches the OS without script.
+ */
+
+:root {
+  color-scheme: light;
+
+  --color-bg: #f3f5f8;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f6f8fa;
+  --color-surface-hover: #eef2f6;
+  --color-surface-selected: #e3eefc;
+  --color-border: #d6dde4;
+  --color-border-strong: #818b95;
+  --color-text: #1f2328;
+  --color-text-muted: #59636e;
+  --color-text-subtle: #626b75;
+  --color-accent: #085fc7;
+  --color-accent-hover: #0550ae;
+  --color-accent-solid: #0969da;
+  --color-accent-solid-hover: #0757b8;
+  --color-on-accent: #ffffff;
+  --color-focus: #0969da;
+  --color-backdrop: rgb(31 35 40 / 0.5);
+  --color-clear: transparent;
+
+  --color-nav-bg: #ffffff;
+  --color-nav-border: #d6dde4;
+  --color-nav-text: #3d444d;
+  --color-nav-text-muted: #59636e;
+  --color-nav-hover: #eef2f6;
+  --color-nav-active-bg: #e3eefc;
+  --color-nav-active-text: #0550ae;
+  --color-nav-active-bar: #0969da;
+  --color-topbar-bg: #ffffff;
+  --color-topbar-border: #d6dde4;
+
+  --color-danger-solid: #cf222e;
+  --color-danger-solid-hover: #a40e26;
+  --color-on-danger-solid: #ffffff;
+
+  --color-disabled-bg: #e9edf1;
+  --color-disabled-border: #d0d7de;
+  --color-disabled-fg: #636c76;
+
+  --color-ok-bg: #dafbe1;
+  --color-ok-fg: #116329;
+  --color-warn-bg: #fff1c2;
+  --color-warn-fg: #7a4a00;
+  --color-danger-bg: #ffebe9;
+  --color-danger-fg: #a40e26;
+  --color-info-bg: #ddf4ff;
+  --color-info-fg: #0550ae;
+  --color-local-bg: #f6edff;
+  --color-local-fg: #6639ba;
+  --color-neutral-bg: #eef1f4;
+  --color-neutral-fg: #4c5560;
+
+  --color-chart-1: #0969da;
+  --color-chart-2: #1a7f37;
+  --color-chart-3: #bc4c00;
+  --color-chart-4: #8250df;
+  --color-chart-grid: #d6dde4;
+
+  --color-terminal-black: #24292f;
+  --color-terminal-bright-black: #57606a;
+  --color-terminal-white: #59636e;
+  --color-terminal-bright-white: #1f2328;
+  --color-terminal-bright-red: #cf222e;
+
+  --shadow-1: 0 1px 0 rgb(31 35 40 / 0.06);
+  --shadow-2: 0 8px 24px rgb(31 35 40 / 0.15), 0 1px 3px rgb(31 35 40 / 0.12);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0d1117;
+  --color-surface: #151b23;
+  --color-surface-sunken: #10151c;
+  --color-surface-hover: #1c232c;
+  --color-surface-selected: #16273d;
+  --color-border: #2a313a;
+  --color-border-strong: #68717b;
+  --color-text: #e6edf3;
+  --color-text-muted: #9ba5b0;
+  --color-text-subtle: #848d97;
+  --color-accent: #4c9bf9;
+  --color-accent-hover: #79b8ff;
+  --color-accent-solid: #1f6feb;
+  --color-accent-solid-hover: #1158c7;
+  --color-on-accent: #ffffff;
+  --color-focus: #4c9bf9;
+  --color-backdrop: rgb(1 4 9 / 0.7);
+
+  --color-nav-bg: #010409;
+  --color-nav-border: #21272f;
+  --color-nav-text: #c3cbd4;
+  --color-nav-text-muted: #848d97;
+  --color-nav-hover: #151b23;
+  --color-nav-active-bg: #16273d;
+  --color-nav-active-text: #e6edf3;
+  --color-nav-active-bar: #4c9bf9;
+  --color-topbar-bg: #010409;
+  --color-topbar-border: #21272f;
+
+  --color-danger-solid: #c9302c;
+  --color-danger-solid-hover: #da3633;
+  --color-on-danger-solid: #ffffff;
+
+  --color-disabled-bg: #1b222b;
+  --color-disabled-border: #2f3742;
+  --color-disabled-fg: #7d8792;
+
+  --color-ok-bg: #0f2a1b;
+  --color-ok-fg: #4ac260;
+  --color-warn-bg: #2c2210;
+  --color-warn-fg: #d9a43a;
+  --color-danger-bg: #331517;
+  --color-danger-fg: #ff7b72;
+  --color-info-bg: #102540;
+  --color-info-fg: #6cb0ff;
+  --color-local-bg: #24193d;
+  --color-local-fg: #c4a0ff;
+  --color-neutral-bg: #1f262e;
+  --color-neutral-fg: #a3adb8;
+
+  --color-chart-1: #58a6ff;
+  --color-chart-2: #3fb950;
+  --color-chart-3: #f0883e;
+  --color-chart-4: #bc8cff;
+  --color-chart-grid: #2a313a;
+
+  --color-terminal-black: #8c959f;
+  --color-terminal-bright-black: #a3adb8;
+  --color-terminal-white: #d0d7de;
+  --color-terminal-bright-white: #ffffff;
+  --color-terminal-bright-red: #ff8f85;
+
+  --shadow-1: 0 1px 0 rgb(1 4 9 / 0.4);
+  --shadow-2: 0 8px 24px rgb(1 4 9 / 0.8), 0 0 0 1px #2a313a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --color-bg: #0d1117;
+    --color-surface: #151b23;
+    --color-surface-sunken: #10151c;
+    --color-surface-hover: #1c232c;
+    --color-surface-selected: #16273d;
+    --color-border: #2a313a;
+    --color-border-strong: #68717b;
+    --color-text: #e6edf3;
+    --color-text-muted: #9ba5b0;
+    --color-text-subtle: #848d97;
+    --color-accent: #4c9bf9;
+    --color-accent-hover: #79b8ff;
+    --color-accent-solid: #1f6feb;
+    --color-accent-solid-hover: #1158c7;
+    --color-on-accent: #ffffff;
+    --color-focus: #4c9bf9;
+    --color-backdrop: rgb(1 4 9 / 0.7);
+
+    --color-nav-bg: #010409;
+    --color-nav-border: #21272f;
+    --color-nav-text: #c3cbd4;
+    --color-nav-text-muted: #848d97;
+    --color-nav-hover: #151b23;
+    --color-nav-active-bg: #16273d;
+    --color-nav-active-text: #e6edf3;
+    --color-nav-active-bar: #4c9bf9;
+    --color-topbar-bg: #010409;
+    --color-topbar-border: #21272f;
+
+    --color-danger-solid: #c9302c;
+    --color-danger-solid-hover: #da3633;
+    --color-on-danger-solid: #ffffff;
+
+    --color-disabled-bg: #1b222b;
+    --color-disabled-border: #2f3742;
+    --color-disabled-fg: #7d8792;
+
+    --color-ok-bg: #0f2a1b;
+    --color-ok-fg: #4ac260;
+    --color-warn-bg: #2c2210;
+    --color-warn-fg: #d9a43a;
+    --color-danger-bg: #331517;
+    --color-danger-fg: #ff7b72;
+    --color-info-bg: #102540;
+    --color-info-fg: #6cb0ff;
+    --color-local-bg: #24193d;
+    --color-local-fg: #c4a0ff;
+    --color-neutral-bg: #1f262e;
+    --color-neutral-fg: #a3adb8;
+
+    --color-chart-1: #58a6ff;
+    --color-chart-2: #3fb950;
+    --color-chart-3: #f0883e;
+    --color-chart-4: #bc8cff;
+    --color-chart-grid: #2a313a;
+
+    --color-terminal-black: #8c959f;
+    --color-terminal-bright-black: #a3adb8;
+    --color-terminal-white: #d0d7de;
+    --color-terminal-bright-white: #ffffff;
+    --color-terminal-bright-red: #ff8f85;
+
+    --shadow-1: 0 1px 0 rgb(1 4 9 / 0.4);
+    --shadow-2: 0 8px 24px rgb(1 4 9 / 0.8), 0 0 0 1px #2a313a;
+  }
+}
+
+:root {
+  --theme-icon-light: inline-block;
+  --theme-icon-dark: none;
+}
+
+[data-theme="dark"] {
+  --theme-icon-light: none;
+  --theme-icon-dark: inline-block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --theme-icon-light: none;
+    --theme-icon-dark: inline-block;
+  }
+}
+
+:root {
+  --space-1: 0.125rem;
+  --space-2: 0.25rem;
+  --space-3: 0.375rem;
+  --space-4: 0.5rem;
+  --space-5: 0.75rem;
+  --space-6: 1rem;
+  --space-7: 1.5rem;
+  --space-8: 2rem;
+
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-pill: 62.5rem;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* rem stays 16px, so browser font settings and zoom still apply. */
+  --text-2xs: 0.625rem;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-md: 0.8125rem;
+  --text-lg: 0.9375rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.375rem;
+  --text-body: var(--text-sm);
+
+  --weight-normal: 400;
+  --weight-medium: 560;
+  --weight-bold: 680;
+
+  --leading-tight: 1.25;
+  --leading-body: 1.45;
+  --line-row: 1rem;
+  --tracking-heading: -0.01em;
+  --tracking-label: 0.04em;
+
+  --size-page: none;
+  --size-form: 48rem;
+  --size-form-column: 60rem;
+  --size-control: 1.5rem;
+  --size-control-sm: 1.25rem;
+  --size-row: 1.5rem;
+  --size-topbar: 2.5rem;
+  --size-sidebar: 13.5rem;
+  --size-icon: 0.875rem;
+  --size-icon-sm: 0.75rem;
+  --size-toast: 24rem;
+  --col-select: 2.75rem;
+  --col-badge: 8rem;
+  --col-time: 9.75rem;
+  --col-count: 6rem;
+  --col-short: 7rem;
+  --col-medium: 12rem;
+  --col-names: 16rem;
+  --col-actions: 8.5rem;
+  --col-actions-wide: 15rem;
+  --col-actions-row: 26rem;
+  --border-width: 1px;
+  --focus-width: 2px;
+  --motion-fast: 120ms;
+  --motion-medium: 180ms;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-md: 0.9375rem;
+    --text-lg: 1.0625rem;
+    --size-control: 2.25rem;
+    --size-control-sm: 2rem;
+    --size-row: 2.25rem;
+    --size-icon: 1rem;
+    --col-actions-row: 28rem;
+  }
+}

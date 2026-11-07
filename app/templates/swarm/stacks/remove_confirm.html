@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "swarm/stacks/_parts.html" import member_list with context %}
+{% block title %}Remove stack {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Remove" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Remove stack", "Review the stack below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Remove stack <span class="mono cell-wrap">{{ review.stack }}</span> from {{ review.environment_name }}?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  <p>Every service, network, config and secret that carries the stack's name is removed, and dockmin forgets the stack. The tasks of each service stop and their containers are removed on every node. Volumes are not removed: their data stays where it is, and each volume without an access control of its own gets a copy of the stack's.</p>
+
+  {{ member_list("Services that are removed", review.services) }}
+  {{ member_list("Networks that are removed", review.networks) }}
+  {{ member_list("Configs that are removed", review.configs) }}
+  {{ member_list("Secrets that are removed", review.secrets) }}
+  {% if review.hidden_members %}
+  <p class="field__help">{{ review.hidden_members }} more {{ "object" if review.hidden_members == 1 else "objects" }} of this stack {{ "is" if review.hidden_members == 1 else "are" }} outside what you can see.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Volumes that are kept</h3>
+  {% if review.volumes_kept %}
+  <ul class="chip-list">
+    {% for volume in review.volumes_kept %}
+    <li class="mono cell-wrap">{{ volume }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No volume of this stack is visible on this manager.</p>
+  {% endif %}
+  <p class="field__help">Volumes on other nodes stay on those nodes. Removing a stack never deletes a volume.</p>
+
+  {% if review.unwritable_members %}
+  <div class="panel panel--alert" role="note">
+    <h3>You cannot change every object of this stack</h3>
+    <p>{{ review.unwritable_members }} {{ "object" if review.unwritable_members == 1 else "objects" }} of this stack {{ "is" if review.unwritable_members == 1 else "are" }} outside what you can change. A stack is removed only by someone who can change all of it. Ask an administrator.</p>
+  </div>
+  <p class="row-actions">
+    <a class="btn" href="{{ detail_href }}">Back to the stack</a>
+  </p>
+  {% else %}
+  <form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_stack_id" value="{{ review.stack_id }}">
+    <input type="hidden" name="expected_members" value="{{ review.expected_members }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Remove stack</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

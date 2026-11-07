@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Delete {{ channel.name }} - dockmin{% endblock %}
+{% set crumb_object = channel.name %}
+{% set crumb_object_href = route_path('notification_channel_detail', channel_id=channel.id) %}
+{% set crumb_page = "Delete" %}
+{% block content %}
+{% call page_header("Delete notification channel", "Review what is removed. Nothing is deleted until you confirm.") %}
+<a class="btn" href="{{ route_path('notification_channel_detail', channel_id=channel.id) }}">Back to the channel</a>
+{% endcall %}
+
+{% for message in errors.values() %}
+{{ error_state("The channel was not deleted", message) }}
+{% endfor %}
+
+<form class="form" method="post" action="{{ route_path('notification_channel_delete', channel_id=channel.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_name" value="{{ channel.name }}">
+  {{ confirm_targets([{"name": channel.name, "detail": channel.kind_label}], "notification channel") }}
+  <ul>
+    <li>Its subscriptions and stored secrets are deleted.</li>
+    <li>Messages waiting for it are discarded.</li>
+    <li>Messages already delivered are not affected.</li>
+  </ul>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Delete channel</button>
+    <a class="btn" href="{{ route_path('notification_channel_detail', channel_id=channel.id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

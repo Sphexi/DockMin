@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% from "restore/_progress.html" import restore_progress with context %}
+{% block title %}Restore progress - dockmin{% endblock %}
+{% set crumb_page = "Restore progress" %}
+{% block content %}
+{{ page_header("Restore progress", "The steps run in order. This page updates itself while the restore runs.") }}
+{{ restore_progress(progress, labels, paused, can_resume, page=true) }}
+{% endblock %}

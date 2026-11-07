@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import grantee_names with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Delete {{ impact.name }} - dockmin{% endblock %}
+{% set crumb_object = impact.name %}
+{% set crumb_object_href = route_path('registry_detail', credential_id=impact.credential_id) %}
+{% set crumb_page = "Delete" %}
+{% block content %}
+{% set presentation = catalogue[impact.provider] %}
+{% call page_header("Delete registry", "Review what is removed. Nothing is deleted until you confirm.") %}
+<a class="btn" href="{{ route_path('registry_detail', credential_id=impact.credential_id) }}">Back to the registry</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("The registry was not deleted", message) }}
+{% endfor %}
+
+<section class="section" aria-labelledby="delete-set-heading">
+  <h2 id="delete-set-heading">{{ impact.name }}</h2>
+  <dl class="facts">
+    <dt>Provider</dt>
+    <dd>{{ presentation.label }}</dd>
+    <dt>Registry address</dt>
+    <dd class="mono">{{ impact.address }}</dd>
+    <dt>Environments that lose it</dt>
+    <dd>
+      {% if impact.environments %}
+      <ul class="chip-list">
+        {% for environment in impact.environments %}
+        <li>{{ environment.name }}</li>
+        {% endfor %}
+      </ul>
+      {% if impact.environments_total > impact.environments|length %}
+      <p class="field__help">Showing {{ impact.environments|length }} of {{ impact.environments_total }} environments.</p>
+      {% endif %}
+      {% else %}
+      None
+      {% endif %}
+    </dd>
+    <dt>Users and teams that lose it</dt>
+    <dd>{{ grantee_names(impact.access) }}</dd>
+    <dt>Images bound to it</dt>
+    <dd>{{ impact.affected_total }}</dd>
+  </dl>
+  <ul>
+    <li>{{ impact.pulled_note }}</li>
+    <li>{{ impact.activity_note }}</li>
+  </ul>
+</section>
+
+{% if impact.affected_total %}
+<section class="section" aria-labelledby="affected-heading">
+  <h2 id="affected-heading">{{ impact.affected_total }} {{ "image is" if impact.affected_total == 1 else "images are" }} affected</h2>
+  <div class="panel panel--notice" role="note">
+    <p>{{ impact.bindings_note }}</p>
+  </div>
+  <div class="data-table__scroll" role="region" aria-label="Affected images" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Images whose binding moves to "Credential set deleted"</caption>
+      <thead>
+        <tr><th scope="col">Environment</th><th scope="col">Image</th></tr>
+      </thead>
+      <tbody>
+        {% for image in impact.affected %}
+        <tr>
+          <th scope="row">{{ image.environment_name }}</th>
+          <td class="mono cell-wrap">{{ image.reference }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if impact.affected_hidden %}
+  <p class="field__help">and {{ impact.affected_hidden }} more not listed.</p>
+  {% endif %}
+  {% if impact.per_environment %}
+  <h3>Images per environment</h3>
+  <ul class="chip-list">
+    {% for environment in impact.per_environment %}
+    <li>{{ environment.environment_name }}: {{ environment.count }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endif %}
+
+<form class="form" method="post" action="{{ route_path('registry_delete', credential_id=impact.credential_id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_name" value="{{ impact.name }}">
+  <input type="hidden" name="expected_bindings" value="{{ impact.affected_total }}">
+  {{ confirm_targets([impact.name], "registry") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Delete registry</button>
+    <a class="btn" href="{{ route_path('registry_detail', credential_id=impact.credential_id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

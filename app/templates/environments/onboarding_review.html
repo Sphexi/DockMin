@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Adopt everything on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Adopt everything on this host" %}
+{% block content %}
+{% call page_header("Adopt everything on this host", environment.name) %}
+<a class="btn" href="{{ environment_href }}">Back to the environment</a>
+{% endcall %}
+
+<p>Tick what to adopt, bind or give access settings. Nothing is pulled, redeployed or restarted: the next page names every ticked target before anything is written.</p>
+
+<form class="form" method="post" action="{{ confirm_href }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <section class="section" aria-labelledby="stacks-heading">
+    <h2 id="stacks-heading">Stacks ({{ stacks|length }})</h2>
+    {% if stacks %}
+    <div class="data-table__scroll" role="region" aria-label="Stacks" tabindex="0">
+      <table class="table">
+        <caption class="visually-hidden">Unmanaged Compose projects and Swarm namespaces</caption>
+        <thead>
+          <tr>
+            <th scope="col">Adopt</th>
+            <th scope="col">Name</th>
+            <th scope="col">Kind</th>
+            <th scope="col">File</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in stacks %}
+          <tr>
+            <td>
+              {% if row.offered %}
+              <input class="choice__input" type="checkbox" name="stack" value="{{ row.index }}" checked aria-label="Adopt {{ row.name }}">
+              {% else %}
+              <input class="choice__input" type="checkbox" disabled aria-label="{{ row.name }} needs a file and cannot be adopted here">
+              {% endif %}
+            </td>
+            <th scope="row" class="cell-wrap mono">{{ row.name }}</th>
+            <td>{{ "Swarm namespace" if row.kind == "swarm" else "Compose project" }}</td>
+            <td>
+              {% if row.offered %}
+              {{ row.source }}. <a href="{{ stack_href[row.index] }}">View the file</a>
+              {% else %}
+              {{ badge("Needs a file", "warn") }} <span class="cell-note">{{ row.needs }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p>No unmanaged project or namespace is on this host.</p>
+    {% endif %}
+    {% if review.dismissed > 0 %}
+    <p class="field__help">{{ review.dismissed }} dismissed {{ "project" if review.dismissed == 1 else "projects" }} not reviewed</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="images-heading">
+    <h2 id="images-heading">Images ({{ images|length }})</h2>
+    {% if not review.images_complete %}
+    <div class="panel panel--notice" role="note"><p>Some containers or services could not be read, so an image in use may be missing.</p></div>
+    {% endif %}
+    {% if images %}
+    <div class="data-table__scroll" role="region" aria-label="Images" tabindex="0">
+      <table class="table">
+        <caption class="visually-hidden">Image references in use with no credential binding</caption>
+        <thead>
+          <tr>
+            <th scope="col">Bind</th>
+            <th scope="col">Reference</th>
+            <th scope="col">Outcome</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in images %}
+          <tr>
+            <td>
+              {% if row.offered %}
+              <input class="choice__input" type="checkbox" name="image" value="{{ row.index }}"{% if row.ticked %} checked{% endif %} aria-label="Bind {{ row.reference }}">
+              {% else %}
+              <input class="choice__input" type="checkbox" disabled aria-label="{{ row.reference }} cannot be bound">
+              {% endif %}
+            </td>
+            <th scope="row" class="cell-wrap mono">{{ row.reference }}</th>
+            <td>
+              {{ row.outcome }}
+              {% if row.ambiguous %}
+              <label class="visually-hidden" for="choice-{{ row.index }}">Credential set for {{ row.reference }}</label>
+              <select class="field__input" id="choice-{{ row.index }}" name="choice_{{ row.index }}">
+                <option value="" selected>Choose a set</option>
+                {% for value, name in row.choices %}
+                <option value="{{ value }}">{{ name }}</option>
+                {% endfor %}
+              </select>
+              {% endif %}
+              {% for note in row.notes %}
+              <span class="cell-note">{{ note }}</span>
+              {% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p>Every image in use is bound to a credential set already.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="objects-heading">
+    <h2 id="objects-heading">Objects without access settings ({{ objects|length }})</h2>
+    {% if not review.objects_complete %}
+    <div class="panel panel--notice" role="note"><p>The Swarm services, configs and secrets of this host could not be read, so they are not listed.</p></div>
+    {% endif %}
+    {% if review.objects_beyond %}
+    <div class="panel panel--notice" role="note"><p>{{ review.objects_beyond }} more {{ "object has" if review.objects_beyond == 1 else "objects have" }} no access settings and {{ "is" if review.objects_beyond == 1 else "are" }} not listed. {{ "It is" if review.objects_beyond == 1 else "They are" }} left as {{ "it is" if review.objects_beyond == 1 else "they are" }}; run this review again afterwards for the next ones.</p></div>
+    {% endif %}
+    {% if objects %}
+    <div class="data-table__scroll" role="region" aria-label="Objects" tabindex="0">
+      <table class="table">
+        <caption class="visually-hidden">Objects with no access settings</caption>
+        <thead>
+          <tr>
+            <th scope="col">Assign</th>
+            <th scope="col">Type</th>
+            <th scope="col">Name</th>
+            <th scope="col">Environment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in objects %}
+          <tr>
+            <td><input class="choice__input" type="checkbox" name="object" value="{{ row.index }}" checked aria-label="Assign {{ row.type }} {{ row.name }}"></td>
+            <td>{{ row.type|capitalize }}</td>
+            <th scope="row" class="cell-wrap mono">{{ row.name }}</th>
+            <td>{{ environment.name }}{% if row.candidate %} <span class="cell-note">{{ row.candidate }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p>Every object on this host has access settings or belongs to a stack that has.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="ownership-heading">
+    <h2 id="ownership-heading">Ownership for the ticked objects</h2>
+    <p class="field__help">Leave both empty to keep the objects visible to administrators only. Nothing is made public. A volume with a candidate owner, shown above, gets that owner when no owner is typed here.</p>
+    <div class="field">
+      <div class="field__head"><label class="field__label" for="field-owner">Owner (username)</label></div>
+      <input class="field__input" id="field-owner" name="owner" type="text" maxlength="128" autocomplete="off">
+    </div>
+    <div class="field">
+      <div class="field__head"><label class="field__label" for="field-team">Team (name)</label></div>
+      <input class="field__input" id="field-team" name="team" type="text" maxlength="128" autocomplete="off">
+    </div>
+    <div class="field">
+      <div class="field__head"><label class="field__label" for="field-level">Team access</label></div>
+      <select class="field__input" id="field-level" name="level">
+        <option value="write" selected>Read and write</option>
+        <option value="read">Read only</option>
+      </select>
+    </div>
+  </section>
+
+  {% if review.protected %}
+  <section class="section" aria-labelledby="protected-heading">
+    <h2 id="protected-heading">dockmin's own objects ({{ review.protected|length }})</h2>
+    <p>These run dockmin itself. They are listed and never offered.</p>
+    <ul class="ref-list">
+      {% for item in review.protected %}
+      <li class="ref-list__item"><span class="cell-note">{{ item.type|capitalize }}</span> <span class="mono cell-wrap">{{ item.name }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Review the selection</button>
+    <a class="btn" href="{{ environment_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

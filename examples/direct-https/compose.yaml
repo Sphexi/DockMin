@@ -1,0 +1,21 @@
+services:
+  dockmin:
+    ports: !override
+      - "${DOCKMIN_HTTPS_PUBLIC_PORT:-443}:${DOCKMIN_HTTPS_PORT:-8443}"
+      - "80:${DOCKMIN_PORT:-8000}"
+    environment:
+      DOCKMIN_TLS_CERT_FILE: /run/secrets/dockmin_tls_cert
+      DOCKMIN_TLS_KEY_FILE: /run/secrets/dockmin_tls_key
+      DOCKMIN_HTTPS_PORT: ${DOCKMIN_HTTPS_PORT:-8443}
+      DOCKMIN_HTTPS_PUBLIC_PORT: ${DOCKMIN_HTTPS_PUBLIC_PORT:-443}
+      DOCKMIN_HTTP_MODE: ${DOCKMIN_HTTP_MODE:-redirect}
+    # The certificate and key files must be readable by uid 10001.
+    secrets:
+      - dockmin_tls_cert
+      - dockmin_tls_key
+
+secrets:
+  dockmin_tls_cert:
+    file: ${DOCKMIN_TLS_CERT_SOURCE:-./secrets/tls_fullchain.pem}
+  dockmin_tls_key:
+    file: ${DOCKMIN_TLS_KEY_SOURCE:-./secrets/tls_privkey.pem}

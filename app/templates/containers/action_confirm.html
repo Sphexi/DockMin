@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "containers/_actions.html" import action_label with context %}
+{% from "containers/_confirm.html" import action_form, return_href with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ action_label(confirmation.action) }} {{ confirmation.name }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.name %}
+{% set crumb_object_href = route_path('environment_container_detail', environment_id=confirmation.environment_id, container_id=confirmation.container_id) %}
+{% set crumb_page = action_label(confirmation.action) %}
+{% block content %}
+{% call page_header(action_label(confirmation.action) ~ " container", "Review the container below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ return_href(confirmation.environment_id, confirmation.container_id, view) }}">Back to {{ "the container" if view == "detail" else "containers" }}</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="confirm-heading">
+  <h2 id="confirm-heading">{{ action_label(confirmation.action) }} <span class="mono">{{ confirmation.name }}</span>?</h2>
+  {{ action_form(confirmation, view) }}
+</section>
+{% endblock %}

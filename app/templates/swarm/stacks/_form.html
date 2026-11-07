@@ -1,0 +1,69 @@
+{% from "partials/form_field.html" import form_field %}
+{% from "stacks/_form.html" import compose_block, files_block, variables_block with context %}
+{% from "swarm/stacks/_validation.html" import swarm_validation_result with context %}
+
+{% macro swarm_stack_form(form, kind, stack_name, post_href, validate_href, cancel_href, compose, variable_cap, catalogue, expected_digest="", file_cap=20) %}
+{% set blocked = compose is not none %}
+<form class="form create-form" method="post" action="{{ post_href }}" enctype="multipart/form-data" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if kind == "edit" %}
+  <input type="hidden" name="expected_file_digest" value="{{ expected_digest }}">
+  {% endif %}
+
+  <section class="panel create-section" aria-labelledby="stack-title">
+    <h2 class="create-section__title" id="stack-title">Stack</h2>
+    <div class="create-section__body">
+      {% if kind == "new" %}
+      {{ form_field("name", "Name", value=form.name, error=form.errors.get("name"), required=true, help="1 to 63 letters, digits, '-' and '_', starting with a letter or digit. Capitals are kept as typed. It cannot be changed later. Every service, network, config and secret is named after it, as <name>_<key>.") }}
+      {% else %}
+      <dl class="facts">
+        <dt>Name</dt>
+        <dd class="mono cell-wrap">{{ stack_name }}</dd>
+      </dl>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="file-title">
+    <h2 class="create-section__title" id="file-title">Compose file</h2>
+    <div class="create-section__body">
+      {{ compose_block(form) }}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="variables-title">
+    <h2 class="create-section__title" id="variables-title">Variables</h2>
+    <div class="create-section__body">
+      {{ variables_block(form, variable_cap, post_href) }}
+    </div>
+  </section>
+
+  {% if kind != "edit" %}
+  <section class="panel create-section" aria-labelledby="files-title">
+    <h2 class="create-section__title" id="files-title">Files</h2>
+    <div class="create-section__body">
+      {{ files_block(form, file_cap, post_href) }}
+    </div>
+  </section>
+  {% endif %}
+
+  {{ swarm_validation_result(form.report, form.rejection, none, none, form.offers, catalogue, form.lines) }}
+
+  <div class="form__actions">
+    {% if validate_href %}
+    <button type="submit" class="btn" formaction="{{ validate_href }}" formnovalidate
+            hx-post="{{ validate_href }}" hx-target="#validation" hx-swap="outerHTML" hx-encoding="multipart/form-data"
+            hx-sync="this:replace" hx-disabled-elt="this"{% if blocked %} disabled{% endif %}>Check the file</button>
+    {% endif %}
+    {% if kind == "new" %}
+    <button type="submit" class="btn btn--primary"{% if blocked %} disabled{% endif %}>Create and deploy</button>
+    {% elif kind == "edit" %}
+    <button type="submit" class="btn btn--primary" name="next" value="save"{% if blocked %} disabled{% endif %}>Save changes</button>
+    <button type="submit" class="btn" name="next" value="redeploy"{% if blocked %} disabled{% endif %}>Save and review redeploy</button>
+    {% else %}
+    <button type="submit" class="btn btn--primary"{% if blocked %} disabled{% endif %}>Adopt stack</button>
+    {% endif %}
+    <a class="btn" href="{{ cancel_href }}">Cancel</a>
+  </div>
+</form>
+{% endmacro %}

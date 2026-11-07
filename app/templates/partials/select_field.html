@@ -1,0 +1,23 @@
+{% macro select_field(name, label, options, value=none, error=none, help=none, required=false) %}
+{% set field_id = "field-" ~ name %}
+{% set described_by = (field_id ~ "-help " if help else "") ~ (field_id ~ "-error" if error else "") %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ label }}{% if required %} <span class="field__required" aria-hidden="true">*</span>{% endif %}</label>
+    {% if help %}
+    <p class="field__help" id="{{ field_id }}-help">{{ help }}</p>
+    {% endif %}
+  </div>
+  <select class="field__input" id="{{ field_id }}" name="{{ name }}"
+          {%- if required %} required{% endif %}
+          {%- if error %} aria-invalid="true"{% endif %}
+          {%- if described_by|trim %} aria-describedby="{{ described_by|trim }}"{% endif %}>
+    {% for option in options %}
+    <option value="{{ option }}"{% if option == value %} selected{% endif %}>{{ option|capitalize }}</option>
+    {% endfor %}
+  </select>
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}

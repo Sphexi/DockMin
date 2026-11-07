@@ -1,0 +1,99 @@
+{# Import with context: rows link to routes. #}
+{% from "environments/_parts.html" import age with context %}
+{% from "images/_parts.html" import reference_list, update_form, update_results, using_containers with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+{% from "partials/error_state.html" import error_state %}
+
+{% macro image_actions(row, can_create, can_remove) %}
+{% set detail_href = route_path("environment_image_detail", environment_id=row.environment_id, image_id=row.id) %}
+{% set tags = row.references|selectattr("kind", "equalto", "tag")|list %}
+<div class="row-actions">
+  <a class="btn btn--compact" href="{{ detail_href }}" aria-label="Details of image {{ row.short_id }}">Details</a>
+  {% if can_create and tags %}
+  <a class="btn btn--compact" href="{{ route_path('environment_image_pull', environment_id=row.environment_id) }}?{{ {'reference': tags[0].text}|urlencode }}" aria-label="Pull again: {{ tags[0].text }}">Pull again</a>
+  {% endif %}
+  {% if can_remove %}
+  <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_image_remove', environment_id=row.environment_id, image_id=row.id) }}" aria-label="Remove image {{ row.short_id }}">Remove</a>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro image_row(row, can_create, can_remove) %}
+<tr id="image-{{ row.id }}">
+  {% if can_remove %}
+  <td>
+    <input class="choice__input" type="checkbox" form="image-batch-form" name="image" value="{{ row.id }}" aria-label="Select image {{ row.references[0].text if row.references else row.short_id }}">
+  </td>
+  {% endif %}
+  <th scope="row">
+    <div class="cell-stack">
+      {{ reference_list(row.references, row.references_hidden, row.environment_id, "No reference") }}
+      <span class="cell-note"><span class="mono">{{ row.short_id }}</span>{% if row.dangling %} {{ badge("Dangling", "warn") }}{% endif %}</span>
+    </div>
+  </th>
+  <td class="is-numeric is-nowrap">{{ row.size|filesize }}</td>
+  <td class="is-nowrap">{{ age(row.created_at, "") }}</td>
+  <td>{{ using_containers(row.containers, row.containers_hidden, row.in_use, row.environment_id) }}</td>
+  {% if can_create or can_remove %}
+  <td>{{ image_actions(row, can_create, can_remove) }}</td>
+  {% endif %}
+</tr>
+{% endmacro %}
+
+{% macro images_table(rows, columns, pager, filtered, can_create, can_remove, environment_id) %}
+{% set columns = ([{"key": "select", "label": "Select", "sortable": false, "numeric": false, "optional": false}] + columns|list) if can_remove else columns %}
+{% set empty_body = "Change the filters, or clear them to see every image." if filtered else ("This host has no images." if principal.is_administrator else "You cannot see any images on this host. Ask an administrator for access to more images.") %}
+{% set show_pull = principal.is_administrator and can_create and not filtered %}
+{% call data_table("images-table", "Images", columns, pager, empty_title=("No matching images" if filtered else "No images"), empty_body=empty_body, empty_action_label=("Pull image" if show_pull else none), empty_action_href=(route_path("environment_image_pull", environment_id=environment_id) if show_pull else none), filtered=filtered, clear_href=route_path("environment_image_list", environment_id=environment_id)) %}
+{% for row in rows %}
+{{ image_row(row, can_create, can_remove) }}
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{% macro batch_form(environment_id, max_batch=none) %}
+<form id="image-batch-form" class="toolbar" method="get" action="{{ route_path('environment_image_batch_remove', environment_id=environment_id) }}">
+  <button type="submit" class="btn btn--danger-quiet">Remove selected...</button>
+  <p class="field__help">Select images in the table, then review them. Nothing is removed until you confirm.
+    {%- if max_batch is not none %} Up to {{ max_batch }} images at a time.{% endif %}</p>
+</form>
+{% endmacro %}
+
+{# Outside the swapped table, so a table response carries it out of band. #}
+{% macro results_summary(total, filtered, oob=false) %}
+<p id="results-summary" class="results-summary" role="status"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
+  {%- if total is not none %}{{ total }} {{ "image" if total == 1 else "images" }}{% if filtered %} {{ "matches" if total == 1 else "match" }} these filters{% endif %}.{% endif -%}
+</p>
+{% endmacro %}
+
+{% macro images_results(rows, columns, pager, total, filtered, environment_id, errors, failure, retry_href, checkable, orphans, can_create, can_remove, oob=false, max_batch=none) %}
+{% if oob %}
+{{ results_summary(none if (errors or failure) else total, filtered, true) }}
+{% endif %}
+{% if errors %}
+{% for message in errors %}
+{{ error_state("Check the filters", message) }}
+{% endfor %}
+{% elif failure %}
+{{ error_state("Images cannot be listed", failure, retry_href=retry_href, region_id="images-results", swap="innerHTML") }}
+{% else %}
+{% if orphans and orphans.bindings %}
+<div class="panel panel--notice" role="note">
+  <p>{{ orphans.bindings|length }}{{ "+" if orphans.more }} {{ "binding refers" if orphans.bindings|length == 1 and not orphans.more else "bindings refer" }} to images that are no longer on this host or in any container.
+    <a href="{{ route_path('environment_image_reap', environment_id=environment_id) }}">Review and remove</a></p>
+</div>
+{% endif %}
+{{ images_table(rows, columns, pager, filtered, can_create, can_remove, environment_id) }}
+{% if can_remove and rows %}
+{{ batch_form(environment_id, max_batch) }}
+{% endif %}
+{% if checkable %}
+<div class="toolbar">
+  {{ update_form(checkable, route_path("environment_image_updates", environment_id=environment_id)) }}
+  <p class="field__help">Compares the bound references on this page with their registries.</p>
+</div>
+{% endif %}
+{{ update_results(none) }}
+{% endif %}
+{% endmacro %}

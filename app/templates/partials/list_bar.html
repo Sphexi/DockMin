@@ -1,0 +1,14 @@
+{# summary is the page's results line, rendered by the caller; the body of the call holds the actions. #}
+{% macro list_bar(summary) %}
+<div class="list-bar">
+  {{ summary }}
+  <div class="list-bar__actions">{{ caller() }}</div>
+</div>
+{% endmacro %}
+
+{# With oob the results line replaces the one already on the page. #}
+{% macro list_count(total, singular, plural=none, filtered=false, oob=false) %}
+<p id="results-summary" class="results-summary" role="status"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
+  {%- if total is not none %}{{ total }} {{ singular if total == 1 else (plural or singular ~ "s") }}{% if filtered %} {{ "matches" if total == 1 else "match" }} these filters{% endif %}.{% endif -%}
+</p>
+{% endmacro %}

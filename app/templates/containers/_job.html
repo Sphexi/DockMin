@@ -1,0 +1,49 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/engine_detail.html" import engine_detail_block %}
+{% from "images/_parts.html" import transfer_progress with context %}
+
+{# Also rendered as each stream event, so it reads only its arguments and the request's csrf token. #}
+{% macro container_job_progress(job, stages, notices, can_cancel, cancel_href) %}
+{% set state = choice(job.state, ["running", "succeeded", "failed", "cancelled"]) %}
+{% set tones = {"running": "info", "succeeded": "ok", "failed": "danger", "cancelled": "warn"} %}
+{% set words = {"pending": "pending", "running": "in progress", "done": "done", "failed": "stopped"} %}
+<div class="job" data-state="{{ state }}">
+  <div class="job__head">
+    {{ badge(state|capitalize, tones[state]) }}
+    <span class="mono cell-wrap">{{ job.reference }}</span>
+  </div>
+  {% if "pull" in job.progress.stages %}
+  {{ transfer_progress(job.progress, job.running and "pulled" not in job.progress.stages, "Pull progress") }}
+  {% endif %}
+  <ol class="progress-panel__steps" aria-label="Steps">
+    {% for step in stages %}
+    <li class="progress-panel__step" data-step-state="{{ choice(step.state, words) }}">{{ step.label }}<span class="visually-hidden">: {{ words[step.state] }}</span></li>
+    {% endfor %}
+  </ol>
+  {% if can_cancel %}
+  <p class="field__help">Cancelling stops the pull. Once the image has been pulled the {{ "recreate" if job.kind == "container_recreate" else "create" }} runs to its end.</p>
+  <form class="inline-form" method="post" action="{{ cancel_href }}" data-job-cancel data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn--danger">Cancel pull</button>
+  </form>
+  {% endif %}
+  {% if job.outcome %}
+  <div class="job__outcome" role="{{ 'status' if job.outcome.ok else 'alert' }}">
+    {% if job.outcome.ok %}
+    {% for notice in notices %}
+    <p>{% if notice.level == "warn" %}<strong>Warning:</strong> {% endif %}{{ notice.message }}</p>
+    {% endfor %}
+    {% if job.outcome.container_id %}
+    <p><a class="btn" href="{{ route_path('environment_container_detail', environment_id=job.environment_id, container_id=job.outcome.container_id) }}">View container</a></p>
+    {% endif %}
+    {% else %}
+    <p><strong>{{ job.outcome.message }}</strong></p>
+    {% if job.outcome.reason == "outcome_unknown" %}
+    <p>Check the container list before trying again. The host may have changed.</p>
+    {% endif %}
+    {{ engine_detail_block(job.outcome.engine_detail) }}
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}

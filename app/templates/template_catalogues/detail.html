@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ catalogue.name }} - dockmin{% endblock %}
+{% set crumb_object = catalogue.name %}
+{% block content %}
+{% call page_header(catalogue.name, "Template catalogue") %}
+<a class="btn" href="{{ route_path('template_catalogues') }}">Back to catalogues</a>
+<a class="btn" href="{{ route_path('template_catalogue_edit', catalogue_id=catalogue.id) }}">Edit</a>
+<a class="btn btn--danger-quiet" href="{{ route_path('template_catalogue_delete_confirm', catalogue_id=catalogue.id) }}">Delete</a>
+{% endcall %}
+
+{% if catalogue.last_failure %}
+<div class="panel panel--alert" role="note">
+  <p><strong>The last fetch failed.</strong> {{ catalogue.last_failure_text }}</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="settings-heading">
+  <h2 id="settings-heading">Settings</h2>
+  <dl class="facts">
+    <dt>Kind</dt>
+    <dd>{{ catalogue.kind_label }}</dd>
+    <dt>Address</dt>
+    <dd class="mono cell-wrap">{{ catalogue.url }}</dd>
+    <dt>State</dt>
+    <dd>{% if catalogue.is_enabled %}{{ badge("Enabled", "ok") }}{% else %}{{ badge("Disabled", "neutral") }}{% endif %}</dd>
+    <dt>Templates</dt>
+    <dd>{{ catalogue.entry_count }}</dd>
+    <dt>Last fetched</dt>
+    <dd>{{ when(catalogue.fetched_at, "Never") }}</dd>
+    <dt>Added</dt>
+    <dd>{{ when(catalogue.created_at, "") }}</dd>
+    <dt>Last changed</dt>
+    <dd>{{ when(catalogue.updated_at, "") }}</dd>
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="actions-heading">
+  <h2 id="actions-heading">Fetching</h2>
+  {% if catalogue.is_enabled %}
+  <p class="field__help">The catalogue is fetched only when you press Refresh. Disabling it hides its templates and keeps what was fetched.</p>
+  <div class="row-actions">
+    <form class="inline-form" method="post" action="{{ route_path('template_catalogue_refresh', catalogue_id=catalogue.id) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn btn--primary">Refresh</button>
+    </form>
+    <form class="inline-form" method="post" action="{{ route_path('template_catalogue_disable', catalogue_id=catalogue.id) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn">Disable</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="field__help">Nothing has been contacted for this catalogue. Enabling it downloads the document once from the address above and offers its templates to every signed-in user.</p>
+  <div class="row-actions">
+    <form class="inline-form" method="post" action="{{ route_path('template_catalogue_enable', catalogue_id=catalogue.id) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn btn--primary">Enable and fetch</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>BadDigest</Code><Message>The Content-Md5 you specified did not match what we received.</Message><Resource>/dockmin-e2e/exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Resource><RequestId>18E17D8AD0AED8BB08CB1B39</RequestId><Key>exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Key><BucketName>dockmin-e2e</BucketName></Error>

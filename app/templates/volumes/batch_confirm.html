@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import kind_badge with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/object_users.html" import object_users %}
+{% from "partials/page_header.html" import page_header %}
+{% from "volumes/_parts.html" import container_base with context %}
+{% block title %}Remove volumes on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Remove volumes" %}
+{% block content %}
+{% call page_header("Remove volumes", "Review the volumes below. Nothing is removed until you confirm.") %}
+<a class="btn" href="{{ list_href }}">Back to volumes</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("Check the selection", message) }}
+{% endfor %}
+
+{% if confirmation is not none %}
+{% set removable = confirmation.targets|rejectattr("in_use")|list %}
+{% set kept = confirmation.targets|selectattr("in_use")|list %}
+<p>
+  Environment <strong>{{ confirmation.environment_name }}</strong> {{ kind_badge(true) if confirmation.is_local else "" }}
+</p>
+{% if confirmation.unavailable %}
+<div class="panel panel--notice" role="note">
+  <p>{{ confirmation.unavailable }} of the selected {{ "volume is" if confirmation.unavailable == 1 else "volumes are" }} left out: {{ "it does not exist or you may not change it" if confirmation.unavailable == 1 else "they do not exist or you may not change them" }}.</p>
+</div>
+{% endif %}
+
+{% if confirmation.targets %}
+{% set items = [] %}
+{% for target in confirmation.targets %}
+{% set _ = items.append({"name": target.name, "detail": target.driver ~ (", anonymous" if target.kind == "anonymous" else ", named") ~ (", stack " ~ target.stack if target.stack else "") ~ (", kept: " ~ target.in_use ~ (" container mounts" if target.in_use == 1 else " containers mount") ~ " it, not removed" if target.in_use else ", removed")}) %}
+{% endfor %}
+{{ confirm_targets(items, "volume") }}
+
+{% if kept %}
+<div class="panel panel--notice" role="note">
+  <h2 class="confirm__subheading">Volumes in use are kept</h2>
+  <p>Docker refuses to remove a volume that any container mounts, running or stopped.</p>
+  <ul class="confirm-targets__list">
+    {% for target in kept %}
+    <li>
+      <span class="mono">{{ target.name }}</span>
+      {{ object_users(target.containers, target.containers_more, target.containers_hidden, target.in_use, container_base(environment_id)) }}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_volume_remove', environment_id=environment_id, volume_name=target.name) }}" aria-label="Review removing volume {{ target.short_name }} with its containers">Remove with its containers...</a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endif %}
+
+{% if confirmation.kept %}
+{% set left_out = [] %}
+{% for volume in confirmation.kept %}
+{% set _ = left_out.append({"name": volume.name, "detail": "kept: the container dockmin runs in has it mounted"}) %}
+{% endfor %}
+<div class="panel panel--notice" role="note">
+  <h2 class="confirm__subheading">Left out</h2>
+  <p>The container dockmin runs in has {{ "this volume" if confirmation.kept|length == 1 else "these volumes" }} mounted. {{ "It is" if confirmation.kept|length == 1 else "They are" }} never removed.</p>
+  {{ confirm_targets(left_out, "volume") }}
+</div>
+{% endif %}
+
+{% if removable %}
+<form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for target in removable %}
+  <input type="hidden" name="target" value="{{ target.token }}">
+  {% endfor %}
+  <p>Each volume listed as removed is deleted with all of the data in it. This cannot be undone. Each volume is checked again as it is removed, and skipped if it has changed or a container mounts it now.</p>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Remove {{ removable|length }} {{ "volume" if removable|length == 1 else "volumes" }}</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% else %}
+<p>None of the selected volumes can be removed here.</p>
+<p><a class="btn" href="{{ list_href }}">Back to volumes</a></p>
+{% endif %}
+{% else %}
+<p>Select between 1 and {{ max_batch }} volumes on the list, then review them again.</p>
+<p><a class="btn" href="{{ list_href }}">Back to volumes</a></p>
+{% endif %}
+{% endblock %}

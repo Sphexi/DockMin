@@ -1,0 +1,80 @@
+{# Import with context: the forms carry the request CSRF token. #}
+{% from "environments/_parts.html" import grantee_names with context %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/disclosure.html" import disclosure with context %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/radio_field.html" import radio_field %}
+
+{% macro grant_rows(kind, grantees, revoke_action, scope) %}
+{% for grantee in grantees %}
+{% set query = ("?user_id=" if kind == "user" else "?team_id=") ~ grantee.id %}
+<tr>
+  <th scope="row">{{ grantee.name }}</th>
+  <td>{{ "User" if kind == "user" else "Team" }}</td>
+  <td>
+    {{ confirm_button("revoke-" ~ kind ~ "-" ~ grantee.id, "Remove " ~ grantee.name) }}
+    {{ confirmation_dialog("revoke-" ~ kind ~ "-" ~ grantee.id, "Remove this access?", "This removes the direct access to " ~ scope ~ " held by this " ~ kind ~ ". Access held through another grant is not affected.", revoke_action ~ query, "Remove access", targets=[grantee.name], noun=kind) }}
+  </td>
+</tr>
+{% endfor %}
+{% endmacro %}
+
+{% macro access_section(kind, grants, grant_action, revoke_action, error, selected_kind, selected_name, inherited=none, group=none, is_local=false) %}
+{% set scope = "this environment" if kind == "environment" else "every environment in this group" %}
+{% call disclosure("access", "Access", open=error) %}
+  {% if is_local %}
+  <div class="panel panel--notice" role="note">
+    <p>This environment is the Docker host this product runs on. Standard users granted it can see its objects but cannot change anything on it; only administrators can.</p>
+  </div>
+  {% endif %}
+  <p>Administrators can always reach every environment. A standard user reaches {{ scope }} only through a grant. Access held through another grant is not affected by removing one.</p>
+
+  {% if grants.users or grants.teams %}
+  <div class="data-table__scroll" role="region" aria-label="Direct grants" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Direct grants on {{ scope }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Kind</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ grant_rows("user", grants.users, revoke_action, scope) }}
+        {{ grant_rows("team", grants.teams, revoke_action, scope) }}
+      </tbody>
+    </table>
+  </div>
+  {% if grants.users_total > grants.users|length or grants.teams_total > grants.teams|length %}
+  <p class="field__help">Showing {{ grants.users|length }} of {{ grants.users_total }} users and {{ grants.teams|length }} of {{ grants.teams_total }} teams.</p>
+  {% endif %}
+  {% else %}
+  <p>No user or team holds a direct grant, so only administrators can reach {{ scope }} this way.</p>
+  {% endif %}
+
+  {% if kind == "environment" %}
+  <h3>Inherited through the group</h3>
+  {% if group is none %}
+  <p>This environment is not in a group, so it inherits no access.</p>
+  {% else %}
+  <p>Everyone granted on the group <a href="{{ route_path('group_detail', group_id=group.id) }}">{{ group.name }}</a> also reaches this environment. Change those grants on the group page.</p>
+  {{ grantee_names(inherited) }}
+  {% endif %}
+  {% endif %}
+
+  <h3>Grant access</h3>
+  <form class="form" method="post" action="{{ grant_action }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <fieldset class="choice-group">
+      <legend>Grant to</legend>
+      {{ radio_field("grantee_kind", "A user", "user", checked=selected_kind != "team") }}
+      {{ radio_field("grantee_kind", "A team", "team", checked=selected_kind == "team") }}
+    </fieldset>
+    {{ name_field("grantee_name", "Username or team name", route_path("suggestions", kind="grantees"), value=selected_name, error=error, help=("This grants read access to the objects on the Docker host this product runs on." if is_local else "Enter the exact name. It is looked up when you grant access."), required=true) }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Grant access</button>
+    </div>
+  </form>
+{% endcall %}
+{% endmacro %}

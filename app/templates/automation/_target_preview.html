@@ -1,0 +1,27 @@
+{# target is a TargetPreview or none. #}
+{% macro target_preview(target) %}
+{% if target is not none %}
+<section class="section" aria-labelledby="matches-heading">
+  <h2 id="matches-heading">Matches now</h2>
+  {% if target.names %}
+  <ul class="target-preview">
+    {% for name in target.names %}
+    <li class="mono cell-wrap">{{ name }}</li>
+    {% endfor %}
+  </ul>
+  {% if target.others %}
+  <p class="field__help">and {{ target.others }} more.</p>
+  {% endif %}
+  {% if target.note %}
+  <p class="field__help">{{ target.note }}</p>
+  {% endif %}
+  {% elif target.note %}
+  <div class="panel panel--notice" role="note">
+    <p>The matching targets could not be listed. {{ target.note }}</p>
+  </div>
+  {% else %}
+  <p>Nothing matches the target now. Anything that matches later is included.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endmacro %}

@@ -1,0 +1,49 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/job_state_badge.html" import job_state_badge %}
+
+{% macro outcome_badge(outcome) -%}
+{% if outcome is none %}{{ badge("Running", "info") }}
+{%- else %}{{ badge({"success": "Success", "partial": "Partial", "failure": "Failed", "skipped": "Skipped", "interrupted": "Interrupted"}.get(outcome, outcome), {"success": "ok", "partial": "warn", "failure": "danger", "skipped": "neutral", "interrupted": "warn"}.get(outcome, "neutral")) }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro held_badges(detail) -%}
+{% if detail.get("held") %}{{ badge("Held " ~ detail.get("held"), "warn") }}{% endif %}
+{%- if detail.get("released") %} {{ badge("Released " ~ detail.get("released"), "ok") }}{% endif %}
+{%- endmacro %}
+
+{% macro trigger_label(trigger) -%}
+{{ {"schedule": "On schedule", "catch_up": "Catch-up", "queued": "Queued", "manual": "Run now", "dry_run": "Dry run", "webhook": "Webhook call"}.get(trigger, trigger) }}
+{%- endmacro %}
+
+{% macro job_state(view) -%}
+{% set job = view.summary.job %}
+{% if view.state == "paused" %}{% set paused_until %}until <time datetime="{{ view.paused_until|timestamp_iso }}">{{ view.paused_until|timestamp }}</time>{% endset %}{{ job_state_badge("paused", paused_until) }}
+{%- elif view.state == "unscheduled" %}{{ badge("Nothing scheduled", "warn") }}
+{%- elif view.state == "auto_disabled" %}{{ job_state_badge("auto_disabled", job.consecutive_failures ~ (" failure" if job.consecutive_failures == 1 else " failures")) }}
+{%- else %}{{ job_state_badge(view.state) }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro job_name(view) -%}
+{% set summary = view.summary %}
+{{ summary.rule_name if summary.rule_name else summary.job.subsystem }}
+{%- endmacro %}
+
+{% macro job_target(view) %}
+{% set summary = view.summary %}
+<dl class="facts">
+  <dt>Job</dt>
+  <dd>{{ job_name(view) }}</dd>
+  <dt>Subsystem</dt>
+  <dd class="mono">{{ summary.job.subsystem }}</dd>
+  <dt>Automation</dt>
+  <dd>{% if summary.rule_name %}<a href="{{ route_path('automation_rule_detail', rule_id=summary.job.rule_id) }}">{{ summary.rule_name }}</a>{% else %}None. This job belongs to the subsystem.{% endif %}</dd>
+  <dt>Environment</dt>
+  <dd>{% if summary.environment_name %}<a href="{{ route_path('environment_detail', environment_id=summary.environment_id) }}">{{ summary.environment_name }}</a>{% else %}All environments{% endif %}</dd>
+  <dt>Schedule</dt>
+  <dd>{{ view.schedule }}</dd>
+  <dt>State</dt>
+  <dd>{{ job_state(view) }}</dd>
+</dl>
+{% endmacro %}

@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import password_rule, unplaced_errors, wait_message %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/select_field.html" import select_field %}
+{% from "tokens/_table.html" import tokens_table with context %}
+{% block title %}{{ user.username }} - dockmin{% endblock %}
+{% set crumb_object = user.username %}
+{% block content %}
+{% call page_header(user.username, "User account") %}
+<a class="btn" href="{{ route_path('users') }}">Back to users</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("That change was refused", error) }}
+{% endif %}
+{{ unplaced_errors(fields, ["username", "role", "new_password", "external_identity"]) }}
+
+<dl class="facts">
+  <dt>Status</dt>
+  <dd>
+    {% if user.is_enabled %}{{ badge("Enabled", "ok") }}{% else %}{{ badge("Disabled", "warn") }}{% endif %}
+    {% if is_self %}{{ badge("You", "info") }}{% endif %}
+  </dd>
+  <dt>Role</dt>
+  <dd>{{ user.role|capitalize }}</dd>
+  <dt>Created</dt>
+  <dd><time datetime="{{ user.created_at|timestamp_iso }}">{{ user.created_at|timestamp }}</time></dd>
+  <dt>Last sign-in</dt>
+  <dd>
+    {% if user.last_login_at %}
+    <time datetime="{{ user.last_login_at|timestamp_iso }}">{{ user.last_login_at|timestamp }}</time>
+    {% else %}
+    Never
+    {% endif %}
+  </dd>
+  {% if user.session_count is not none %}
+  <dt>Active sessions</dt>
+  <dd>{{ user.session_count }}</dd>
+  {% endif %}
+</dl>
+
+<section class="section" aria-labelledby="user-access-heading">
+  <h2 id="user-access-heading">Access</h2>
+  {% if user.is_enabled %}
+  <p>Disabling blocks sign-in and ends every session. Their history stays, and you can enable the account again.
+    {%- if is_self %} This is your own account, so you will be signed out.{% endif %}</p>
+  {{ confirm_button("disable-dialog", "Disable user") }}
+  {{ confirmation_dialog("disable-dialog", "Disable this user?", "This ends every session and blocks sign-in. The account and its history stay.", route_path('user_disable', user_id=user.id), "Disable user", targets=[user.username], noun="user") }}
+  {% else %}
+  <p>This account cannot sign in.</p>
+  <form method="post" action="{{ route_path('user_enable', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn--primary">Enable user</button>
+  </form>
+  {% endif %}
+</section>
+
+{% if user.lockout_retry_after %}
+<section class="section" aria-labelledby="user-lockout-heading">
+  <h2 id="user-lockout-heading">Sign-in lock</h2>
+  <p>Failed sign-in attempts have locked this account. {{ wait_message(user.lockout_retry_after) }}</p>
+  <form method="post" action="{{ route_path('user_clear_lockout', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn--primary">Lift the lock</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="user-profile-heading">
+  <h2 id="user-profile-heading">Profile</h2>
+  <form class="form" method="post" action="{{ route_path('user_update', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("username", "Username", value=username, error=fields.get("username"), required=true, autocomplete="off") }}
+    {{ select_field("role", "Role", roles, value=role, error=fields.get("role"), required=true) }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Save changes</button>
+    </div>
+  </form>
+</section>
+
+{% if platform_enabled or user.external_identity %}
+<section class="section" aria-labelledby="user-identity-heading">
+  <h2 id="user-identity-heading">Access platform identity</h2>
+  {% if user.external_identity %}
+  <p>Signs in through the access platform as <code>{{ user.external_identity }}</code>. Changing or clearing the identity ends this user's platform sessions on their next request.</p>
+  {% else %}
+  <p>Not linked. A person who arrives through the access platform signs in as this user once their identity is entered here.</p>
+  {% endif %}
+  <form class="form" method="post" action="{{ route_path('user_set_identity', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("external_identity", "Identity", value=identity, error=fields.get("external_identity"), help="The value of the identity claim in the platform's token, for example an email address. Leave blank to unlink.", autocomplete="off") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Save identity</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="user-password-heading">
+  <h2 id="user-password-heading">Reset password</h2>
+  <p>Setting a new password ends this user's sessions and revokes their API tokens and webhook URLs.</p>
+  <form class="form" method="post" action="{{ route_path('user_reset_password', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("new_password", "New password", type="password", error=fields.get("new_password"), help=password_rule(password_policy), required=true, autocomplete="new-password") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Reset password</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="user-sessions-heading">
+  <h2 id="user-sessions-heading">Sessions</h2>
+  <p>Signs this user out of every browser and revokes every API token and webhook URL without disabling the account.</p>
+  {{ confirm_button("revoke-dialog", "End all sessions") }}
+  {{ confirmation_dialog("revoke-dialog", "End all sessions?", "This signs out every browser and revokes every API token and webhook URL of this user.", route_path('user_revoke_sessions', user_id=user.id), "End all sessions", targets=[user.username], noun="user") }}
+</section>
+
+<section class="section" aria-labelledby="user-tokens-heading">
+  <h2 id="user-tokens-heading">API tokens</h2>
+  <p>Tokens act with this user's role. Revoking one takes effect on its next request.</p>
+  {{ tokens_table(token_rows, token_columns, token_pager, now, owner_id=user.id) }}
+</section>
+
+<section class="section" aria-labelledby="user-delete-heading">
+  <h2 id="user-delete-heading">Delete</h2>
+  <p>Only an account with no recorded activity can be deleted. For anyone else, disable the account.</p>
+  {{ confirm_button("delete-dialog", "Delete user") }}
+  {{ confirmation_dialog("delete-dialog", "Delete this user?", "This permanently removes the account.", route_path('user_delete', user_id=user.id), "Delete user", targets=[user.username], noun="user", hidden={"expected_name": user.username}) }}
+</section>
+{% endblock %}

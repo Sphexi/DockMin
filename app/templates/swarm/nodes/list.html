@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Nodes of {{ nodes.environment_name }} - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Nodes", nodes.environment_name) %}
+<a class="btn" href="{{ route_path('environment_swarm_overview', environment_id=nodes.environment_id) }}">Back to Swarm</a>
+{% endcall %}
+
+{% call list_bar(list_count(nodes.rows|length, "node")) %}{% endcall %}
+<div class="data-table__scroll" role="region" aria-label="Nodes" tabindex="0">
+  <table class="table table--fixed" data-columns="6" data-optional="5 6">
+    <caption class="visually-hidden">Nodes of the cluster</caption>
+    <colgroup><col><col class="col--short"><col class="col--badge"><col class="col--badge"><col class="col--short"><col></colgroup>
+    <thead>
+      <tr>
+        <th scope="col">Node</th>
+        <th scope="col">Role</th>
+        <th scope="col">Availability</th>
+        <th scope="col">State</th>
+        <th scope="col" class="col-optional">Engine</th>
+        <th scope="col" class="col-optional">Address</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in nodes.rows %}
+      <tr>
+        <th scope="row">
+          <div class="cell-stack">
+            <a href="{{ route_path('environment_swarm_node_detail', environment_id=nodes.environment_id, node_id=row.id) }}">{{ row.hostname }}</a>
+            <span class="cell-note"><span class="mono">{{ row.short_id }}</span>{% if row.is_this_manager %} {{ badge("This manager", "info") }}{% endif %}</span>
+          </div>
+        </th>
+        <td>
+          {{ row.role|capitalize }}
+          {% if row.leader %}<span class="cell-note">Leader</span>{% elif row.reachability %}<span class="cell-note">{{ row.reachability|capitalize }}</span>{% endif %}
+        </td>
+        <td>{{ badge(row.availability|capitalize, "ok" if row.availability == "active" else "warn") }}</td>
+        <td>{{ badge(row.state|capitalize, "ok" if row.state == "ready" else "danger") }}</td>
+        <td class="mono">{{ row.engine_version or "—" }}</td>
+        <td class="mono">{{ row.address or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

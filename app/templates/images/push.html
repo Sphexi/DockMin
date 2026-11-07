@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "images/_parts.html" import pull_choice with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Push image {{ detail.short_id }} - dockmin{% endblock %}
+{% set crumb_object = detail.short_id %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Push" %}
+{% block content %}
+{% call page_header("Push image", "Image " ~ detail.short_id ~ " on " ~ detail.environment_name) %}
+<a class="btn" href="{{ detail_href }}">Back to the image</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("The image was not pushed", error) }}
+{% endif %}
+
+{% if tags %}
+<form class="form form--wide" method="get" action="{{ push_href }}">
+  <div class="field"{% if fields.get("reference") %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-reference">Reference to push</label>
+      <p class="field__help" id="field-reference-help">The registry in the reference receives the image. Pushing needs a credential set for that registry.</p>
+    </div>
+    <select class="field__input mono" id="field-reference" name="reference" aria-describedby="field-reference-help{% if fields.get('reference') %} field-reference-error{% endif %}">
+      {% if not reference %}<option value="" selected>Choose a reference</option>{% endif %}
+      {% for tag in tags %}
+      <option value="{{ tag }}"{% if tag == reference %} selected{% endif %}>{{ tag }}</option>
+      {% endfor %}
+    </select>
+    {% if fields.get("reference") %}
+    <p class="field__error" id="field-reference-error">{{ fields.get("reference") }}</p>
+    {% endif %}
+  </div>
+  <div class="form__actions">
+    <button type="submit" class="btn">Continue</button>
+  </div>
+</form>
+{{ pull_choice(offer, selected, fields.get("credential_choice"), catalogue, post_href, "Push image") }}
+{% else %}
+<div class="panel panel--notice" role="note">
+  {% if principal.is_administrator %}
+  <p>This image has no tag to push. Tag it with the repository name first.</p>
+  <p><a class="btn" href="{{ route_path('environment_image_tag', environment_id=detail.environment_id, image_id=detail.id) }}">Tag image</a></p>
+  {% else %}
+  <p>This image has no tag to push. An administrator has to tag it with the repository name first.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

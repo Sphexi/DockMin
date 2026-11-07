@@ -1,0 +1,325 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/check_status.html" import check_status %}
+{% from "partials/error_state.html" import error_state %}
+
+{% set stage_labels = {
+  "queued": "Queued", "waiting": "Waiting", "downloading": "Downloading", "verifying": "Verifying",
+  "downloaded": "Downloaded", "extracting": "Extracting", "complete": "Complete",
+  "exists": "Already on the host", "preparing": "Preparing", "pushing": "Pushing",
+  "pushed": "Pushed", "mounted": "Mounted from another repository", "working": "Working",
+} %}
+{% set update_labels = {
+  "up_to_date": ("Up to date", "ok"),
+  "update_available": ("Update available", "info"),
+  "unknown": ("Unknown", "warn"),
+  "pinned": ("Pinned", "neutral"),
+  "not_bound": ("Not bound", "neutral"),
+} %}
+{% set update_notes = {
+  "pinned": "The reference names a digest, so it does not change.",
+  "not_bound": "Not checked. Pull the image to bind it to a credential set.",
+} %}
+{% set unknown_reasons = {
+  "no_local_digest": "This host holds no registry digest for the image; it was built or tagged locally.",
+  "no_digest": "The registry did not report a digest.",
+  "credential_missing": "The credential set this image was pulled with has been deleted.",
+  "credential_not_available": "You hold no grant on the credential set this image is bound to.",
+  "credential_mismatch": "The bound credential set is for a different registry.",
+  "registry_not_configured": "No credential set for this registry is granted to this environment, so dockmin does not connect to it.",
+  "invalid_reference": "The reference is not valid.",
+  "dns": "The registry name could not be resolved from this server.",
+  "tcp": "This server could not connect to the registry.",
+  "tls": "The TLS handshake with the registry failed.",
+  "certificate": "The registry's certificate was not accepted.",
+  "authentication": "The registry refused the credentials.",
+  "not_found": "The registry has no such repository or tag.",
+  "rate_limited": "The registry is limiting requests.",
+  "protocol": "The registry's reply was not understood.",
+  "timeout": "The registry did not answer in time.",
+} %}
+{% set binding_notes = {
+  "created": "A binding was created for this reference.",
+  "rebound": "The binding for this reference now names the credential set used.",
+  "kept": "The existing binding was kept.",
+} %}
+
+{% macro binding_text(view) -%}
+{%- if view.state == "bound" -%}Bound to {{ view.set_name }}
+{%- elif view.state == "anonymous" -%}Bound as an anonymous pull
+{%- elif view.state == "credential_missing" -%}{{ "Registry address changed" if view.missing_reason == "address_changed" else "Credential set deleted" }}{% if view.set_name %} (was {{ view.set_name }}){% endif %}
+{%- else -%}Not bound yet
+{%- endif -%}
+{%- endmacro %}
+
+{% macro binding_state(view, environment_id, pinned=false) %}
+{% if view.state == "bound" %}
+{{ badge("Bound to " ~ view.set_name, "ok") }}
+{% elif view.state == "anonymous" %}
+{{ badge("Anonymous pull", "neutral") }}
+{% elif view.state == "credential_missing" %}
+{{ badge("Registry address changed" if view.missing_reason == "address_changed" else "Credential set deleted", "warn") }}
+{% if view.set_name %}<span class="cell-note">was {{ view.set_name }}</span>{% endif %}
+{% else %}
+{{ badge("Not bound", "neutral") }}
+{% endif %}
+{% if principal.is_administrator and view.state in ("bound", "anonymous", "credential_missing") %}
+{% set target = "environment_image_pull" if pinned else "environment_image_rebind" %}
+{% if view.state == "credential_missing" %}
+<a class="btn btn--compact" href="{{ route_path(target, environment_id=environment_id) }}?{{ {'reference': view.reference}|urlencode }}" aria-label="Repair the binding of {{ view.reference }}">Repair</a>
+{% elif not pinned %}
+<a class="btn btn--compact" href="{{ route_path(target, environment_id=environment_id) }}?{{ {'reference': view.reference}|urlencode }}" aria-label="Change the credential set of {{ view.reference }}">Change credential set</a>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro stored_update(reference) %}
+{% if reference.update_state and reference.update_state != "not_bound" %}
+<span class="visually-hidden">Update check: </span>{{ update_badge(reference.update_state) }}
+<span class="cell-note">checked <time datetime="{{ reference.update_checked_at|timestamp_iso }}">{{ reference.update_checked_at|timestamp }}</time></span>
+{% else %}
+<span class="cell-note">Not checked</span>
+{% endif %}
+{% endmacro %}
+
+{% macro reference_list(references, hidden, environment_id, empty="No reference") %}
+{% if references %}
+<ul class="ref-list">
+  {% for reference in references %}
+  <li class="ref-list__item">
+    <span class="mono cell-wrap">{{ reference.text }}</span>
+    {% if reference.kind == "digest" %}<span class="chip">digest</span>{% endif %}
+    {{ binding_state(reference.binding, environment_id, reference.kind == "digest") }}
+    {{ stored_update(reference) }}
+  </li>
+  {% endfor %}
+</ul>
+{% if hidden %}
+<span class="cell-note">and {{ hidden }} more</span>
+{% endif %}
+{% else %}
+<span class="cell-note">{{ empty }}</span>
+{% endif %}
+{% endmacro %}
+
+{% macro using_containers(containers, hidden, total, environment_id) %}
+{% if total == 0 %}
+<span class="cell-note">Not used</span>
+{% else %}
+<ul class="chip-list">
+  {% for container in containers %}
+  <li><a href="{{ route_path('environment_container_detail', environment_id=environment_id, container_id=container.id) }}">{{ container.name }}</a></li>
+  {% endfor %}
+</ul>
+{% if hidden %}
+<span class="cell-note">{% if containers %}and {{ hidden }} {{ "other" if hidden == 1 else "others" }}{% else %}{{ total }} {{ "container" if total == 1 else "containers" }}{% endif %}</span>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro update_badge(state) -%}
+{% set shown = update_labels.get(state, ("Unknown", "warn")) %}
+{{ badge(shown[0], shown[1]) }}
+{%- endmacro %}
+
+{% macro update_results(statuses, failure=none) %}
+{% set available = statuses|selectattr("state", "equalto", "update_available")|list|length if statuses else 0 %}
+{{ check_status("update-results-status", ("Update check finished. " ~ (available if available else "No") ~ (" update available." if available == 1 else " updates available.")) if statuses and not failure else "") }}
+<div id="update-results" class="update-results">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if failure %}
+  {{ error_state("The check did not run", failure) }}
+  {% elif statuses %}
+  <ul class="update-list">
+    {% for status in statuses %}
+    <li class="update-list__item">
+      <span class="mono cell-wrap">{{ status.display }}</span>
+      {{ update_badge(status.state) }}
+      {% if status.state == "unknown" %}
+      <span class="cell-note">{{ unknown_reasons.get(status.reason, "The check did not complete.") }}</span>
+      {% elif status.state in update_notes %}
+      <span class="cell-note">{{ update_notes[status.state] }}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="field__help">Checked from this server, not from the Docker host, so a registry that only the host can reach reads as unknown. The result is kept and shown beside the reference in the image list.</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro update_form(references, action, htmx_target="#update-results", back=none) %}
+{% if references %}
+<form class="inline-form" method="post" action="{{ action }}"
+      hx-post="{{ action }}" hx-target="{{ htmx_target }}" hx-swap="outerHTML" hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if back %}<input type="hidden" name="back" value="{{ back }}">{% endif %}
+  {% for reference in references %}
+  <input type="hidden" name="reference" value="{{ reference }}">
+  {% endfor %}
+  <button type="submit" class="btn">Check for updates</button>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro layer_progress(layer) %}
+{% if layer.total > 0 %}
+{{ layer.current|filesize }} of {{ layer.total|filesize }}
+{% elif layer.current > 0 %}
+{{ layer.current|filesize }}
+{% else %}
+<span class="cell-note">—</span>
+{% endif %}
+{% endmacro %}
+
+{% macro transfer_progress(progress, running, label="Transfer progress") %}
+{% if progress.percent is not none %}
+<progress class="progress-panel__bar" max="100" value="{{ progress.percent }}" aria-label="{{ label }}">{{ progress.percent }}%</progress>
+{% elif running %}
+<progress class="progress-panel__bar" aria-label="{{ label }}">Working</progress>
+{% endif %}
+{% if progress.layers_total %}
+<p class="job__summary" role="status">
+  {{ progress.layers_done }} of {{ progress.layers_total }} {{ "layer" if progress.layers_total == 1 else "layers" }} done
+  {%- if progress.total_bytes > 0 %}, {{ progress.current_bytes|filesize }} of {{ progress.total_bytes|filesize }}
+  {%- if progress.percent is not none %} ({{ progress.percent }}%){% endif %}{% endif %}.
+</p>
+<div class="data-table__scroll" role="region" aria-label="Layers of {{ label|lower }}" tabindex="0">
+  <table class="table job__layers">
+    <caption class="visually-hidden">Layers of the transfer</caption>
+    <thead>
+      <tr><th scope="col">Layer</th><th scope="col">Stage</th><th scope="col">Transferred</th></tr>
+    </thead>
+    <tbody>
+      {% for layer in progress.layers %}
+      <tr>
+        <th scope="row" class="mono">{{ layer.layer }}</th>
+        <td>{{ stage_labels.get(layer.stage, "Working") }}</td>
+        <td>{{ layer_progress(layer) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if progress.layers_total > progress.layers|length %}
+<p class="field__help">and {{ progress.layers_total - progress.layers|length }} more layers.</p>
+{% endif %}
+{% elif running %}
+<p class="job__summary" role="status">Waiting for the host to report layers.</p>
+{% endif %}
+{% endmacro %}
+
+{# Rendered as the page's first state and as every stream event. #}
+{% macro job_progress(job) %}
+{% set state = choice(job.state, ["running", "succeeded", "failed", "cancelled"]) %}
+{% set tones = {"running": "info", "succeeded": "ok", "failed": "danger", "cancelled": "warn"} %}
+<div class="job" data-state="{{ state }}">
+  <div class="job__head">
+    {{ badge(state|capitalize, tones[state]) }}
+    <span class="mono cell-wrap">{{ job.reference }}</span>
+  </div>
+  {{ transfer_progress(job.progress, job.running) }}
+  {% if job.outcome %}
+  <div class="job__outcome" role="{{ 'status' if job.outcome.ok else 'alert' }}">
+    <p><strong>{{ job.outcome.message }}</strong></p>
+    {% if job.outcome.ok and job.outcome.binding in binding_notes %}
+    <p>{{ binding_notes[job.outcome.binding] }}</p>
+    {% elif job.outcome.reason == "outcome_unknown" %}
+    <p>Check the image list before trying again. Layers or the tag may have changed on the host.</p>
+    {% endif %}
+    {% if job.outcome.ok and job.outcome.image_id %}
+    <p><a class="btn" href="{{ route_path('environment_image_detail', environment_id=job.environment_id, image_id=job.outcome.image_id) }}">View image</a></p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro credential_fieldset(offer, selected, error, catalogue, required=false) %}
+{% set binding = offer.binding %}
+{% set locked = (not offer.may_rebind) and binding.state != "unbound" %}
+{% if locked and offer.preselected is none %}
+<div class="panel panel--notice" role="note">
+  <p>{% if binding.state == "credential_missing" %}The credential set this image was pulled with has been deleted. {% else %}This image is bound to a credential set you cannot use. {% endif %}Only an administrator can change which credential set this image uses.</p>
+</div>
+{% elif locked or not offer.candidates %}
+{% set bound_name = namespace(text="Anonymous (no credentials)") %}
+{% for candidate in offer.candidates if selected == candidate.id|string %}{% set bound_name.text = candidate.name %}{% endfor %}
+<div class="field">
+  <div class="field__head">
+    <span class="field__label">Credential set</span>
+    <p class="field__help">
+      {%- if locked %}Only an administrator can change which credential set this image uses.
+      {%- elif binding.state == "credential_missing" %}The credential set this image was pulled with has been deleted, and no other set is available for this registry. The image is pulled anonymously.
+      {%- else %}No credential set is available for this registry.{% endif %}</p>
+  </div>
+  <p>{{ bound_name.text }}</p>
+  <input type="hidden" name="credential_choice" value="{{ selected if locked else 'anonymous' }}">
+  {% if error %}
+  <p class="field__error" role="alert">{{ error }}</p>
+  {% endif %}
+</div>
+{% else %}
+<fieldset class="choice-group"{% if error %} data-invalid{% endif %}>
+  <legend>Credential set</legend>
+  {% if binding.state == "credential_missing" %}
+  <p class="field__help">The credential set this image was pulled with has been deleted. Choose another set, or an anonymous pull, to repair the binding.</p>
+  {% elif binding.state != "unbound" %}
+  <p class="field__help">Choosing a different option changes the binding for every user of this image.</p>
+  {% else %}
+  <p class="field__help">The set that pulls the image is bound to it, so updates use the same set.</p>
+  {% endif %}
+  {% if error %}
+  <p class="field__error" role="alert">{{ error }}</p>
+  {% endif %}
+  <div class="choice">
+    <input class="choice__input" type="radio" id="choice-anonymous" name="credential_choice" value="anonymous"
+           {%- if selected == "anonymous" %} checked{% endif %}{% if not selected %} required{% endif %} aria-describedby="choice-anonymous-help">
+    <label class="choice__label" for="choice-anonymous">Anonymous (no credentials)</label>
+    <p class="choice__help" id="choice-anonymous-help">Pull without signing in. Private images and rate-limited registries may refuse it.</p>
+  </div>
+  {% for candidate in offer.candidates %}
+  <div class="choice">
+    <input class="choice__input" type="radio" id="choice-{{ candidate.id }}" name="credential_choice" value="{{ candidate.id }}"
+           {%- if selected == candidate.id|string %} checked{% endif %}{% if not selected %} required{% endif %} aria-describedby="choice-{{ candidate.id }}-help">
+    <label class="choice__label" for="choice-{{ candidate.id }}">{{ candidate.name }}</label>
+    <p class="choice__help" id="choice-{{ candidate.id }}-help">
+      {{- catalogue[candidate.provider].label if candidate.provider in catalogue else candidate.provider }} at <span class="mono">{{ candidate.url }}</span>
+      {%- if not candidate.authentication_enabled %}, no authentication{% endif %}
+      {%- if candidate.is_default_for_host %}. Default for this registry.{% endif %}</p>
+  </div>
+  {% endfor %}
+</fieldset>
+{% endif %}
+{% endmacro %}
+
+{% macro pull_choice(offer, selected, error, catalogue, post_href, submit_label, reference_error=none) %}
+<div id="pull-choice" class="pull-choice">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if reference_error %}
+  <p class="field__error" role="alert">{{ reference_error }}</p>
+  {% elif offer is none %}
+  <p class="field__help">Name an image above and choose Continue to see which credential sets can pull it.</p>
+  {% else %}
+  {% set binding = offer.binding %}
+  {% set blocked = (not offer.may_rebind) and binding.state != "unbound" and offer.preselected is none %}
+  <form class="form form--wide" method="post" action="{{ post_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="reference" value="{{ offer.reference.familiar }}">
+    <dl class="facts">
+      <dt>Reference</dt>
+      <dd class="mono cell-wrap">{{ offer.reference.familiar }}</dd>
+      <dt>Registry</dt>
+      <dd class="mono">{{ offer.reference.registry_address }}</dd>
+      <dt>Binding</dt>
+      <dd>{{ binding_text(binding) }}</dd>
+    </dl>
+    {{ credential_fieldset(offer, selected, error, catalogue, true) }}
+    {% if not blocked %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">{{ submit_label }}</button>
+    </div>
+    {% endif %}
+  </form>
+  {% endif %}
+</div>
+{% endmacro %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import password_rule, unplaced_errors %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/select_field.html" import select_field %}
+{% block title %}New user - dockmin{% endblock %}
+{% set crumb_page = "New user" %}
+{% block content %}
+{% call page_header("New user", "Give someone an account. They can change the password after signing in.") %}
+<a class="btn" href="{{ route_path('users') }}">Back to users</a>
+{% endcall %}
+
+{{ unplaced_errors(fields, ["username", "password", "role"]) }}
+
+<form class="form" method="post" action="{{ route_path('user_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ form_field("username", "Username", value=username, error=fields.get("username"), required=true, autocomplete="off") }}
+  {{ form_field("password", "Initial password", type="password", error=fields.get("password"), help=password_rule(password_policy), required=true, autocomplete="new-password") }}
+  {{ select_field("role", "Role", roles, value=role, error=fields.get("role"), help="Administrators manage users. Standard users cannot.", required=true) }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Create user</button>
+  </div>
+</form>
+{% endblock %}

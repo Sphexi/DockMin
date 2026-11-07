@@ -1,0 +1,18 @@
+{% from "partials/error_state.html" import error_state %}
+
+{% macro password_rule(policy) -%}
+Use at least {{ policy.min_length }} characters
+{%- if policy.required_classes %}, mixing at least {{ policy.required_classes }} of lower case, upper case, digits and symbols{% endif %}.
+{%- endmacro %}
+
+{% macro wait_message(retry_after) -%}
+{% set minutes = ((retry_after + 59) // 60) -%}
+Try again in {{ (minutes ~ " minute" ~ ("s" if minutes != 1 else "")) if retry_after >= 60 else (retry_after ~ " seconds") }}.
+{%- endmacro %}
+
+{# A message keyed to a field this page does not render would otherwise vanish. #}
+{% macro unplaced_errors(fields, known) %}
+{% for key, message in fields.items() if key not in known %}
+{{ error_state("Check the form", message) }}
+{% endfor %}
+{% endmacro %}

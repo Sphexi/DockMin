@@ -1,0 +1,35 @@
+{% from "partials/badge.html" import badge %}
+
+{# A terminal state carries no polling attributes, which is what stops the loop. #}
+{% macro progress_panel(panel_id, title, state, href, percent=none, detail=none, steps=none, poll_seconds=2) %}
+{% set state = choice(state, ["queued", "running", "succeeded", "failed"]) %}
+{% set active = state in ("queued", "running") %}
+{% set tone = {"queued": "neutral", "running": "info", "succeeded": "ok", "failed": "danger"}[state] %}
+<section id="{{ panel_id }}" class="progress-panel" data-state="{{ state }}" aria-labelledby="{{ panel_id }}-title" aria-busy="{{ 'true' if active else 'false' }}"
+         {%- if active %} hx-get="{{ href }}" hx-trigger="every {{ poll_seconds|int }}s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <header class="progress-panel__head">
+    <h2 class="progress-panel__title" id="{{ panel_id }}-title">{{ title }}</h2>
+    {{ badge(state|capitalize, tone) }}
+  </header>
+  {% if percent is not none %}
+  {% set clamped = [[percent|int, 0]|max, 100]|min %}
+  <progress class="progress-panel__bar" max="100" value="{{ clamped }}" aria-label="{{ title }} progress">{{ clamped }}%</progress>
+  {% elif active %}
+  <progress class="progress-panel__bar" aria-label="{{ title }} progress">Working</progress>
+  {% endif %}
+  <p class="visually-hidden" role="status">{{ title }}: {{ state }}{% if percent is not none %}, {{ clamped }}%{% endif %}</p>
+  {% if detail %}
+  <p class="progress-panel__detail" role="{{ 'alert' if state == 'failed' else 'status' }}">{{ detail }}</p>
+  {% endif %}
+  {% if steps %}
+  <ol class="progress-panel__steps">
+    {% for step in steps %}
+    <li class="progress-panel__step" data-step-state="{{ step.state }}">{{ step.label }}</li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+  {% if active %}
+  <p class="progress-panel__refresh"><a href="{{ href }}">Refresh status</a></p>
+  {% endif %}
+</section>
+{% endmacro %}

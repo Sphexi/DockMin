@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "jobs/_parts.html" import job_name, job_state with context %}
+{% from "jobs/_run_region.html" import run_region with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Run {{ row.run.id }} - dockmin{% endblock %}
+{% set crumb_object = job_name(view) %}
+{% set crumb_object_href = route_path('job_detail', job_id=row.run.scheduled_job_id) %}
+{% set crumb_page = "Run " ~ row.run.id %}
+{% block head_extra %}
+{% if not finished %}
+<noscript><meta http-equiv="refresh" content="5"></noscript>
+{% endif %}
+{% endblock %}
+{% block content %}
+{% set run = row.run %}
+{% call page_header("Run " ~ run.id, job_name(view)) %}
+<a class="btn" href="{{ route_path('job_detail', job_id=run.scheduled_job_id) }}">Back to the job</a>
+<a class="btn" href="{{ route_path('activity') }}?{{ {'job_run_id': run.id}|urlencode }}">Events of this run</a>
+{% if not finished %}
+<span data-nojs-only><a class="btn" href="{{ region_href }}">Refresh</a></span>
+{% endif %}
+{% endcall %}
+
+{% if run.trigger == "dry_run" %}
+<div class="panel panel--notice" role="note">
+  <p>Dry run: no container, stack or automation was changed.</p>
+</div>
+{% endif %}
+
+{{ run_region(view, row, detail, finished, region_href) }}
+
+<section class="section" aria-labelledby="job-heading">
+  <h2 id="job-heading">Job</h2>
+  <dl class="facts">
+    <dt>Job</dt>
+    <dd><a href="{{ route_path('job_detail', job_id=run.scheduled_job_id) }}">{{ job_name(view) }}</a></dd>
+    <dt>Subsystem</dt>
+    <dd class="mono">{{ view.summary.job.subsystem }}</dd>
+    {% if view.summary.job.rule_id %}
+    <dt>Automation</dt>
+    <dd><a href="{{ route_path('automation_rule_detail', rule_id=view.summary.job.rule_id) }}">{{ view.summary.rule_name }}</a></dd>
+    {% endif %}
+    <dt>State now</dt>
+    <dd>{{ job_state(view) }}</dd>
+  </dl>
+</section>
+{% endblock %}

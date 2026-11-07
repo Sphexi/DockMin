@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_confirm.html" import removal_containers, removal_form, removal_networks, volumes_table with context %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Remove stack {{ confirmation.stack }} and its volumes - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Remove with volumes" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Remove stack and volumes", "Review every volume below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Remove stack <span class="mono cell-wrap">{{ review.stack }}</span> and delete its volumes?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  <div class="panel panel--alert" role="note">
+    <h3>The data in these volumes is deleted</h3>
+    <p>This cannot be undone. A volume marked Kept is left on the host with its data.</p>
+  </div>
+
+  <h3 class="confirm__subheading">Volumes</h3>
+  {{ volumes_table(review) }}
+
+  {{ removal_containers(review, false) }}
+  {{ removal_networks(review) }}
+
+  {{ removal_form(review, run_href, detail_href, plain_href, compose, with_volumes=true, alternatives=[("Remove stack without volumes", plain_href), ("Force remove stack and volumes...", orphans_href)]) }}
+</section>
+{% endblock %}

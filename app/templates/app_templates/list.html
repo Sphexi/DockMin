@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "app_templates/_table.html" import templates_table with context %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Templates - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Templates", "Applications from the enabled catalogues. A template fills in the container or stack create form; nothing is created until you submit it.") %}
+{% endcall %}
+
+{% call list_bar(list_count(total, "template", filtered=filtered)) %}
+{% if can_add %}
+<a class="btn" href="{{ route_path('template_catalogues') }}">Template catalogues</a>
+{% endif %}
+{% endcall %}
+
+<form class="list-bar__filter" method="get" action="{{ route_path('templates') }}" role="search" aria-label="Filter templates">
+  <div class="field">
+    <div class="field__head"><label class="field__label" for="field-q">Search</label></div>
+    <input class="field__input" id="field-q" name="q" type="search" value="{{ q }}" maxlength="200" autocomplete="off">
+  </div>
+  <div class="field">
+    <div class="field__head"><label class="field__label" for="field-category">Category</label></div>
+    <select class="field__input" id="field-category" name="category">
+      <option value="">All categories</option>
+      {% for name in categories %}
+      <option value="{{ name }}"{% if name|lower == category|lower %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head"><label class="field__label" for="field-catalogue">Catalogue</label></div>
+    <select class="field__input" id="field-catalogue" name="catalogue">
+      <option value="">All catalogues</option>
+      {% for item in catalogues %}
+      <option value="{{ item.id }}"{% if item.id == catalogue %} selected{% endif %}>{{ item.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn btn--primary">Apply filter</button>
+  <a class="btn" href="{{ route_path('templates') }}">Reset</a>
+</form>
+
+{{ templates_table(rows, columns, pager, filtered) }}
+{% endblock %}

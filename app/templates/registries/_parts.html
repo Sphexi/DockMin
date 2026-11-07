@@ -1,0 +1,70 @@
+{# Import with context: route_path and the CSRF token come from the request. #}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/check_status.html" import check_status %}
+{% from "shared/_stage_report.html" import stage_table %}
+
+{% set stage_labels = {"credential_exchange": "Token exchange", "dns": "DNS lookup", "tcp": "TCP connection", "tls_handshake": "TLS handshake", "certificate": "Server certificate", "registry_api": "Registry API", "authentication": "Authentication"} %}
+
+{% macro tls_badge(verify_tls) -%}
+{% if not verify_tls %}{{ badge("TLS not verified", "danger") }}{% endif %}
+{%- endmacro %}
+
+{% macro authentication_badge(enabled) -%}
+{% if enabled %}{{ badge("Authenticated", "info") }}{% else %}{{ badge("Anonymous") }}{% endif %}
+{%- endmacro %}
+
+{% macro ca_certificates(certificates) %}
+<div class="data-table__scroll" role="region" aria-label="CA certificates" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">CA certificates added to the system trust store</caption>
+    <thead>
+      <tr>
+        <th scope="col">Subject</th>
+        <th scope="col">Issuer</th>
+        <th scope="col">Expires</th>
+        <th scope="col">SHA-256 fingerprint</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for certificate in certificates %}
+      <tr>
+        <th scope="row">{{ certificate.leaf_subject }}</th>
+        <td>{{ certificate.leaf_issuer }}</td>
+        <td>
+          {{ when(certificate.not_after, "") }}
+          {% if certificate.expired %}{{ badge("Expired", "danger") }}{% elif certificate.expires_soon %}{{ badge("Expires soon", "warn") }}{% endif %}
+        </td>
+        <td class="mono cell-wrap">{{ certificate.sha256_fingerprint }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{# Always renders the target element, so a swap and the first load share one id. #}
+{% macro registry_test_result(report, error=none) %}
+{{ check_status("registry-test-status", ("Connection test " ~ ("passed" if report.passed else "failed") ~ ". " ~ report.message) if report is not none else "") }}
+<div id="registry-test">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if error %}
+  <p class="field__error" role="alert">{{ error }}</p>
+  {% endif %}
+  {% if report is not none %}
+  <section class="panel test-report" aria-labelledby="registry-test-heading">
+    <h3 id="registry-test-heading">Connection test</h3>
+    <p class="test-report__summary">
+      {% if report.passed %}{{ badge("Passed", "ok") }}{% else %}{{ badge("Failed", "danger") }}{% endif %}
+      <span>{{ report.message }}</span>
+    </p>
+    <p class="field__help">Run from this server, not from a Docker host. Finished in {{ report.duration_ms }} ms.</p>
+    {% if report.stages %}
+    {{ stage_table(report.stages, stage_labels) }}
+    {% endif %}
+  </section>
+  {% elif not error %}
+  <p class="field__help">Not tested since saved.</p>
+  {% endif %}
+</div>
+{% endmacro %}

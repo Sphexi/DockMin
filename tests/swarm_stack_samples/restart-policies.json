@@ -1,0 +1,89 @@
+{
+  "name": "shop",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "shop_default"
+    }
+  },
+  "services": {
+    "r1": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "restart": "no"
+    },
+    "r2": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "restart": "always"
+    },
+    "r3": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "restart": "unless-stopped"
+    },
+    "r4": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "restart": "on-failure"
+    },
+    "r5": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "restart": "on-failure:3"
+    },
+    "r6": {
+      "command": null,
+      "deploy": {
+        "placement": {},
+        "resources": {},
+        "restart_policy": {
+          "condition": "none"
+        }
+      },
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "restart": "always"
+    },
+    "r7": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "r8": {
+      "command": null,
+      "entrypoint": null,
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      },
+      "restart": "bogus"
+    }
+  }
+}

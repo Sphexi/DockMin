@@ -1,0 +1,29 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+{% from "registries/_parts.html" import authentication_badge, tls_badge with context %}
+
+{% macro registries_table(rows, columns, pager, catalogue) %}
+{% call data_table("registries-table", "Registry credential sets", columns, pager, empty_title="No registries", empty_body="Add a registry credential set so images can be pulled from a private or rate-limited registry.", empty_action_label="Add registry", empty_action_href=route_path('registry_new')) %}
+{% for row in rows %}
+<tr>
+  <th scope="row">
+    <div class="cell-stack">
+      <a href="{{ route_path('registry_detail', credential_id=row.id) }}">{{ row.name }}</a>
+      {% if row.is_default_for_host %}{{ badge("Default", "ok") }}{% endif %}
+      {{ tls_badge(row.verify_tls) }}
+    </div>
+  </th>
+  <td>{{ catalogue[row.provider].label }}</td>
+  <td class="mono cell-wrap">{{ row.address }}</td>
+  <td>{{ authentication_badge(row.authentication_enabled) }}</td>
+  <td class="is-numeric">
+    <div class="cell-stack">
+      <span>{{ row.environment_count }}</span>
+      {% if row.environment_count == 0 %}<span class="cell-note">Offered nowhere</span>{% endif %}
+    </div>
+  </td>
+  <td class="is-numeric">{{ row.grantee_count }}</td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

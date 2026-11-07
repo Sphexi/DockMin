@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% set swarm = page.kind == "swarm" %}
+{% set action = "Reconstruct from the cluster" if swarm else "Read from host" %}
+{% block title %}{{ action }}: {{ page.name }} on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = action ~ ": " ~ page.name %}
+{% block content %}
+{% call page_header(action, page.name ~ " on " ~ environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ paste_href }}">Back to the paste form</a>
+{% endcall %}
+
+{% if failure %}
+{{ error_state(failure.title, failure.message) }}
+{% endif %}
+
+<section class="panel" aria-labelledby="read-heading">
+  <h2 id="read-heading">Result</h2>
+  <dl class="facts">
+    <dt>{{ "Stack" if swarm else "Project" }}</dt>
+    <dd class="mono cell-wrap">{{ page.name }}</dd>
+    <dt>How the file was obtained</dt>
+    <dd>{% if page.source %}{{ page.source }}{% else %}{{ badge("A file is needed", "warn") }}{% endif %}</dd>
+    {% if page.attempted %}
+    <dt>The project's own files</dt>
+    <dd>Not used. {{ page.attempted }}</dd>
+    {% endif %}
+    {% if page.needed %}
+    <dt>Why no file was produced</dt>
+    <dd>{{ page.needed }}</dd>
+    {% endif %}
+  </dl>
+  {% if not page.source %}
+  <p>dockmin could not produce the file. Paste the file the {{ "stack" if swarm else "project" }} was started from.</p>
+  <p><a class="btn btn--primary" href="{{ paste_href }}">Paste the file</a></p>
+  {% endif %}
+</section>
+
+{% if page.read_paths or page.refusals %}
+<section class="panel" aria-labelledby="paths-heading">
+  <h2 id="paths-heading">Files on the host</h2>
+  <div class="data-table__scroll" role="region" aria-label="Files on the host" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Files requested from the host</caption>
+      <thead>
+        <tr><th scope="col">Path</th><th scope="col">Outcome</th></tr>
+      </thead>
+      <tbody>
+        {% for path in page.read_paths %}
+        <tr><th scope="row" class="mono cell-wrap">{{ path }}</th><td>{{ badge("Read", "ok") }}</td></tr>
+        {% endfor %}
+        {% for path, sentence in page.refusals %}
+        <tr><th scope="row" class="mono cell-wrap">{{ path }}</th><td>{{ badge("Refused", "danger") }} {{ sentence }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if page.source %}
+<section class="panel" aria-labelledby="stack-heading">
+  <h2 id="stack-heading">What would be stored</h2>
+  <dl class="facts">
+    <dt>Services</dt>
+    <dd class="mono cell-wrap">{{ page.services|join(", ") or "—" }}</dd>
+    <dt>Files</dt>
+    <dd>{{ page.files|length }}</dd>
+    <dt>Variables</dt>
+    <dd>{{ page.variables|length }}</dd>
+  </dl>
+  {% if page.files %}
+  <h3>Files</h3>
+  <ul class="ref-list">
+    {% for item in page.files %}
+    <li class="ref-list__item"><span class="mono cell-wrap">{{ item.name }}</span> <span class="cell-note">{{ "Secret file. Stored encrypted and never shown." if item.secret else "Plain file, " ~ item.size ~ " bytes" }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if page.variables %}
+  <h3>Variables</h3>
+  <div class="data-table__scroll" role="region" aria-label="Variables" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Variables found</caption>
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">Value</th></tr>
+      </thead>
+      <tbody>
+        {% for item in page.variables %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ item.name }}</th>
+          <td>{% if item.secret %}{{ badge("Secret", "info") }} <span class="cell-note">Not shown</span>{% else %}<span class="mono cell-wrap">{{ item.value }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if page.losses %}
+  <h3>What is not carried over</h3>
+  <ul>
+    {% for loss in page.losses %}
+    <li>{{ loss }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <details class="stderr">
+    <summary>The file that would be stored</summary>
+    <pre class="stderr__text" tabindex="0">{{ page.text }}</pre>
+  </details>
+</section>
+
+<section class="panel" aria-labelledby="adopt-heading">
+  <h2 id="adopt-heading">Adopt <span class="mono cell-wrap">{{ page.name }}</span> as is on {{ environment.name }}?</h2>
+  {{ confirm_targets(page.services, "service") }}
+  <p>dockmin stores the file, files and variables above and puts the {{ "stack" if swarm else "project" }} <span class="mono cell-wrap">{{ page.name }}</span> under your control. Nothing will be redeployed: no container, service, network, volume, config or secret on the {{ "cluster" if swarm else "host" }} is changed, and the stack reads as unchanged. {{ page.redeploy }}</p>
+  <form class="form" method="post" action="{{ adopt_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="read_token" value="{{ page.token }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Adopt as is</button>
+      <a class="btn" href="{{ prefill_href }}">Edit in the paste form</a>
+      <a class="btn" href="{{ cancel_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,246 @@
+{% from "partials/form_field.html" import form_field %}
+{% from "stacks/_validation.html" import goto_line, validation_result with context %}
+
+{% macro compose_block(form) %}
+{% set error = form.errors.get("compose_file") %}
+{% set error_line = form.lines.get("compose_file") %}
+<div class="field field--wide"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-compose_file">File contents <span class="field__required" aria-hidden="true">*</span></label>
+    <p class="field__help" id="field-compose_file-help">Paste the file, or choose one to upload. At most 128 KiB. Keep secrets out of the file: put each in a variable marked secret and refer to it as ${NAME}.</p>
+  </div>
+  <textarea class="field__input field__input--code" id="field-compose_file" name="compose_file" rows="20"
+            spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" data-code-editor
+            {%- if error %} aria-invalid="true"{% endif %}
+            aria-describedby="field-compose_file-help{% if error %} field-compose_file-error{% endif %}">
+{{ form.compose_text }}</textarea>
+  <label class="field__label field__label--secondary" for="field-compose_upload">Or choose a file</label>
+  <input class="field__input" type="file" id="field-compose_upload" name="compose_upload" accept=".yaml,.yml,text/yaml,text/plain">
+  {% if error %}
+  <p class="field__error" id="field-compose_file-error">{{ error }}{% if error_line %} {{ goto_line("field-compose_file", error_line) }}{% endif %}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro variable_row(row, index, number) %}
+{% set base = "variable-" ~ index %}
+{% set kept_secret = row is not none and row.stored and row.secret %}
+<div class="repeat__row" data-repeat-row="{{ index }}">
+  <div class="field repeat__cell"{% if row and row.name_error %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label repeat__label" for="field-{{ base }}-name"><span class="visually-hidden">Variable {{ number }}: </span>Name</label>
+    </div>
+    <input class="field__input mono" id="field-{{ base }}-name" name="{{ base }}-name" type="text" value="{{ row.name if row else '' }}"
+           {%- if row and row.stored %} readonly{% endif %}
+           {%- if row and row.name_error %} aria-invalid="true" aria-describedby="field-{{ base }}-name-error"{% endif %}
+           autocomplete="off" spellcheck="false">
+    {% if row and row.name_error %}
+    <p class="field__error" id="field-{{ base }}-name-error">{{ row.name_error }}</p>
+    {% endif %}
+    {% if row and row.stored %}
+    <input type="hidden" name="{{ base }}-stored" value="1">
+    {% endif %}
+  </div>
+  <div class="field repeat__cell"{% if row and row.value_error %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label repeat__label" for="field-{{ base }}-value"><span class="visually-hidden">Variable {{ number }}: </span>{{ "New value" if kept_secret else "Value" }}</label>
+    </div>
+    <input class="field__input mono" id="field-{{ base }}-value" name="{{ base }}-value" type="text"
+           {%- if row and row.value is not none %} value="{{ row.value }}"{% endif %}
+           {%- if kept_secret %} placeholder="Set. Leave empty to keep it."{% endif %}
+           {%- if row and row.value_error %} aria-invalid="true" aria-describedby="field-{{ base }}-value-error"{% endif %}
+           autocomplete="off" spellcheck="false">
+    {% if row and row.value_error %}
+    <p class="field__error" id="field-{{ base }}-value-error">{{ row.value_error }}</p>
+    {% endif %}
+  </div>
+  <div class="repeat__cell repeat__cell--check">
+    {% if kept_secret %}
+    <input type="hidden" name="{{ base }}-secret" value="on">
+    <span class="chip">Secret</span>
+    {% else %}
+    <input class="choice__input" type="checkbox" id="field-{{ base }}-secret" name="{{ base }}-secret" value="on"{% if row and row.secret %} checked{% endif %}>
+    <label class="repeat__label" for="field-{{ base }}-secret"><span class="visually-hidden">Variable {{ number }}: </span>Secret</label>
+    {% endif %}
+  </div>
+  {% if row and row.stored %}
+  <div class="repeat__cell repeat__cell--check">
+    <input class="choice__input" type="checkbox" id="field-{{ base }}-remove" name="{{ base }}-remove" value="on"{% if row.remove %} checked{% endif %}>
+    <label class="repeat__label" for="field-{{ base }}-remove"><span class="visually-hidden">Variable {{ number }}: </span>Remove</label>
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro variables_block(form, cap, post_href) %}
+{% set group_error = form.errors.get("variables") %}
+<fieldset class="choice-group repeat" id="group-variable" data-group="stack-variables" data-repeat data-repeat-cap="{{ cap }}"{% if group_error %} data-invalid{% endif %}>
+  <legend class="visually-hidden">Variables</legend>
+  <p class="field__help">Compose fills ${NAME} in the file from these. A secret is stored encrypted and is never shown again: leave its value empty to keep it, or type a new one to replace it. Secret values are not put back in the form if it is shown again, so enter them again when a row asks. To change a stored variable between secret and plain, remove it and add it again.</p>
+  {% if group_error %}
+  <p class="field__error">{{ group_error }}</p>
+  {% endif %}
+  <div class="repeat__head" aria-hidden="true">
+    <span>Name</span><span>Value</span><span>Secret</span>{% if form.rows|selectattr("stored")|list %}<span>Remove</span>{% endif %}
+  </div>
+  <div class="repeat__rows" data-repeat-rows>
+    {% for row in form.rows %}
+    {{ variable_row(row, row.index, loop.index) }}
+    {% endfor %}
+  </div>
+  <template data-repeat-template>{{ variable_row(none, "__INDEX__", "__NUMBER__") }}</template>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--compact" name="rows" value="variable" formaction="{{ post_href }}#group-variable" formnovalidate data-repeat-more>Add rows</button>
+    <button type="button" class="btn btn--compact" data-repeat-add hidden>Add row</button>
+  </div>
+</fieldset>
+{% endmacro %}
+
+{% macro file_row(row, index, number) %}
+{% set base = "file-" ~ index %}
+<div class="repeat__row file-row" data-repeat-row="{{ index }}">
+  <div class="field file-row__name"{% if row and row.name_error %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-{{ base }}-name"><span class="visually-hidden">File {{ number }}: </span>Name</label>
+    </div>
+    <input class="field__input mono" id="field-{{ base }}-name" name="{{ base }}-name" type="text" value="{{ row.name if row else '' }}"
+           {%- if row and row.name_error %} aria-invalid="true" aria-describedby="field-{{ base }}-name-error"{% endif %}
+           autocomplete="off" spellcheck="false" maxlength="128">
+    {% if row and row.name_error %}
+    <p class="field__error" id="field-{{ base }}-name-error">{{ row.name_error }}</p>
+    {% endif %}
+  </div>
+  <div class="file-row__secret">
+    <input class="choice__input" type="checkbox" id="field-{{ base }}-secret" name="{{ base }}-secret" value="on"{% if row and row.secret %} checked{% endif %}>
+    <label class="choice__label" for="field-{{ base }}-secret"><span class="visually-hidden">File {{ number }}: </span>Secret file</label>
+  </div>
+  <div class="field file-row__content"{% if row and row.content_error %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-{{ base }}-content"><span class="visually-hidden">File {{ number }}: </span>Content</label>
+    </div>
+    <textarea class="field__input field__input--code" id="field-{{ base }}-content" name="{{ base }}-content" rows="8"
+              spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" data-code-editor
+              {%- if row and row.content_error %} aria-invalid="true" aria-describedby="field-{{ base }}-content-error"{% endif %}>
+{{ row.content if row and row.content is not none else '' }}</textarea>
+    <label class="field__label field__label--secondary" for="field-{{ base }}-upload">Or choose a file</label>
+    <input class="field__input" type="file" id="field-{{ base }}-upload" name="{{ base }}-upload">
+    {% if row and row.content_error %}
+    <p class="field__error" id="field-{{ base }}-content-error">{{ row.content_error }}{% if row.content_line %} {{ goto_line("field-" ~ base ~ "-content", row.content_line) }}{% endif %}</p>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro files_block(form, cap, post_href) %}
+{% set group_error = form.errors.get("files") %}
+<fieldset class="choice-group repeat" id="group-file" data-group="stack-files" data-repeat data-repeat-cap="{{ cap }}"{% if group_error %} data-invalid{% endif %}>
+  <legend class="visually-hidden">Files</legend>
+  <p class="field__help">Files the Compose file refers to: an environment file, a label file, the source of a config or secret, or a Compose file it includes. Refer to one by its name, as <span class="mono">name</span> or <span class="mono">./name</span>. Paste the content or choose a file; a name is 1 to 128 letters, digits, '.', '_' and '-'. A stack holds at most {{ cap }} files, 64 KiB each and 128 KiB in total. A secret file is stored encrypted and never shown again. The whole form is at most 256 KiB, so add larger sets one at a time on the Files tab afterwards. Rows left empty are ignored.</p>
+  {% if group_error %}
+  <p class="field__error">{{ group_error }}</p>
+  {% endif %}
+  <div class="repeat__rows" data-repeat-rows>
+    {% for row in form.file_rows %}
+    {{ file_row(row, row.index, loop.index) }}
+    {% endfor %}
+  </div>
+  <template data-repeat-template>{{ file_row(none, "__INDEX__", "__NUMBER__") }}</template>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--compact" name="rows" value="file" formaction="{{ post_href }}#group-file" formnovalidate data-repeat-more>Add rows</button>
+    <button type="button" class="btn btn--compact" data-repeat-add hidden>Add row</button>
+  </div>
+</fieldset>
+{% endmacro %}
+
+{% macro stack_form(form, kind, stack_name, post_href, validate_href, cancel_href, compose, variable_cap, catalogue, project=none, file_cap=20, template_ref=none) %}
+{% set blocked = compose is not none %}
+<form class="form create-form" method="post" action="{{ post_href }}" enctype="multipart/form-data" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if template_ref %}
+  <input type="hidden" name="template_ref" value="{{ template_ref }}">
+  {% endif %}
+  {% if kind == "edit" %}
+  <input type="hidden" name="expected_file_digest" value="{{ expected_file_digest }}">
+  {% endif %}
+
+  <section class="panel create-section" aria-labelledby="stack-title">
+    <h2 class="create-section__title" id="stack-title">Stack</h2>
+    <div class="create-section__body">
+      {% if kind == "new" %}
+      {{ form_field("name", "Name", value=form.name, error=form.errors.get("name"), required=true, help="1 to 63 lower-case letters, digits, '-' and '_', starting with a letter or digit. It cannot be changed later.") }}
+      {% else %}
+      <dl class="facts">
+        <dt>Name</dt>
+        <dd class="mono cell-wrap">{{ stack_name }}</dd>
+      </dl>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="file-title">
+    <h2 class="create-section__title" id="file-title">Compose file</h2>
+    <div class="create-section__body">
+      {{ compose_block(form) }}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="variables-title">
+    <h2 class="create-section__title" id="variables-title">Variables</h2>
+    <div class="create-section__body">
+      {{ variables_block(form, variable_cap, post_href) }}
+    </div>
+  </section>
+
+  {% if kind != "edit" %}
+  <section class="panel create-section" aria-labelledby="files-title">
+    <h2 class="create-section__title" id="files-title">Files</h2>
+    <div class="create-section__body">
+      {{ files_block(form, file_cap, post_href) }}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if kind == "adopt" %}
+  <section class="panel create-section" aria-labelledby="deploy-title">
+    <h2 class="create-section__title" id="deploy-title">After adopting</h2>
+    <div class="create-section__body">
+      <div class="choice">
+        <input class="choice__input" type="checkbox" id="field-deploy" name="deploy" value="yes"{% if form.deploy %} checked{% endif %} aria-describedby="field-deploy-help">
+        <label class="choice__label" for="field-deploy">Deploy now</label>
+        <p class="choice__help" id="field-deploy-help">Runs the file against the host straight away, which recreates containers whose configuration differs. Left unticked, nothing on the host changes.</p>
+      </div>
+      {% if project and project.container_names %}
+      <p class="field__help" id="deploy-containers">Containers of this project that deploying may recreate:</p>
+      <ul class="chip-list mono" aria-labelledby="deploy-containers">
+        {% for container_name in project.container_names %}
+        <li>{{ container_name }}</li>
+        {% endfor %}
+      </ul>
+      {% if project.containers > project.container_names|length %}
+      <p class="field__help">and {{ project.containers - project.container_names|length }} more.</p>
+      {% endif %}
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {{ validation_result(form.report, form.rejection, none, none, form.offers, catalogue, form.lines) }}
+
+  <div class="form__actions">
+    {% if validate_href %}
+    <button type="submit" class="btn" formaction="{{ validate_href }}" formnovalidate
+            hx-post="{{ validate_href }}" hx-target="#validation" hx-swap="outerHTML" hx-encoding="multipart/form-data"
+            hx-sync="this:replace" hx-disabled-elt="this"{% if blocked %} disabled{% endif %}>Check the file</button>
+    {% endif %}
+    {% if kind == "new" %}
+    <button type="submit" class="btn btn--primary"{% if blocked %} disabled{% endif %}>Create and deploy</button>
+    {% elif kind == "edit" %}
+    <button type="submit" class="btn btn--primary" name="next" value="save"{% if blocked %} disabled{% endif %}>Save changes</button>
+    <button type="submit" class="btn" name="next" value="redeploy"{% if blocked %} disabled{% endif %}>Save and review redeploy</button>
+    {% else %}
+    <button type="submit" class="btn btn--primary"{% if blocked %} disabled{% endif %}>Adopt stack</button>
+    {% endif %}
+    <a class="btn" href="{{ cancel_href }}">Cancel</a>
+  </div>
+</form>
+{% endmacro %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_confirm.html" import removal_containers, removal_form, removal_networks, volumes_table with context %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Force remove stack {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Force remove" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Force remove stack", "Review the stack below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Force remove stack <span class="mono cell-wrap">{{ review.stack }}</span>{% if with_volumes %} and delete its volumes{% endif %}?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  <div class="panel panel--alert" role="note">
+    <h3>What forcing does</h3>
+    <ul>
+      <li>Containers that carry this project's label but belong to no service in the file are deleted as well. They are listed under Also removed.</li>
+      <li>The stack's other containers and its networks are stopped and deleted, and dockmin forgets the stack.</li>
+      {% if with_volumes %}
+      <li>The volumes marked Deleted below lose their data. This cannot be undone.</li>
+      {% else %}
+      <li>Volumes are not deleted: their data stays on the host.</li>
+      {% endif %}
+    </ul>
+  </div>
+
+  {% if with_volumes %}
+  <h3 class="confirm__subheading">Volumes</h3>
+  {{ volumes_table(review) }}
+  {% endif %}
+
+  {{ removal_containers(review, true) }}
+  {{ removal_networks(review) }}
+
+  {{ removal_form(review, run_href, detail_href, plain_href, compose, with_volumes=with_volumes, with_orphans=true, alternatives=[("Remove stack and volumes without forcing", volumes_href) if with_volumes else ("Remove stack without forcing", plain_href)]) }}
+</section>
+{% endblock %}

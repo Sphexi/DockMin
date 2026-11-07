@@ -1,0 +1,99 @@
+{# Import with context: the forms carry the request CSRF token. #}
+{% from "environments/_access.html" import grant_rows with context %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/radio_field.html" import radio_field %}
+
+{% macro environments_section(detail, error, selected_name) %}
+<section class="section section--grants" aria-labelledby="environments-heading">
+  <h2 id="environments-heading">Environments</h2>
+  <p>A credential set can be used for a pull only on an environment it is granted to. This applies to administrators as well.</p>
+  {% if detail.offered_nowhere %}
+  <div class="panel panel--notice" role="note">
+    <p>This set is offered nowhere. Grant it to an environment before it can be used for a pull.</p>
+  </div>
+  {% else %}
+  <div class="data-table__scroll" role="region" aria-label="Environments granted this credential set" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Environments granted {{ detail.name }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Environment</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for environment in detail.environments %}
+        {% set dialog_id = "revoke-environment-" ~ environment.id %}
+        <tr>
+          <th scope="row"><a href="{{ route_path('environment_detail', environment_id=environment.id) }}">{{ environment.name }}</a></th>
+          <td>
+            {{ confirm_button(dialog_id, "Remove " ~ environment.name) }}
+            {{ confirmation_dialog(dialog_id, "Remove this environment?", "The credential set will no longer be offered for pulls on this environment.", route_path('registry_environment_revoke', credential_id=detail.id) ~ "?environment_id=" ~ environment.id, "Remove environment", targets=[environment.name], noun="environment") }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if detail.environments_total > detail.environments|length %}
+  <p class="field__help">Showing {{ detail.environments|length }} of {{ detail.environments_total }} environments.</p>
+  {% endif %}
+  {% endif %}
+
+  <h3>Grant to an environment</h3>
+  <form class="form" method="post" action="{{ route_path('registry_environment_grant', credential_id=detail.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("environment_name", "Environment name", value=selected_name, error=error, help="Enter the exact name. It is looked up when you grant the set.", required=true, autocomplete="off") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Grant to environment</button>
+    </div>
+  </form>
+</section>
+{% endmacro %}
+
+{% macro grantees_section(detail, error, selected_kind, selected_name) %}
+{% set grants = detail.access %}
+<section class="section section--grants" aria-labelledby="grantees-heading">
+  <h2 id="grantees-heading">Users and teams</h2>
+  <p>Administrators need only the environment grant. A standard user also needs a grant here, given directly or through a team, to be offered the set.</p>
+  {% if grants.users or grants.teams %}
+  <div class="data-table__scroll" role="region" aria-label="Users and teams granted this credential set" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Users and teams granted {{ detail.name }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Kind</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ grant_rows("user", grants.users, route_path('registry_access_revoke', credential_id=detail.id), "this credential set") }}
+        {{ grant_rows("team", grants.teams, route_path('registry_access_revoke', credential_id=detail.id), "this credential set") }}
+      </tbody>
+    </table>
+  </div>
+  {% if grants.users_total > grants.users|length or grants.teams_total > grants.teams|length %}
+  <p class="field__help">Showing {{ grants.users|length }} of {{ grants.users_total }} users and {{ grants.teams|length }} of {{ grants.teams_total }} teams.</p>
+  {% endif %}
+  {% else %}
+  <p>No user or team holds a grant, so only administrators can use this set.</p>
+  {% endif %}
+
+  <h3>Grant to a user or team</h3>
+  <form class="form" method="post" action="{{ route_path('registry_access_grant', credential_id=detail.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <fieldset class="choice-group">
+      <legend>Grant to</legend>
+      {{ radio_field("grantee_kind", "A user", "user", checked=selected_kind != "team") }}
+      {{ radio_field("grantee_kind", "A team", "team", checked=selected_kind == "team") }}
+    </fieldset>
+    {{ name_field("grantee_name", "Username or team name", route_path("suggestions", kind="grantees"), value=selected_name, error=error, help="Enter the exact name. It is looked up when you grant the set.", required=true) }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Grant to user or team</button>
+    </div>
+  </form>
+</section>
+{% endmacro %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "partials/engine_detail.html" import engine_detail_block %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "swarm/services/_form.html" import form_errors, service_form with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Edit {{ offered.name }} - dockmin{% endblock %}
+{% set crumb_object = offered.name %}
+{% set crumb_object_href = cancel_href %}
+{% set crumb_page = "Edit" %}
+{% block content %}
+{% call page_header("Edit service", offered.name ~ " on " ~ environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ cancel_href }}">Cancel</a>
+{% endcall %}
+
+{% if banner %}
+{{ error_state(banner.title, banner.message) }}
+{{ engine_detail_block(engine_detail) }}
+{% endif %}
+{% if view.errors %}
+{{ form_errors(view.errors) }}
+{% endif %}
+<p class="field__help">Nothing changes until you review the edit and confirm it. Settings this form does not show are kept as they are.</p>
+{{ service_form(true, "Review changes") }}
+{% endblock %}

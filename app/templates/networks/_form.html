@@ -1,0 +1,109 @@
+{# Import with context: the form carries the CSRF token. #}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/key_value_rows.html" import key_value_rows %}
+
+{% set driver_notes = {
+  "bridge": "A private network on this host. Containers on it reach each other by name.",
+  "overlay": "A network that spans the nodes of a Swarm. Attachable lets standalone containers join it.",
+  "macvlan": "Gives each container its own address on a physical network segment. Needs a subnet and a parent interface.",
+  "ipvlan": "Gives containers addresses on a physical network segment through the host's interface. Needs a subnet and a parent interface.",
+} %}
+
+{% macro address_fields(version, values, errors) %}
+{% set label = "IPv" ~ version %}
+<div class="address-grid">
+  {{ form_field("subnet_v" ~ version, label ~ " subnet", value=values.get("subnet_v" ~ version, ""), error=errors.get("subnet_v" ~ version), help=("Such as 10.20.0.0/24." if version == 4 else "Such as fd00:20::/64.")) }}
+  {{ form_field("gateway_v" ~ version, label ~ " gateway", value=values.get("gateway_v" ~ version, ""), error=errors.get("gateway_v" ~ version), help="Inside the subnet.") }}
+  {{ form_field("ip_range_v" ~ version, label ~ " allocation range", value=values.get("ip_range_v" ~ version, ""), error=errors.get("ip_range_v" ~ version), help="A part of the subnet, in CIDR form.") }}
+</div>
+{% endmacro %}
+
+{% macro driver_fields(driver, values, errors, is_admin, option_keys) %}
+{% set driver = choice(driver, ["bridge", "overlay", "macvlan", "ipvlan"]) %}
+<fieldset id="driver-fields" class="choice-group create-section__body">
+  <legend>{{ driver|capitalize }} settings</legend>
+  <p class="loading" role="status">Loading&hellip;</p>
+  <p class="field__help">{{ driver_notes[driver] }}</p>
+  {{ checkbox_field("internal", "Internal", checked=values.get("internal") == "on", help="Containers on the network cannot reach anything outside it.", error=errors.get("internal")) }}
+  {% if driver == "overlay" %}
+  {{ checkbox_field("attachable", "Attachable", checked=values.get("attachable") == "on", help="Standalone containers, not only services, may join.", error=errors.get("attachable")) }}
+  {% endif %}
+  {{ checkbox_field("enable_ipv6", "Enable IPv6", checked=values.get("enable_ipv6") == "on", error=errors.get("enable_ipv6")) }}
+
+  {% if is_admin %}
+  <h3>Addressing</h3>
+  <p class="field__help">
+    {% if driver in ("macvlan", "ipvlan") %}A subnet is required.{% else %}Leave the fields empty to let Docker choose from its default pools.{% endif %}
+    Docker compares a subnet only with the networks it knows. Overlap with routes on the host itself cannot be seen through the Engine API, so check the range against the host's own network.
+  </p>
+  {{ address_fields(4, values, errors) }}
+  {{ address_fields(6, values, errors) }}
+  {% else %}
+  <p class="field__help">Docker chooses the address range. Only administrators can set a subnet, a gateway or an allocation range.</p>
+  {% endif %}
+
+  <h3>Driver options</h3>
+  {% if is_admin %}
+  <p class="field__help">Passed to the {{ driver }} driver as they are. Suggested keys are listed as you type.</p>
+  {% else %}
+  <p class="field__help">You may set {{ option_keys|join(", ") }}. Administrators can set others.</p>
+  {% endif %}
+  <datalist id="option-keys">
+    {% for key in option_keys %}
+    <option value="{{ key }}"></option>
+    {% endfor %}
+  </datalist>
+</fieldset>
+{% endmacro %}
+
+{% macro driver_select(offered, driver, error, post_href) %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-driver">Driver</label>
+  </div>
+  <select class="field__input" id="field-driver" name="driver"
+          hx-post="{{ post_href }}" hx-trigger="change" hx-target="#driver-fields" hx-swap="outerHTML" hx-sync="this:replace" hx-vals='{"step": "driver"}'
+          {%- if error %} aria-invalid="true" aria-describedby="field-driver-error"{% endif %}>
+    {% for option in offered %}
+    <option value="{{ option }}"{% if option == driver %} selected{% endif %}>{{ option|capitalize }}</option>
+    {% endfor %}
+  </select>
+  {% if error %}
+  <p class="field__error" id="field-driver-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro network_form(offered, driver, values, errors, is_admin, option_keys, option_count, label_count, row_cap, post_href, list_href) %}
+<form class="form create-form" method="post" action="{{ post_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="visually-hidden" name="step" value="create" tabindex="-1" aria-hidden="true">Create network</button>
+
+  <section class="panel create-section" aria-labelledby="network-title">
+    <h2 class="create-section__title" id="network-title">Network</h2>
+    <div class="create-section__body">
+      {{ form_field("name", "Name", value=values.get("name", ""), error=errors.get("name"), required=true, help="Letters, digits, underscore, period and hyphen, starting with a letter or digit.") }}
+      {{ driver_select(offered, driver, errors.get("driver"), post_href) }}
+      <div class="form__actions" data-nojs-only>
+        <button type="submit" class="btn btn--compact" name="step" value="driver" formnovalidate>Continue</button>
+      </div>
+      <p class="field__help" data-nojs-only>Choose a driver, then Continue to see the fields it takes.</p>
+      {{ driver_fields(driver, values, errors, is_admin, option_keys) }}
+      {{ key_value_rows("option", "Driver options", "Option", none, option_count, row_cap, values, errors, post_href, "option-keys") }}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="labels-title">
+    <h2 class="create-section__title" id="labels-title">Labels</h2>
+    <div class="create-section__body">
+      {{ key_value_rows("label", "Labels", "Label", "Stack membership labels cannot be set here.", label_count, row_cap, values, errors, post_href) }}
+    </div>
+  </section>
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary" name="step" value="create">Create network</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% endmacro %}

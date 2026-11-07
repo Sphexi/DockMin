@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "images/_detail.html" import image_summary, image_tabs with context %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}Image {{ detail.short_id }} - dockmin{% endblock %}
+{% set crumb_object = detail.short_id %}
+{% block content %}
+{% call page_header("Image " ~ detail.short_id, "Image on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to images", origin) }}
+{% endcall %}
+
+{{ image_summary(detail) }}
+{{ image_tabs(detail, tab, tabs, history, checkable) }}
+{% endblock %}

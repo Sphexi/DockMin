@@ -1,0 +1,146 @@
+{% from "partials/check_status.html" import check_status %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/ports.html" import port_list %}
+{% from "stacks/_parts.html" import credential_choices, stderr_block with context %}
+
+{% macro goto_line(field_id, line) -%}
+<a class="goto-line" href="#{{ field_id }}" data-goto-line="{{ line }}">Go to line {{ line }}</a>
+{%- endmacro %}
+
+{% macro service_table(services) %}
+{% if services %}
+<div class="data-table__scroll" role="region" aria-label="Services in the file" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Services in the file</caption>
+    <thead>
+      <tr>
+        <th scope="col">Service</th><th scope="col">Image</th><th scope="col">Ports</th>
+        <th scope="col">Networks</th><th scope="col" class="is-numeric">Mounts</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for service in services %}
+      <tr>
+        <th scope="row" class="mono cell-wrap">{{ service.name }}</th>
+        <td class="mono cell-wrap">{{ service.image or "—" }}</td>
+        <td class="cell-wrap">{{ port_list(service.ports, "—") }}</td>
+        <td class="mono cell-wrap">{{ service.networks|join(", ") or "—" }}</td>
+        <td class="is-numeric">{{ service.volumes }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro collision_notice(warnings, label_id) %}
+{% if warnings %}
+<section class="panel panel--notice" aria-labelledby="{{ label_id }}">
+  <h3 id="{{ label_id }}">Check these before you deploy</h3>
+  <ul>
+    {% for warning in warnings %}
+    <li>{{ warning }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endmacro %}
+
+{% macro valid_status(report) %}The file is valid. {{ report.services|length }}{{ " service." if report.services|length == 1 else " services." }}{% if report.warnings %} {{ report.warnings|length }}{{ " warning." if report.warnings|length == 1 else " warnings." }}{% endif %}{% endmacro %}
+
+{% macro validation_result(report, rejection, failure, errors=none, offers=(), catalogue=none, lines=none) %}
+{{ check_status("validation-status", valid_status(report) if report and not (failure or rejection or errors) else "") }}
+<div id="validation" class="validation">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <div>
+  {% if failure %}
+  {{ error_state(failure.title, failure.message) }}
+  {% elif rejection or errors %}
+  <div class="panel panel--alert" role="alert">
+    <h2>{{ rejection.title if rejection else "Check the form" }}</h2>
+    {% if errors %}
+    <ul>
+      {% for key, message in errors.items() %}
+      <li>{{ message }}{% if lines and lines.get(key) %} {{ goto_line("field-" ~ key, lines[key]) }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if rejection %}
+    {% if rejection.reason in ("credential_choice_required", "credential_missing", "credential_unavailable") %}
+    <p>Choose a credential set for each image in the Credentials section, then submit again.</p>
+    {% endif %}
+    {% if rejection.problems %}
+    <ul>
+      {% for path, message in rejection.problems %}
+      <li><span class="mono cell-wrap">{{ path }}</span>: {{ message }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if rejection.findings %}
+    <div class="data-table__scroll" role="region" aria-label="Refused options" tabindex="0">
+      <table class="table">
+        <caption class="visually-hidden">Options in the file that your role cannot deploy</caption>
+        <thead>
+          <tr><th scope="col">Where in the file</th><th scope="col">What is refused</th></tr>
+        </thead>
+        <tbody>
+          {% for finding in rejection.findings %}
+          <tr>
+            <th scope="row" class="mono cell-wrap">{{ finding.path }}</th>
+            <td class="cell-wrap">{{ finding.message }}{% if lines is not none and rejection.finding_lines.get(finding.path) %} {{ goto_line("field-compose_file", rejection.finding_lines[finding.path]) }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {{ stderr_block(rejection.stderr) }}
+    {{ collision_notice(rejection.warnings, "validation-warnings") }}
+    {% endif %}
+  </div>
+  {% elif report %}
+  <div class="panel">
+    <h2>The file is valid</h2>
+    <p>Docker Compose resolved the file. Nothing was stored or run.</p>
+    <dl class="facts">
+      <dt>Services</dt>
+      <dd>{{ report.services|length }}</dd>
+      <dt>Images</dt>
+      <dd class="mono cell-wrap">{{ report.images|join(", ") or "—" }}</dd>
+      <dt>To pull on deploy</dt>
+      <dd class="mono cell-wrap">{{ report.to_pull|join(", ") or "None: the host has every image" }}</dd>
+      <dt>Networks</dt>
+      <dd class="mono cell-wrap">{{ report.networks|join(", ") or "—" }}</dd>
+      <dt>Volumes</dt>
+      <dd class="mono cell-wrap">{{ report.volumes|join(", ") or "—" }}</dd>
+    </dl>
+    {{ collision_notice(report.warnings, "validation-warnings") }}
+    {{ service_table(report.services) }}
+    {% if report.restricted_options or report.restricted %}
+    <div class="panel panel--notice" role="note">
+      <p>This file uses options that are restricted for standard users. They are allowed for you because you are an administrator.</p>
+      <ul>
+        {% for item in report.restricted_options %}
+        <li>{{ item.label }}</li>
+        {% else %}
+        {% for option in report.restricted %}
+        <li class="mono">{{ option }}</li>
+        {% endfor %}
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  </div>
+  {% if offers %}
+  <section class="panel create-section" aria-labelledby="credentials-title">
+    <h2 class="create-section__title" id="credentials-title">Credentials for image pulls</h2>
+    <div class="create-section__body">
+      {{ credential_choices(offers, catalogue) }}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endmacro %}

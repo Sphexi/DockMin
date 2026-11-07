@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "teams/_tables.html" import roster_table with context %}
+{% block title %}{{ team.name }} - dockmin{% endblock %}
+{% set crumb_object = team.name %}
+{% block content %}
+{% call page_header(team.name, "Team") %}
+<a class="btn" href="{{ route_path('teams') }}">Back to teams</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("That change was refused", error) }}
+{% endif %}
+{{ unplaced_errors(fields, ["name", "username", "user"]) }}
+{% if fields.get("user") %}
+{{ error_state("That change was refused", fields.get("user")) }}
+{% endif %}
+
+<dl class="facts">
+  <dt>Created</dt>
+  <dd><time datetime="{{ team.created_at|timestamp_iso }}">{{ team.created_at|timestamp }}</time></dd>
+</dl>
+
+<section class="section" aria-labelledby="team-members-heading">
+  <h2 id="team-members-heading">Members</h2>
+  {% if not detail.can_manage_members %}
+  <p>Only a team leader or an administrator can change who belongs to this team.</p>
+  {% elif not detail.can_manage_leaders %}
+  <p>You lead this team, so you can add and remove members. Only an administrator can appoint or remove a leader.</p>
+  {% endif %}
+  {{ roster_table(rows, columns, pager, team, detail.can_manage_members, detail.can_manage_leaders) }}
+</section>
+
+{% if detail.can_manage_members %}
+<section class="section" aria-labelledby="team-add-heading">
+  <h2 id="team-add-heading">Add a member</h2>
+  <form class="form" method="post" action="{{ route_path('team_member_add', team_id=team.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ name_field("username", "Username", route_path("suggestions", kind="users"), value=member_username, error=fields.get("username"), help="An enabled account.", required=true) }}
+    {% if detail.can_manage_leaders %}
+    {{ checkbox_field("is_leader", "Appoint as team leader", checked=member_is_leader, help="A leader can add and remove the members of this team.") }}
+    {% endif %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Add member</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+{% if detail.can_rename_and_delete %}
+<section class="section" aria-labelledby="team-rename-heading">
+  <h2 id="team-rename-heading">Rename</h2>
+  <form class="form" method="post" action="{{ route_path('team_rename', team_id=team.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("name", "Team name", value=name, error=fields.get("name"), help="Up to 64 characters. Names are unique, ignoring case.", required=true, autocomplete="off") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Save name</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="team-delete-heading">
+  <h2 id="team-delete-heading">Delete</h2>
+  <p>Deleting a team removes its memberships and every grant made to it. The users keep their accounts.</p>
+  {{ confirm_button("delete-dialog", "Delete team") }}
+  {{ confirmation_dialog("delete-dialog", "Delete this team?", "This removes its memberships and every access grant made to it. The users keep their accounts.", route_path('team_delete', team_id=team.id), "Delete team", targets=[team.name], noun="team", hidden={"expected_name": team.name}) }}
+</section>
+{% endif %}
+{% endblock %}

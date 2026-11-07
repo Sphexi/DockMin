@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Encryption - dockmin{% endblock %}
+{% block content %}
+{{ page_header("Encryption", "The key that seals stored secrets, and how many secrets each key version holds.") }}
+
+{% if error %}
+{{ error_state("The check did not start", error) }}
+{% endif %}
+
+<section class="section" aria-labelledby="key-heading">
+  <h2 id="key-heading">Key</h2>
+  <dl class="facts">
+    <dt>Held in</dt>
+    <dd>{{ overview.key_description }}</dd>
+    <dt>Key version</dt>
+    <dd>{{ overview.key_version }}</dd>
+    <dt>Fingerprint</dt>
+    <dd class="mono cell-wrap">{{ overview.key_fingerprint }}</dd>
+    <dt>Previous key</dt>
+    <dd>
+      {%- if overview.previous_key %}{{ overview.previous_key.source }}, fingerprint <span class="mono cell-wrap">{{ overview.previous_key.fingerprint }}</span>
+      {%- else %}None configured{% endif -%}
+    </dd>
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="secrets-heading">
+  <h2 id="secrets-heading">Stored secrets by key version</h2>
+  <div class="data-table__scroll" role="region" aria-labelledby="secrets-heading" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Stored secret values in each column, by the key version that sealed them</caption>
+      <thead>
+        <tr>
+          <th scope="col">Column</th>
+          {% for version in versions %}
+          <th scope="col" class="is-numeric">Version {{ version }}{% if version == overview.key_version %} (current){% endif %}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for column in overview.columns %}
+        {% set name = column.table ~ "." ~ column.column %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ name }}</th>
+          {% for version in versions %}
+          <td class="is-numeric">{{ counts[name].get(version, 0) }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if overview.values_below_current %}
+  <p>{{ badge("Below the current key", "warn") }} {{ overview.values_below_current }} stored {{ "secret is" if overview.values_below_current == 1 else "secrets are" }} sealed under an older key version.</p>
+  {% else %}
+  <p>{{ badge("Current", "ok") }} Every stored secret is sealed under key version {{ overview.key_version }}.</p>
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="check-heading">
+  <h2 id="check-heading">Check stored secrets</h2>
+  <p>Opens every stored secret at the current key version and reports any that cannot be opened, by table, column and row. Nothing is changed and the instance stays online.</p>
+  <form class="form" method="post" action="{{ check_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Check stored secrets</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="rekey-heading">
+  <h2 id="rekey-heading">Re-encrypt stored secrets</h2>
+  {% if overview.values_below_current %}
+  <p>Rewrites every stored secret that is below key version {{ overview.key_version }} under the current key. The instance refuses changes until it finishes.</p>
+  <p><a class="btn" href="{{ rekey_href }}">Review and re-encrypt</a></p>
+  {% else %}
+  <p>Nothing to re-encrypt.</p>
+  {% endif %}
+</section>
+
+{% if last_run_href %}
+<section class="section" aria-labelledby="latest-heading">
+  <h2 id="latest-heading">Latest run</h2>
+  <p><a href="{{ last_run_href }}">{{ "Check of stored secrets" if overview.last_run.kind == "check" else "Re-encryption of stored secrets" }}</a>, {{ "running" if overview.last_run.phase == "running" else "finished" }}.</p>
+</section>
+{% endif %}
+{% endblock %}

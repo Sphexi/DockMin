@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% from "registries/_tables.html" import registries_table with context %}
+{% block title %}Registries - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Registries", "Credential sets for pulling images, and the environments and users that may use them.") %}
+{% endcall %}
+
+{% call list_bar(list_count(total|default(none), "registry", "registries")) %}
+<a class="btn btn--primary" href="{{ route_path('registry_new') }}">Add registry</a>
+{% endcall %}
+{{ registries_table(rows, columns, pager, catalogue) }}
+{% endblock %}

@@ -1,0 +1,135 @@
+{# Import with context: the rows read the form state from the page context. #}
+{% from "partials/name_field.html" import name_cell %}
+
+{% set heads = {
+  "env": ["Name", "Value"],
+  "labels": ["Key", "Value"],
+  "ports": ["Host IP", "Host port", "Container port", "Protocol"],
+  "mounts": ["Type", "Source", "Target", "Read-only", "Tmpfs size"],
+  "networks": ["Network", "Aliases", "IPv4 address"],
+  "devices": ["Host path", "Container path", "Permissions"],
+  "extra_hosts": ["Host name", "Address"],
+  "log_options": ["Option", "Value"],
+} %}
+{% set prefixes = {"env": "env", "labels": "label", "ports": "port", "mounts": "mount", "networks": "network", "devices": "device", "extra_hosts": "host", "log_options": "logopt"} %}
+{% set subjects = {"env": "Environment variable", "labels": "Label", "ports": "Port mapping", "mounts": "Mount", "networks": "Network", "devices": "Device", "extra_hosts": "Extra host", "log_options": "Log option"} %}
+{% set group_types = ["volume", "bind", "tmpfs"] %}
+
+{% macro cell(group, index, number, column, label, st, placeholder=none, default="", suggest=none) %}
+{% set name = prefixes[group] ~ "-" ~ index ~ "-" ~ column %}
+{% set field_id = "field-" ~ name %}
+{% set error = st.errors.get(name) %}
+{% if suggest %}
+{{ name_cell(name, label, subjects[group] ~ " " ~ number ~ ": ", route_path("environment_suggestions", environment_id=environment_id, kind=suggest), value=st.get(name) or default, error=error, placeholder=placeholder) }}
+{% else %}
+<div class="field repeat__cell"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subjects[group] }} {{ number }}: </span>{{ label }}</label>
+  </div>
+  <input class="field__input" id="{{ field_id }}" name="{{ name }}" type="text" value="{{ st.get(name) or default }}"
+         {%- if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+         {%- if error %} aria-invalid="true" aria-describedby="{{ field_id }}-error"{% endif %}
+         autocomplete="off">
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro choice_cell(group, index, number, column, label, options, st) %}
+{% set name = prefixes[group] ~ "-" ~ index ~ "-" ~ column %}
+{% set field_id = "field-" ~ name %}
+{% set error = st.errors.get(name) %}
+{% set current = st.get(name) or options[0] %}
+<div class="field repeat__cell"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subjects[group] }} {{ number }}: </span>{{ label }}</label>
+  </div>
+  <select class="field__input" id="{{ field_id }}" name="{{ name }}"
+          {%- if error %} aria-invalid="true" aria-describedby="{{ field_id }}-error"{% endif %}>
+    {% for option in options %}
+    <option value="{{ option }}"{% if option == current %} selected{% endif %}>{{ option }}</option>
+    {% endfor %}
+    {% if current not in options %}
+    <option value="{{ current }}" selected>{{ current }}</option>
+    {% endif %}
+  </select>
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro check_cell(group, index, number, column, label, st) %}
+{% set name = prefixes[group] ~ "-" ~ index ~ "-" ~ column %}
+{% set field_id = "field-" ~ name %}
+<div class="repeat__cell repeat__cell--check">
+  <input class="choice__input" type="checkbox" id="{{ field_id }}" name="{{ name }}" value="on"{% if st.checked(name) %} checked{% endif %}>
+  <label class="repeat__label" for="{{ field_id }}"><span class="visually-hidden">{{ subjects[group] }} {{ number }}: </span>{{ label }}</label>
+</div>
+{% endmacro %}
+
+{% macro row(group, index, number, st) %}
+<div class="repeat__row" data-repeat-row="{{ index }}">
+  {% if group == "env" %}
+  {{ cell(group, index, number, "key", "Name", st) }}
+  {{ cell(group, index, number, "value", "Value", st) }}
+  {% elif group == "labels" %}
+  {{ cell(group, index, number, "key", "Key", st) }}
+  {{ cell(group, index, number, "value", "Value", st) }}
+  {% elif group == "ports" %}
+  {{ cell(group, index, number, "host_ip", "Host IP", st, placeholder="All interfaces") }}
+  {{ cell(group, index, number, "host_port", "Host port", st, placeholder="Assigned") }}
+  {{ cell(group, index, number, "container_port", "Container port", st, placeholder="80 or 8000-8010") }}
+  {{ choice_cell(group, index, number, "protocol", "Protocol", ["tcp", "udp", "sctp"], st) }}
+  {% elif group == "mounts" %}
+  {% set types = group_types if is_administrator else group_types|reject("in", admin_only.mount_types)|list %}
+  {{ choice_cell(group, index, number, "type", "Type", types, st) }}
+  {{ cell(group, index, number, "source", "Source", st, placeholder="Volume name or host path", suggest="volumes") }}
+  {{ cell(group, index, number, "target", "Target", st, placeholder="/data") }}
+  {{ check_cell(group, index, number, "read_only", "Read-only", st) }}
+  {{ cell(group, index, number, "tmpfs_size", "Tmpfs size", st, placeholder="64m") }}
+  {% elif group == "networks" %}
+  {{ cell(group, index, number, "name", "Network", st, suggest="networks") }}
+  {{ cell(group, index, number, "aliases", "Aliases", st, placeholder="Space separated") }}
+  {{ cell(group, index, number, "ipv4", "IPv4 address", st) }}
+  {% elif group == "devices" %}
+  {{ cell(group, index, number, "host_path", "Host path", st, placeholder="/dev/fuse") }}
+  {{ cell(group, index, number, "container_path", "Container path", st, placeholder="Same as host path") }}
+  {{ cell(group, index, number, "permissions", "Permissions", st, default="rwm") }}
+  {% elif group == "extra_hosts" %}
+  {{ cell(group, index, number, "name", "Host name", st) }}
+  {{ cell(group, index, number, "address", "Address", st) }}
+  {% elif group == "log_options" %}
+  {{ cell(group, index, number, "key", "Option", st) }}
+  {{ cell(group, index, number, "value", "Value", st) }}
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro repeat_group(group, legend, help=none) %}
+{% set error = state.errors.get(group) %}
+<fieldset class="choice-group repeat" id="group-{{ group }}" data-group="{{ choice(group, heads.keys()|list) }}" data-repeat="{{ group }}" data-repeat-cap="{{ row_caps[group] }}"{% if error %} data-invalid{% endif %}>
+  <legend class="visually-hidden">{{ legend }}</legend>
+  {% if help %}
+  <p class="field__help">{{ help }}</p>
+  {% endif %}
+  {% if error %}
+  <p class="field__error">{{ error }}</p>
+  {% endif %}
+  <div class="repeat__head" aria-hidden="true">
+    {% for head in heads[group] %}<span>{{ head }}</span>{% endfor %}
+  </div>
+  <div class="repeat__rows" data-repeat-rows>
+    {% for index in state.row_indices(group) %}
+    {{ row(group, index, index + 1, state) }}
+    {% endfor %}
+  </div>
+  <template data-repeat-template>{{ row(group, "__INDEX__", "__NUMBER__", blank) }}</template>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--compact" name="rows" value="{{ group }}" formaction="{{ submit_href }}#group-{{ group }}" formnovalidate data-repeat-more>Add rows</button>
+    <button type="button" class="btn btn--compact" data-repeat-add hidden>Add row</button>
+  </div>
+</fieldset>
+{% endmacro %}

@@ -1,0 +1,30 @@
+{% macro stack_variable_reveal_form(variable, environment_id, stack_kind, stack_name, row_id, reveal_href, row_href, back_href, error=none, revealed=none, window_expires_at=none, reveals_left=none) %}
+{% set field_id = row_id ~ "-password" %}
+{% set described_by = field_id ~ "-help" ~ (" " ~ field_id ~ "-error" if error else "") %}
+<tr id="{{ row_id }}">
+  <th scope="row" class="mono cell-wrap">{{ variable.name }}</th>
+  <td>
+    <form class="reveal-form" method="post" action="{{ reveal_href }}"
+          hx-post="{{ reveal_href }}" hx-target="#{{ row_id }}" hx-swap="outerHTML" hx-push-url="false"
+          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="expected_name" value="{{ variable.name }}">
+      <div class="field"{% if error %} data-invalid{% endif %}>
+        <div class="field__head">
+          <label class="field__label" for="{{ field_id }}">Your password</label>
+          <p class="field__help" id="{{ field_id }}-help">Enter your dockmin password. Values can then be revealed for 5 minutes on this session. An account created at access-platform sign-in has no dockmin password until an administrator sets one.</p>
+        </div>
+        <input class="field__input" id="{{ field_id }}" name="password" type="password" autocomplete="current-password" required data-autofocus
+               {%- if error %} aria-invalid="true"{% endif %} aria-describedby="{{ described_by }}">
+        {% if error %}
+        <p class="field__error" id="{{ field_id }}-error" role="alert">{{ error }}</p>
+        {% endif %}
+      </div>
+      <div class="row-actions">
+        <button type="submit" class="btn btn--primary btn--compact">Reveal</button>
+        <a class="btn btn--compact" href="{{ row_href }}" hx-get="{{ row_href }}" hx-target="#{{ row_id }}" hx-swap="outerHTML" hx-push-url="false">Cancel</a>
+      </div>
+    </form>
+  </td>
+</tr>
+{% endmacro %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "networks/_detail.html" import network_summary, network_tabs with context %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}{{ detail.name }} - dockmin{% endblock %}
+{% set crumb_object = detail.name %}
+{% block content %}
+{% call page_header(detail.name, "Network on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to networks", origin) }}
+{% endcall %}
+
+{{ network_summary(detail) }}
+{{ network_tabs(detail, tab, tabs, panel, values, fields) }}
+{% endblock %}

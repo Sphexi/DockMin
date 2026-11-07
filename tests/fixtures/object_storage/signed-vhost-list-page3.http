@@ -1,0 +1,18 @@
+GET /?list-type=2&prefix=backups/rule-1-20260101T000000/&max-keys=2&continuation-token=backups/rule-1-20260101T000000/dockmin-backup-20260105T000000Z.tar.gz HTTP/1.1
+host: dockmin-e2e.s3.localhost:29000
+accept: */*
+accept-encoding: gzip, deflate
+connection: keep-alive
+user-agent: python-httpx/0.28.1
+x-amz-date: 20261024T172300Z
+x-amz-content-sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+authorization: AWS4-HMAC-SHA256 Credential=<redacted>/20261024/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=<redacted>
+
+HTTP/1.1 200 OK
+accept-ranges: bytes
+content-length: 606
+content-type: application/xml
+server: SeaweedFS 30GB 4.48
+vary: Origin
+x-amz-request-id: 18E18704B64586269D934758
+date: Sat, 24 Oct 2026 17:23:00 GMT

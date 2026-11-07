@@ -1,0 +1,3 @@
+{% macro container_state_label(status) -%}
+{{ {"created": "Created", "running": "Running", "paused": "Paused", "restarting": "Restarting", "removing": "Removing", "exited": "Exited", "dead": "Dead", "stopped": "Stopped"}.get(status, status) }}
+{%- endmacro %}

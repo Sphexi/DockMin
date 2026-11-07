@@ -1,0 +1,62 @@
+{
+  "name": "shop",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "shop_default"
+    }
+  },
+  "services": {
+    "web": {
+      "command": [
+        "echo",
+        "$$HOME",
+        "plain",
+        "pa$$word$$$$x"
+      ],
+      "deploy": {
+        "labels": {
+          "dl": "p$$q"
+        },
+        "placement": {},
+        "resources": {}
+      },
+      "entrypoint": [
+        "sh",
+        "-c"
+      ],
+      "environment": {
+        "A": "a$$b",
+        "B": "$$$$x",
+        "C": "pa$$word$$$$x",
+        "D": "def",
+        "E": "",
+        "F": null,
+        "G": "plain",
+        "H": "plain",
+        "I": "x$$",
+        "J": "5",
+        "K": "true",
+        "L": "multi line",
+        "M": "tab\tq\"uote"
+      },
+      "extra_hosts": [
+        "h1=10.0.0.1"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "echo $$HOME"
+        ]
+      },
+      "image": "registry:2",
+      "labels": {
+        "l1": "a$$b",
+        "l2": "pa$$word$$$$x"
+      },
+      "networks": {
+        "default": null
+      }
+    }
+  }
+}

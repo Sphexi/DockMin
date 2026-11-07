@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import grantee_names with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Delete {{ preview.name }} - dockmin{% endblock %}
+{% set crumb_object = preview.name %}
+{% set crumb_object_href = route_path('group_detail', group_id=preview.group_id) %}
+{% set crumb_page = "Delete" %}
+{% block content %}
+{% call page_header("Delete group", "Review what is removed. Nothing is deleted until you confirm.") %}
+<a class="btn" href="{{ route_path('group_detail', group_id=preview.group_id) }}">Back to the group</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("The group was not deleted", message) }}
+{% endfor %}
+
+<section class="panel" aria-labelledby="impact-heading">
+  <h2 id="impact-heading">{{ preview.name }}</h2>
+
+  <h3>Environments left ungrouped</h3>
+  {% if preview.environments %}
+  <ul class="chip-list">
+    {% for environment in preview.environments %}
+    <li><a href="{{ route_path('environment_detail', environment_id=environment.id) }}">{{ environment.name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% if preview.environments_total > preview.environments|length %}
+  <p class="field__help">Showing {{ preview.environments|length }} of {{ preview.environments_total }}.</p>
+  {% endif %}
+  {% else %}
+  <p>None. The group is empty.</p>
+  {% endif %}
+  <p>{{ preview.ungroup_note }}</p>
+
+  <h3>Access that goes with it</h3>
+  {{ grantee_names(preview.grants) }}
+  <p>Standard users who lose access to an environment through this group: {{ preview.standard_users_affected }}.</p>
+  <p>{{ preview.grants_note }}</p>
+</section>
+
+<form class="form" method="post" action="{{ route_path('group_delete', group_id=preview.group_id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_name" value="{{ preview.name }}">
+  {{ confirm_targets([preview.name], "group") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Delete group</button>
+    <a class="btn" href="{{ route_path('group_detail', group_id=preview.group_id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

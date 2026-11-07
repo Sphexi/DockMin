@@ -1,0 +1,15 @@
+{# One option of a group; wrap the options in a fieldset with a legend. #}
+{% macro radio_field(name, label, value, checked=false, help=none, group_error=none) %}
+{% set field_id = "field-" ~ name ~ "-" ~ value %}
+<div class="choice">
+  <input class="choice__input" type="radio" id="{{ field_id }}" name="{{ name }}" value="{{ value }}"
+         {%- if checked %} checked{% endif %}
+         {%- if group_error %} aria-invalid="true"{% endif %}
+         {%- set described_by = (field_id ~ "-help " if help else "") ~ (group_error if group_error else "") %}
+         {%- if described_by|trim %} aria-describedby="{{ described_by|trim }}"{% endif %}>
+  <label class="choice__label" for="{{ field_id }}">{{ label }}</label>
+  {% if help %}
+  <p class="choice__help" id="{{ field_id }}-help">{{ help }}</p>
+  {% endif %}
+</div>
+{% endmacro %}

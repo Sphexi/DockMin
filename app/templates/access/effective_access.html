@@ -1,0 +1,95 @@
+{# names maps resource_id to the name shown; an id missing from it is shown as is. #}
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Access for {{ access.username }} - dockmin{% endblock %}
+{% set crumb_page = "Effective access" %}
+{% block content %}
+{% set reason_text = {
+  "administrator": "Administrators can reach every object.",
+  "owner": "They own it.",
+  "user_grant": "They were granted access directly.",
+  "team_grant": "A team they belong to was granted access.",
+  "public": "It is public, so everyone who can sign in can reach it.",
+  "uncontrolled_default": "No control covers it, so the default for uncontrolled objects applies.",
+  "administrators_only": "It is restricted to administrators, which overrides every grant on it.",
+  "not_granted": "A control covers it, but nothing in that control reaches this user.",
+  "uncontrolled_denied": "No control covers it, and the default for uncontrolled objects is to refuse.",
+  "no_environment_access": "They have no access to the environment these objects are in.",
+  "local_socket_read_only": "The environment is the Docker host this product runs on, where a standard user has read access at most.",
+} %}
+{% set default_text = {
+  "administrators_only": "Administrators only",
+  "read": "Read for everyone",
+  "write": "Read and write for everyone",
+} %}
+{% call page_header("Access for " ~ access.username, "What this account can reach among " ~ resource_type ~ " objects, and why.") %}
+<a class="btn" href="{{ back_href }}">{{ back_label }}</a>
+{% endcall %}
+
+{% if not access.is_enabled %}
+<div class="panel panel--notice" role="status">
+  <p><strong>This account is disabled.</strong> It cannot sign in, so none of the access below can be used until it is enabled.</p>
+</div>
+{% endif %}
+
+<dl class="facts">
+  <dt>Role</dt>
+  <dd>{{ access.role|capitalize }}</dd>
+  <dt>Account</dt>
+  <dd>{% if access.is_enabled %}{{ badge("Enabled", "ok") }}{% else %}{{ badge("Disabled", "warn") }}{% endif %}</dd>
+  <dt>Uncontrolled objects</dt>
+  <dd>{{ default_text[access.uncontrolled_default] }}</dd>
+</dl>
+
+{% if not access.entries %}
+{{ empty_state("No objects to explain", "There are no " ~ resource_type ~ " objects in the list this view was given.") }}
+{% else %}
+<div class="data-table">
+  <div class="data-table__scroll" role="region" aria-label="Access by object" tabindex="0">
+    <table class="table table--reasons">
+      <caption class="visually-hidden">Why {{ access.username }} can or cannot reach each {{ resource_type }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Object</th>
+          <th scope="col">Why</th>
+          <th scope="col">Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in access.entries %}
+        <tr>
+          <th scope="row">{{ names.get(entry.resource_id, entry.resource_id) }}</th>
+          <td>
+            <ul class="reason-list">
+              {% for reason in entry.reasons %}
+              <li class="reason">
+                <span class="reason__lead">{{ reason_text[reason|string] }}</span>
+                {% if reason|string == "team_grant" and entry.via_teams %}
+                <span class="reason__detail">Through {{ entry.via_teams|join(", ") }}.</span>
+                {% endif %}
+              </li>
+              {% endfor %}
+              {% if entry.inherited_from %}
+              <li class="reason"><span class="reason__detail">Inherited from the stack <span class="mono">{{ entry.inherited_from }}</span>.</span></li>
+              {% endif %}
+            </ul>
+          </td>
+          <td>
+            {% if entry.level == "write" %}
+            {{ badge("Read and write", "ok") }}
+            {% elif entry.level == "read" %}
+            {{ badge("Read", "info") }}
+            {% else %}
+            {{ badge("No access") }}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

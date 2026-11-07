@@ -1,0 +1,12 @@
+{"id":"Container dockmin-e2e-sample-once-1","status":"Working","text":"Stopping"}
+{"id":"Container dockmin-e2e-sample-web-1","status":"Working","text":"Stopping"}
+{"id":"Container dockmin-e2e-sample-once-1","status":"Done","text":"Stopped"}
+{"id":"Container dockmin-e2e-sample-once-1","status":"Working","text":"Removing"}
+{"id":"Container dockmin-e2e-sample-once-1","status":"Done","text":"Removed"}
+{"id":"Container dockmin-e2e-sample-web-1","status":"Done","text":"Stopped"}
+{"id":"Container dockmin-e2e-sample-web-1","status":"Working","text":"Removing"}
+{"id":"Container dockmin-e2e-sample-web-1","status":"Done","text":"Removed"}
+{"id":"Volume dockmin-e2e-sample_data","status":"Working","text":"Removing"}
+{"id":"Network dockmin-e2e-sample_appnet","status":"Working","text":"Removing"}
+{"id":"Volume dockmin-e2e-sample_data","status":"Done","text":"Removed"}
+{"id":"Network dockmin-e2e-sample_appnet","status":"Done","text":"Removed"}

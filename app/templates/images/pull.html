@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "images/_parts.html" import pull_choice with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Pull image on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Pull image" %}
+{% block content %}
+{% call page_header("Pull image", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("The image was not pulled", error) }}
+{% endif %}
+
+<form class="form form--wide" method="get" action="{{ pull_href }}">
+  <div class="field"{% if fields.get("reference") %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-reference">Image reference <span class="field__required" aria-hidden="true">*</span></label>
+      <p class="field__help" id="field-reference-help">A repository with an optional tag or digest, such as <span class="mono">nginx:1.27</span> or <span class="mono">ghcr.io/org/app@sha256:…</span>. Without a tag, <span class="mono">latest</span> is pulled.</p>
+    </div>
+    <input class="field__input" id="field-reference" name="reference" type="text" value="{{ reference }}" required autocomplete="off" spellcheck="false"
+           aria-describedby="field-reference-help{% if fields.get('reference') %} field-reference-error{% endif %}"{% if fields.get("reference") %} aria-invalid="true"{% endif %}
+           hx-post="{{ choices_href }}" hx-trigger="change" hx-target="#pull-choice" hx-swap="outerHTML" hx-sync="closest form:queue last">
+    {% if fields.get("reference") %}
+    <p class="field__error" id="field-reference-error">{{ fields.get("reference") }}</p>
+    {% endif %}
+  </div>
+  <div class="form__actions">
+    <button type="submit" class="btn"
+            hx-post="{{ choices_href }}" hx-target="#pull-choice" hx-swap="outerHTML" hx-sync="closest form:queue last">Continue</button>
+  </div>
+</form>
+
+{{ pull_choice(offer, selected, fields.get("credential_choice"), catalogue, post_href, "Pull image") }}
+{% endblock %}

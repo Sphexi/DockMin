@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "stacks/_validation.html" import goto_line, validation_result with context %}
+{% set heading = "Add file" if file_name is none else "Edit file" %}
+{% block title %}{{ heading }}{% if file_name %} {{ file_name }}{% endif %} on {{ stack_name }} - dockmin{% endblock %}
+{% set crumb_object = stack_name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = heading %}
+{% block content %}
+{% call page_header(heading, stack_name ~ " on " ~ environment_name) %}
+<a class="btn" href="{{ detail_href }}">Cancel</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if form.failure %}
+{{ error_state(form.failure.title, form.failure.message) }}
+{% endif %}
+{% if form.errors %}
+{{ error_summary(form.errors) }}
+{% endif %}
+{% if form.rejection %}
+{{ validation_result(none, form.rejection, none) }}
+{% endif %}
+<div class="panel panel--notice" role="note">
+  <p>Saving stores the file and checks the whole stack with it. Nothing runs on the {{ "cluster" if swarm else "host" }}: the stack keeps running as it is until you redeploy it.</p>
+</div>
+
+{% set content_error = form.errors.get("content") %}
+<form class="form create-form" method="post" action="{{ post_href }}" enctype="multipart/form-data" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_inputs_digest" value="{{ expected_inputs_digest }}">
+
+  <section class="panel create-section" aria-labelledby="file-title">
+    <h2 class="create-section__title" id="file-title">File</h2>
+    <div class="create-section__body">
+      {% if file_name is none %}
+      {{ form_field("name", "Name", value=form.name, error=form.errors.get("name"), required=true, help="1 to 128 letters, digits, '.', '_' and '-', starting with a letter or digit. The Compose file refers to the file by this name, as name or ./name. It cannot be changed later.") }}
+      {% else %}
+      <dl class="facts">
+        <dt>Name</dt>
+        <dd class="mono cell-wrap">{{ file_name }}</dd>
+      </dl>
+      {% endif %}
+
+      <div class="field field--wide"{% if content_error %} data-invalid{% endif %}>
+        <div class="field__head">
+          <label class="field__label" for="field-content">Content{% if not stored_secret %} <span class="field__required" aria-hidden="true">*</span>{% endif %}</label>
+          <p class="field__help" id="field-content-help">Paste the content, or choose a file to upload. At most 64 KiB.{% if stored_secret %} The stored content is not shown. Leave this empty to keep it.{% endif %}</p>
+        </div>
+        <textarea class="field__input field__input--code" id="field-content" name="content" rows="16"
+                  spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" data-code-editor
+                  {%- if stored_secret %} placeholder="Set. Leave empty to keep it."{% endif %}
+                  {%- if content_error %} aria-invalid="true"{% endif %}
+                  aria-describedby="field-content-help{% if content_error %} field-content-error{% endif %}">
+{{ form.content if form.content is not none else '' }}</textarea>
+        <label class="field__label field__label--secondary" for="field-upload">Or choose a file</label>
+        <input class="field__input" type="file" id="field-upload" name="upload">
+        {% if content_error %}
+        <p class="field__error" id="field-content-error">{{ content_error }}{% if form.content_line %} {{ goto_line("field-content", form.content_line) }}{% endif %}</p>
+        {% endif %}
+      </div>
+
+      {{ checkbox_field("secret", "Secret file", "on", checked=form.secret, help="Stored encrypted and never shown again. Use it for credentials. A plain file is shown to everyone who can read the stack. Changing a secret file to a plain one needs its content again.") }}
+    </div>
+  </section>
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary"{% if compose %} disabled{% endif %}>{{ "Add file" if file_name is none else "Save file" }}</button>
+    <a class="btn" href="{{ detail_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

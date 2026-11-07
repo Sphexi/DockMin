@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "networks/_parts.html" import container_base, facts with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/object_users.html" import object_users %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Remove network {{ impact.name }} - dockmin{% endblock %}
+{% set crumb_object = impact.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Remove" %}
+{% block content %}
+{% call page_header("Remove network", "Review the network below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the network</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Remove network <span class="mono">{{ impact.name }}</span>?</h2>
+  {{ confirm_targets([{"name": impact.name, "detail": impact.short_id}], "network") }}
+  {{ facts(impact) }}
+  {% if not impact.removable %}
+  <div class="panel panel--alert" role="note">
+    <h3>This network cannot be removed</h3>
+    <p>Docker provides this network and needs it. It is listed so it can be seen, and it has no remove action.</p>
+  </div>
+  <div class="form__actions">
+    <a class="btn" href="{{ detail_href }}">Back to the network</a>
+  </div>
+  {% elif impact.in_use %}
+  <div class="panel panel--alert" role="note">
+    <h3>This network is in use</h3>
+    {% if impact.container_count %}
+    <p>{{ impact.container_count }} {{ "container is" if impact.container_count == 1 else "containers are" }} attached to it, running or stopped. Detach {{ "it" if impact.container_count == 1 else "them" }} first, on the Networks tab of {{ "that container" if impact.container_count == 1 else "each container" }}. Removing a network a stopped container is attached to would leave that container unable to start.</p>
+    {{ object_users(impact.containers, impact.containers_more, impact.containers_hidden, impact.container_count, container_base(impact.environment_id), "Not used", "?tab=networks") }}
+    {% if impact.containers %}
+    <p class="field__help">Each name opens the Networks tab of that container, where Detach is.</p>
+    {% endif %}
+    {% endif %}
+    {% if impact.service_count %}
+    <p>{{ impact.service_count }} {{ "service uses" if impact.service_count == 1 else "services use" }} it. Remove the network from {{ "that service" if impact.service_count == 1 else "each service" }} first, by editing the service; a service keeps its networks whether or not its tasks are running.</p>
+    {{ object_users(impact.services, impact.services_more, impact.services_hidden, impact.service_count, route_path("environment_swarm_service_list", environment_id=impact.environment_id), "Not used") }}
+    {% endif %}
+  </div>
+  <div class="form__actions">
+    <a class="btn" href="{{ detail_href }}">Back to the network</a>
+  </div>
+  {% else %}
+  <p>The network is removed from the host. No container or service uses it. This cannot be undone.</p>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_name" value="{{ impact.name }}">
+    <input type="hidden" name="expected_in_use" value="{{ impact.in_use }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Remove network</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

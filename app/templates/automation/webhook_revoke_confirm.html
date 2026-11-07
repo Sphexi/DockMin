@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Revoke webhook URL of {{ rule.name }} - dockmin{% endblock %}
+{% set crumb_object = rule.name %}
+{% set crumb_object_href = route_path('automation_rule_detail', rule_id=rule.id) %}
+{% set crumb_page = "Revoke webhook URL" %}
+{% block content %}
+{% call page_header("Revoke webhook URL", "Review what changes. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Back to the automation</a>
+{% endcall %}
+
+<dl class="facts">
+  <dt>Automation</dt>
+  <dd>{{ rule.name }}</dd>
+  <dt>URL</dt>
+  <dd class="mono">{{ masked_url }}</dd>
+</dl>
+
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What changes</h2>
+  <ul>
+    <li>The webhook URL stops working at once. A sender that still uses it is answered as if the URL did not exist.</li>
+    <li>The automation, its settings and its run history are kept. A run already going finishes; a call still waiting is dropped.</li>
+    {% if owner_revokes %}
+    <li>Rotating the URL later issues a new one.</li>
+    {% else %}
+    <li>Only the owner can issue a new URL, by rotating it.</li>
+    {% endif %}
+  </ul>
+</section>
+
+<form class="form" method="post" action="{{ route_path('automation_webhook_revoke', rule_id=rule.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_prefix" value="{{ webhook.prefix }}">
+  {{ confirm_targets([rule.name], "automation") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Revoke webhook URL</button>
+    <a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

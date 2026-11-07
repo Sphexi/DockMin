@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Adopt everything result - dockmin{% endblock %}
+{% set crumb_page = "Adopt everything result" %}
+{% block content %}
+{% set labels = {"done": ("Done", "ok"), "skipped": ("Skipped", "warn"), "failed": ("Failed", "danger")} %}
+{% set sections = [("stack", "Stacks"), ("image", "Images"), ("object", "Objects")] %}
+{% call page_header("Adopt everything result", environment.name) %}
+<a class="btn btn--primary" href="{{ environment_href }}">Back to the environment</a>
+{% endcall %}
+
+<div class="panel" role="status">
+  <ul>
+    {% for section, title in sections %}
+    <li>{{ title }}: {{ result.count(section, "done") }} done, {{ result.count(section, "skipped") }} skipped, {{ result.count(section, "failed") }} failed.</li>
+    {% endfor %}
+  </ul>
+  {% if result.left %}
+  <p>{{ result.left }} ticked {{ "object" if result.left == 1 else "objects" }} left visible to administrators only.</p>
+  {% endif %}
+  <p>Each target was handled on its own and has its own entry in the activity log. Nothing was pulled, redeployed or restarted.</p>
+</div>
+
+{% for section, title in sections %}
+{% set items = result.of(section) %}
+{% if items %}
+<section class="section" aria-labelledby="{{ section }}-heading">
+  <h2 id="{{ section }}-heading">{{ title }}</h2>
+  <div class="data-table__scroll" role="region" aria-label="{{ title }}" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Result for each target</caption>
+      <thead>
+        <tr><th scope="col">Target</th><th scope="col">Result</th><th scope="col">Detail</th></tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        {% set shown = labels[item.status] %}
+        <tr>
+          <th scope="row" class="cell-wrap mono">{{ item.label }}</th>
+          <td>{{ badge(shown[0], shown[1]) }}</td>
+          <td>{{ item.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endfor %}
+{% endblock %}

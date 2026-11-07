@@ -1,0 +1,80 @@
+{# Import with context: rows link to routes. #}
+{% from "networks/_parts.html" import container_base, flags, kind_badge, stack_cell with context %}
+{% from "partials/data_table.html" import data_table %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/object_users.html" import object_users %}
+
+{% macro network_actions(row) %}
+<div class="row-actions">
+  <a class="btn btn--compact" href="{{ route_path('environment_network_detail', environment_id=row.environment_id, network_id=row.id) }}" aria-label="Details of network {{ row.name }}">Details</a>
+  {% if row.can_remove %}
+  <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_network_remove', environment_id=row.environment_id, network_id=row.id) }}" aria-label="Remove network {{ row.name }}">Remove</a>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro network_users(row) %}
+{% if row.container_count %}
+{% if row.service_count %}<span class="cell-note">Containers</span>{% endif %}
+{{ object_users(row.containers, row.containers_more, row.containers_hidden, row.container_count, container_base(row.environment_id)) }}
+{% endif %}
+{% if row.service_count %}
+<span class="cell-note">Services</span>
+{{ object_users(row.services, row.services_more, row.services_hidden, row.service_count, route_path("environment_swarm_service_list", environment_id=row.environment_id)) }}
+{% endif %}
+{% if not row.container_count and not row.service_count and row.services_known %}
+<span class="cell-note">Not used</span>
+{% elif not row.services_known %}
+<span class="cell-note">Service use unknown</span>
+{% endif %}
+{% endmacro %}
+
+{% macro network_row(row) %}
+<tr id="network-{{ row.id }}">
+  <th scope="row">
+    <div class="cell-stack">
+      <a href="{{ route_path('environment_network_detail', environment_id=row.environment_id, network_id=row.id) }}">{{ row.name }}</a>
+      <span class="cell-note"><span class="mono">{{ row.short_id }}</span> {{ kind_badge(row.kind) }}</span>
+    </div>
+  </th>
+  <td class="mono">{{ row.driver }}</td>
+  <td>{{ row.scope }}</td>
+  <td>{% if row.subnets %}<ul class="chip-list mono">{% for subnet in row.subnets %}<li>{{ subnet }}</li>{% endfor %}</ul>{% else %}—{% endif %}</td>
+  <td>{{ flags(row.internal, row.attachable, row.ipv6) }}</td>
+  <td>{{ stack_cell(row.stack, row.environment_id) }}</td>
+  <td>{{ network_users(row) }}</td>
+  <td>{{ network_actions(row) }}</td>
+</tr>
+{% endmacro %}
+
+{% macro networks_table(rows, columns, pager, filtered, environment_id=none, can_create=false) %}
+{% set empty_body = "Change the filters, or clear them to see every network." if filtered else ("This host has no networks." if principal.is_administrator else "You cannot see any networks on this host. Ask an administrator for access to more networks.") %}
+{% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
+{% call data_table("networks-table", "Networks", columns, pager, empty_title=("No matching networks" if filtered else "No networks"), empty_body=empty_body, empty_action_label=("Create network" if show_create else none), empty_action_href=(route_path("environment_network_new", environment_id=environment_id) if show_create else none), filtered=filtered) %}
+{% for row in rows %}
+{{ network_row(row) }}
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{# Outside the swapped table, so a table response carries it out of band. #}
+{% macro results_summary(total, visible, filtered, oob=false) %}
+<p id="results-summary" class="results-summary" role="status"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
+  {%- if total is not none %}{{ total }} {{ "network" if total == 1 else "networks" }}{% if filtered %} {{ "matches" if total == 1 else "match" }} these filters, of {{ visible }} you can see{% endif %}.{% endif -%}
+</p>
+{% endmacro %}
+
+{% macro networks_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false) %}
+{% if oob %}
+{{ results_summary(none if (errors or failure) else total, visible, filtered, true) }}
+{% endif %}
+{% if errors %}
+{% for message in errors %}
+{{ error_state("Check the filters", message) }}
+{% endfor %}
+{% elif failure %}
+{{ error_state("Networks cannot be listed", failure, retry_href=retry_href, region_id="networks-results", swap="innerHTML") }}
+{% else %}
+{{ networks_table(rows, columns, pager, filtered, environment_id, can_create) }}
+{% endif %}
+{% endmacro %}

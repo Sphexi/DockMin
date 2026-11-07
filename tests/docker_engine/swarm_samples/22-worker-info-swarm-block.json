@@ -1,0 +1,15 @@
+{
+  "Swarm": {
+    "NodeID": "t55prpsoltethywit8ykgjtgi",
+    "NodeAddr": "172.17.0.3",
+    "LocalNodeState": "active",
+    "ControlAvailable": false,
+    "Error": "",
+    "RemoteManagers": [
+      {
+        "NodeID": "wy2xnfkd2f39yckp8r3ub70gc",
+        "Addr": "172.17.0.2:2377"
+      }
+    ]
+  }
+}

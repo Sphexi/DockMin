@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Re-encrypt stored secrets - dockmin{% endblock %}
+{% set crumb_page = "Re-encrypt" %}
+{% block content %}
+{% call page_header("Re-encrypt stored secrets", "Review the columns below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ back_href }}">Back to Encryption</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("Nothing was re-encrypted", error) }}
+{% endif %}
+{% for key, text in fields.items() if key != confirm_field %}
+{{ error_state("Check the form", text) }}
+{% endfor %}
+
+{% if overview.values_below_current %}
+<section class="panel" aria-labelledby="confirm-heading">
+  <h2 id="confirm-heading">Re-encrypt {{ overview.values_below_current }} stored {{ "secret" if overview.values_below_current == 1 else "secrets" }}?</h2>
+  {{ confirm_targets(targets, "column") }}
+  <form class="form form--wide" method="post" action="{{ rekey_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_counts" value="{{ overview.counts_digest }}">
+    <p>Secrets sealed under key {{ "version" if from_versions|length == 1 else "versions" }} {{ from_versions|join(", ") }} are rewritten under key version {{ overview.key_version }}.</p>
+    <p>The instance refuses every change until the re-encryption finishes: requests that change something answer with status 503, scheduled jobs stop, and backup downloads are refused. Pages can still be read.</p>
+    <p>The start and the end are recorded in the activity log.</p>
+    {{ checkbox_field(confirm_field, "Re-encrypt the stored secrets listed above", value=confirm_value, error=fields.get(confirm_field)) }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Re-encrypt stored secrets</button>
+      <a class="btn" href="{{ back_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

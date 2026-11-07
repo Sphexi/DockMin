@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/radio_field.html" import radio_field %}
+{% block title %}{{ ("Edit " ~ catalogue.name) if editing else "Add template catalogue" }} - dockmin{% endblock %}
+{% set crumb_object = catalogue.name if editing else none %}
+{% set crumb_object_href = route_path('template_catalogue_detail', catalogue_id=catalogue.id) if editing else none %}
+{% set crumb_page = "Edit" if editing else "Add template catalogue" %}
+{% block content %}
+{% call page_header("Edit catalogue" if editing else "Add template catalogue", catalogue.name if editing else "A remote list of applications. It is added disabled and fetched only when you enable it.") %}
+<a class="btn" href="{{ route_path('template_catalogue_detail', catalogue_id=catalogue.id) if editing else route_path('template_catalogues') }}">Cancel</a>
+{% endcall %}
+
+{{ unplaced_errors(errors, ["name", "kind", "url"]) }}
+
+{% if not editing %}
+<div class="panel panel--notice" role="note">
+  <p>Preset: <a href="{{ route_path('template_catalogue_new') }}?preset={{ preset.key }}">{{ preset.name }}</a> fills in the kind and address of the {{ preset.name }} image list. Adding it contacts nothing.</p>
+</div>
+{% else %}
+<div class="panel panel--notice" role="note">
+  <p>Changing the kind or the address discards the fetched templates and disables the catalogue.</p>
+</div>
+{% endif %}
+
+<form id="catalogue-form" class="form form--wide" method="post" data-submit-once
+      action="{{ route_path('template_catalogue_update', catalogue_id=catalogue.id) if editing else route_path('template_catalogue_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if editing %}
+  <input type="hidden" name="expected_updated_at" value="{{ catalogue.updated_at }}">
+  {% endif %}
+
+  {{ form_field("name", "Name", value=state.name, error=errors.get("name"), help="1 to 64 characters. Names are unique, ignoring case.", required=true) }}
+
+  <fieldset class="choice-group"{% if errors.get("kind") %} data-invalid{% endif %}>
+    <legend>Kind</legend>
+    {% for value, label in kinds %}
+    {{ radio_field("kind", label, value, checked=(state.kind == value), group_error=errors.get("kind")) }}
+    {% endfor %}
+    {% if errors.get("kind") %}<p class="field__error">{{ errors.get("kind") }}</p>{% endif %}
+    <p class="field__help">linuxserver.io is that project's image list. Portainer format is any JSON document with version 2 or 3; only container templates are read.</p>
+  </fieldset>
+
+  {{ form_field("url", "Address", value=state.url, type="url", error=errors.get("url"), help="An https address of at most 2,048 characters, with no user name, password or fragment. Up to 3 redirects are followed, each to an https address.", required=true) }}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">{{ "Save changes" if editing else "Add catalogue" }}</button>
+    <a class="btn" href="{{ route_path('template_catalogue_detail', catalogue_id=catalogue.id) if editing else route_path('template_catalogues') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

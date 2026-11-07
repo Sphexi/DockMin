@@ -1,0 +1,21 @@
+PUT /dockmin-e2e/backups/stream/three-badmd5.tar.gz HTTP/1.1
+host: 127.0.0.1:29000
+accept: */*
+accept-encoding: gzip, deflate
+connection: keep-alive
+user-agent: python-httpx/0.28.1
+content-type: application/gzip
+content-md5: p+RBEohou5SvjqHLib2Vnw==
+content-length: 3145728
+x-amz-date: 20261024T172231Z
+x-amz-content-sha256: 5c408f7e5fd88e1eb86c19257155f6cb9fb2d8bff71d45e80395416c2878d6bd
+authorization: AWS4-HMAC-SHA256 Credential=<redacted>/20261024/us-east-1/s3/aws4_request, SignedHeaders=content-length;content-md5;content-type;host;x-amz-content-sha256;x-amz-date, Signature=<redacted>
+
+HTTP/1.1 400 Bad Request
+accept-ranges: bytes
+content-length: 352
+content-type: application/xml
+server: SeaweedFS 30GB 4.48
+vary: Origin
+x-amz-request-id: 18E186FDD0C12A367395116F
+date: Sat, 24 Oct 2026 17:22:31 GMT

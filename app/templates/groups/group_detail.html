@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "environments/_access.html" import access_section with context %}
+{% from "groups/_tables.html" import group_candidates, group_members_table with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ group.name }} - dockmin{% endblock %}
+{% set crumb_object = group.name %}
+{% block content %}
+{% call page_header(group.name, "Group") %}
+<a class="btn" href="{{ route_path('groups') }}">Back to groups</a>
+<a class="btn btn--danger-quiet" href="{{ route_path('group_delete_confirm', group_id=group.id) }}">Delete</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("That change was incomplete", error) }}
+{% endif %}
+{{ unplaced_errors(fields, ["name", "description", "grantee", "environments"]) }}
+{% if fields.get("environments") %}
+{{ error_state("That change was refused", fields.get("environments")) }}
+{% endif %}
+
+<dl class="facts">
+  <dt>Environments</dt>
+  <dd>{{ group.environment_count }}</dd>
+  <dt>Created</dt>
+  <dd><time datetime="{{ group.created_at|timestamp_iso }}">{{ group.created_at|timestamp }}</time></dd>
+</dl>
+
+<section class="section" aria-labelledby="group-members-heading">
+  <h2 id="group-members-heading">Environments in this group</h2>
+  {{ group_members_table(rows, columns, pager) }}
+</section>
+
+<section class="section" aria-labelledby="group-assign-heading">
+  <h2 id="group-assign-heading">Add environments</h2>
+  <form class="filters" method="get" action="{{ route_path('group_detail', group_id=group.id) }}" role="search" aria-label="Find environments to add"
+        hx-get="{{ route_path('group_detail', group_id=group.id) }}" hx-target="#group-candidates" hx-swap="outerHTML"
+        hx-trigger="submit, input delay:300ms">
+    {{ form_field("candidate_q", "Name contains", value=search, type="search", autocomplete="off") }}
+    <div class="form__actions">
+      <button type="submit" class="btn">Search</button>
+    </div>
+  </form>
+  {{ group_candidates(group, candidates, search, search_error, candidate_limit) }}
+</section>
+
+<section class="section" aria-labelledby="group-edit-heading">
+  <h2 id="group-edit-heading">Details</h2>
+  <form class="form" method="post" action="{{ route_path('group_update', group_id=group.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("name", "Group name", value=name, error=fields.get("name"), help="1 to 64 characters. Names are unique, ignoring case.", required=true, autocomplete="off") }}
+    {{ form_field("description", "Description", value=description, error=fields.get("description"), help="Optional. Up to 256 characters.", autocomplete="off") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Save group</button>
+    </div>
+  </form>
+</section>
+
+{{ access_section("group", access_view.grants, route_path('group_access_grant', group_id=group.id), route_path('group_access_revoke', group_id=group.id), fields.get("grantee"), grantee_kind, grantee_name) }}
+{% endblock %}

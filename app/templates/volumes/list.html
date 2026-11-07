@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/list_bar.html" import list_bar %}
+{% from "partials/page_header.html" import page_header %}
+{% from "volumes/_tables.html" import results_summary, volumes_results with context %}
+{% block title %}Volumes on {{ environment.name }} - dockmin{% endblock %}
+{% block content %}
+{% set list_href = route_path("environment_volume_list", environment_id=environment.id) %}
+{% call page_header("Volumes", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ route_path('environment_detail', environment_id=environment.id) }}">Back to environment</a>
+{% endcall %}
+
+
+<form id="volume-filters" class="filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter volumes"
+      hx-get="{{ list_href }}" hx-target="#volumes-results" hx-swap="innerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#volume-filters select, #volume-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-driver">Driver</label>
+    </div>
+    <select class="field__input" id="field-driver" name="driver">
+      <option value="">Any driver</option>
+      {% for value in driver_options %}
+      <option value="{{ value }}"{% if driver == value %} selected{% endif %}>{{ "Local" if value == "local" else "Another driver" }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-usage">Use</label>
+    </div>
+    <select class="field__input" id="field-usage" name="usage">
+      <option value="">Any</option>
+      {% for value in usage_options %}
+      <option value="{{ value }}"{% if usage == value %} selected{% endif %}>{{ "Used by a container" if value == "used" else "Unused" }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-kind">Kind</label>
+    </div>
+    <select class="field__input" id="field-kind" name="kind">
+      <option value="">Any kind</option>
+      {% for value in kind_options %}
+      <option value="{{ value }}"{% if kind == value %} selected{% endif %}>{{ value|capitalize }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {{ name_field("stack", "Stack", route_path("environment_suggestions", environment_id=environment.id, kind="stacks") ~ "?stack_kind=compose", value=stack, type="search") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply filters</button>
+    <a class="btn" href="{{ list_href }}">Reset</a>
+  </div>
+</form>
+
+{% call list_bar(results_summary(none if (errors or failure) else total, visible, filtered)) %}
+{% if can_create %}
+<a class="btn btn--primary" href="{{ route_path('environment_volume_new', environment_id=environment.id) }}">Create volume</a>
+{% endif %}
+{% if can_backfill %}
+<a class="btn" href="{{ route_path('environment_volume_backfill', environment_id=environment.id) }}">Assign owners</a>
+{% endif %}
+{% if can_prune %}
+<a class="btn" href="{{ route_path('environment_volume_prune', environment_id=environment.id) }}">Prune volumes</a>
+{% endif %}
+{% endcall %}
+<div id="volumes-results">
+  {{ volumes_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, environment_id=environment.id, can_create=can_create, max_batch=max_batch) }}
+</div>
+{% endblock %}

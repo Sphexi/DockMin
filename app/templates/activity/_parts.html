@@ -1,0 +1,53 @@
+{# Free text goes through visible_text, so a control or bidirectional character shows as its code point. Import with context. #}
+{% from "partials/badge.html" import badge %}
+
+{% macro result_badge(result) -%}
+{% if result == "success" %}{{ badge("Success", "ok") }}{% else %}{{ badge("Failure", "danger") }}{% endif %}
+{%- endmacro %}
+
+{% macro when(event) -%}
+<time datetime="{{ event.occurred_at|timestamp_iso }}">{{ event.occurred_at|timestamp(seconds=True) }}</time>
+{%- endmacro %}
+
+{% macro actor_cell(view) %}
+{% set event = view.event %}
+{% set detail = event.detail or {} %}
+{% if event.actor_type == "user" %}
+<span class="cell-wrap">{% if view.actor_username is not none %}{{ view.actor_username|visible_text }}{% else %}User {{ event.actor_user_id }}{% endif %}</span>
+{% elif event.actor_type == "subsystem" %}
+<div class="cell-stack">
+  <span class="mono cell-wrap">{{ event.actor_subsystem|visible_text }}</span>
+  {% if detail.get("rule_name") %}
+  <span class="cell-note cell-wrap">Automation: {{ detail.get("rule_name")|visible_text }}</span>
+  {% endif %}
+</div>
+{% else %}
+<div class="cell-stack">
+  <span>Anonymous</span>
+  {% if detail.get("username") %}
+  <span class="cell-note cell-wrap">Tried: {{ detail.get("username")|visible_text }}</span>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro target_cell(event) %}
+<div class="cell-stack">
+  <span class="cell-wrap">{% if event.target_id is not none %}{{ event.target_id|visible_text }}{% else %}&mdash;{% endif %}</span>
+  <span class="cell-note mono">{{ event.target_type|visible_text }}</span>
+</div>
+{% endmacro %}
+
+{% macro environment_cell(view) %}
+{% if view.environment_name is not none %}
+<a class="cell-wrap" href="{{ route_path('environment_detail', environment_id=view.event.environment_id) }}">{{ view.environment_name|visible_text }}</a>
+{% elif view.event.environment_id is not none %}
+<span class="cell-note">Environment {{ view.event.environment_id }}</span>
+{% else %}
+&mdash;
+{% endif %}
+{% endmacro %}
+
+{% macro detail_value(value) -%}
+{% if value is sameas true %}Yes{% elif value is sameas false %}No{% elif value is none %}&mdash;{% else %}{{ value|visible_text }}{% endif %}
+{%- endmacro %}

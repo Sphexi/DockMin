@@ -1,0 +1,191 @@
+{# Import with context: the forms carry the CSRF token and links come from route names. #}
+{% from "containers/_actions.html" import action_effect, action_label with context %}
+{% from "environments/_parts.html" import kind_badge with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+
+{% macro target_facts(environment_name, is_local, name, short_id, image, state) %}
+{{ confirm_targets([{"name": name, "detail": short_id}], "container") }}
+<dl class="facts">
+  <dt>Image</dt>
+  <dd class="mono">{{ image }}</dd>
+  <dt>State</dt>
+  <dd>{{ container_state_badge(state) }}</dd>
+  <dt>Environment</dt>
+  <dd>{{ environment_name }} {{ kind_badge(true) if is_local else "" }}</dd>
+</dl>
+{% endmacro %}
+
+{% macro force_choices(can_force, plural=false) %}
+{% if can_force %}
+{{ checkbox_field("force", "Kill any that are running first" if plural else "Kill it first if it is running", checked=true, help="Without this, a container that is running cannot be removed.") }}
+{% endif %}
+{{ checkbox_field("volumes", "Also remove the anonymous volumes of every container above" if plural else "Also remove this container's anonymous volumes", checked=true, help="Named volumes are kept whichever you choose. Anonymous volumes cannot be recovered once removed.") }}
+{% endmacro %}
+
+{% macro volume_list(c) %}
+{% if c.volumes %}
+<h3 class="confirm__subheading">Volumes mounted in this container</h3>
+<ul class="confirm__volumes">
+  {% for volume in c.volumes %}
+  <li>
+    <span class="mono">{{ volume.name }}</span> at <span class="mono">{{ volume.destination }}</span>
+    {% if volume.anonymous is none %}<span class="cell-note">kind not known</span>
+    {% elif volume.anonymous %}<span class="cell-note">anonymous</span>
+    {% else %}<span class="cell-note">named, always kept</span>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if c.volumes_hidden %}
+<p class="field__help">and {{ c.volumes_hidden }} more not listed.</p>
+{% endif %}
+{% else %}
+<p class="field__help">This container mounts no volumes.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro return_href(environment_id, container_id, view) -%}
+{% if view == "detail" -%}
+{{ route_path("environment_container_detail", environment_id=environment_id, container_id=container_id) }}
+{%- else -%}
+{{ route_path("environment_container_list", environment_id=environment_id) }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro force_href(c, view) -%}
+{{ route_path("environment_container_action_confirm", environment_id=c.environment_id, container_id=c.container_id, action="remove") }}?view={{ choice(view, ['list', 'detail']) }}&amp;force=1
+{%- endmacro %}
+
+{% macro remove_options(c, view, inline=false) %}
+{{ volume_list(c) }}
+<p class="field__help">Volumes are kept, and a container that is running cannot be removed here.
+  {% set href = force_href(c, view)|trim -%}
+  <a href="{{ href }}"
+     {%- if inline %} hx-get="{{ href }}" hx-target="#action-region" hx-swap="innerHTML"{% endif %}>Force remove this container instead</a>.</p>
+{% endmacro %}
+
+{% macro confirm_fields(c, view) %}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="view" value="{{ choice(view, ['list', 'detail']) }}">
+{% if c.action == "remove" %}
+<input type="hidden" name="expected_name" value="{{ c.name }}">
+{% endif %}
+{% endmacro %}
+
+{% macro action_dialog(c, view) %}
+{% set post_href = route_path("environment_container_action", environment_id=c.environment_id, container_id=c.container_id, action=c.action) %}
+{% set target = "#container-summary" if view == "detail" else "#container-" ~ c.container_id %}
+<dialog id="action-dialog" class="dialog dialog--inline" open aria-labelledby="action-dialog-title" aria-describedby="action-dialog-body" data-confirm-dialog data-dialog-return="act-{{ c.container_id }}-{{ c.action }}">
+  <form class="dialog__form" method="post" action="{{ post_href }}" hx-post="{{ post_href }}" hx-target="{{ target }}" hx-swap="outerHTML" hx-sync="this:drop" hx-disabled-elt="find button[type=submit]" hx-disinherit="hx-disabled-elt">
+    {{ confirm_fields(c, view) }}
+    <h2 class="dialog__title" id="action-dialog-title">{{ action_label(c.action) }} container <span class="mono">{{ c.name }}</span>?</h2>
+    <div id="action-dialog-body">
+      <p>{{ action_effect(c.action) }}</p>
+      {{ target_facts(c.environment_name, c.is_local, c.name, c.short_id, c.image, c.state) }}
+      {% if c.action == "remove" %}
+      {{ remove_options(c, view, true) }}
+      {% endif %}
+    </div>
+    <div class="dialog__actions">
+      <button type="button" class="btn" data-dialog-close data-autofocus>Cancel</button>
+      <button type="submit" class="btn {{ 'btn--danger' if c.action in ('kill', 'remove') else 'btn--primary' }}">{{ action_label(c.action) }} container</button>
+    </div>
+  </form>
+</dialog>
+{% endmacro %}
+
+{% macro force_dialog(c, view) %}
+{% set post_href = route_path("environment_container_action", environment_id=c.environment_id, container_id=c.container_id, action="remove") %}
+{% set target = "#container-summary" if view == "detail" else "#container-" ~ c.container_id %}
+<dialog id="action-dialog" class="dialog dialog--inline" open aria-labelledby="action-dialog-title" aria-describedby="action-dialog-body" data-confirm-dialog data-dialog-return="act-{{ c.container_id }}-remove">
+  <form class="dialog__form" method="post" action="{{ post_href }}" hx-post="{{ post_href }}" hx-target="{{ target }}" hx-swap="outerHTML" hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="view" value="{{ choice(view, ['list', 'detail']) }}">
+    <input type="hidden" name="expected_name" value="{{ c.name }}">
+    <input type="hidden" name="confirm_force" value="yes">
+    <h2 class="dialog__title" id="action-dialog-title">Force remove container <span class="mono">{{ c.name }}</span>?</h2>
+    <div id="action-dialog-body">
+      <p>Deletes the container and its writable layer, and everything ticked below. This cannot be undone.</p>
+      {{ target_facts(c.environment_name, c.is_local, c.name, c.short_id, c.image, c.state) }}
+      {{ volume_list(c) }}
+      {{ force_choices(c.can_force) }}
+    </div>
+    <div class="dialog__actions">
+      <button type="button" class="btn" data-dialog-close data-autofocus>Cancel</button>
+      <button type="submit" class="btn btn--danger">Force remove container</button>
+    </div>
+  </form>
+</dialog>
+{% endmacro %}
+
+{% macro action_form(c, view) %}
+{% set post_href = route_path("environment_container_action", environment_id=c.environment_id, container_id=c.container_id, action=c.action) %}
+<form class="form form--wide" method="post" action="{{ post_href }}" data-submit-once>
+  {{ confirm_fields(c, view) }}
+  <p>{{ action_effect(c.action) }}</p>
+  {{ target_facts(c.environment_name, c.is_local, c.name, c.short_id, c.image, c.state) }}
+  {% if c.action == "remove" %}
+  {{ remove_options(c, view) }}
+  {% endif %}
+  <div class="form__actions">
+    <button type="submit" class="btn {{ 'btn--danger' if c.action in ('kill', 'remove') else 'btn--primary' }}">{{ action_label(c.action) }} container</button>
+    <a class="btn" href="{{ return_href(c.environment_id, c.container_id, view) }}">Cancel</a>
+  </div>
+</form>
+{% endmacro %}
+
+{% macro force_form(c, view) %}
+{% set post_href = route_path("environment_container_action", environment_id=c.environment_id, container_id=c.container_id, action="remove") %}
+<form class="form form--wide" method="post" action="{{ post_href }}" data-submit-once>
+  {{ confirm_fields(c, view) }}
+  <input type="hidden" name="confirm_force" value="yes">
+  <div class="panel panel--alert" role="note">
+    <h3>What forcing does</h3>
+    <ul>
+      {% if c.can_force %}<li>A running container is killed first, with no chance to shut down.</li>{% endif %}
+      <li>The container and its writable layer are deleted.</li>
+      <li>Anonymous volumes are deleted with it when ticked below. Named volumes are always kept.</li>
+      <li>This cannot be undone.</li>
+    </ul>
+  </div>
+  {{ target_facts(c.environment_name, c.is_local, c.name, c.short_id, c.image, c.state) }}
+  {{ volume_list(c) }}
+  {{ force_choices(c.can_force) }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Force remove container</button>
+    <a class="btn" href="{{ return_href(c.environment_id, c.container_id, view) }}">Cancel</a>
+  </div>
+</form>
+{% endmacro %}
+
+{% macro busy_notice(busy, verb) %}
+<p>
+  {%- if busy.held_by_you %}You started a {{ busy.action }} on this container{% elif busy.holder == "another user" %}Another user started a {{ busy.action }} on this container{% else %}{{ busy.holder }} started a {{ busy.action }} on this container{% endif %}
+  {{ busy.age_seconds }} {{ "second" if busy.age_seconds == 1 else "seconds" }} ago and it has not finished.
+  Wait for it to complete, then {{ verb }} again.
+</p>
+{% endmacro %}
+
+{# A busy container passes the holder instead of a message. #}
+{% macro action_notice(title, message, busy=none, retry_href=none) %}
+<dialog id="action-dialog" class="dialog dialog--inline" open role="alertdialog" aria-labelledby="action-dialog-title" aria-describedby="action-dialog-body" data-confirm-dialog>
+  <div class="dialog__form">
+    <h2 class="dialog__title" id="action-dialog-title">{{ title }}</h2>
+    <div id="action-dialog-body">
+      {% if busy is not none %}
+      {{ busy_notice(busy, "try") }}
+      {% else %}
+      <p>{{ message }}</p>
+      {% endif %}
+    </div>
+    <div class="dialog__actions">
+      {% if retry_href %}
+      <a class="btn" href="{{ retry_href }}" hx-get="{{ retry_href }}" hx-target="#action-region" hx-swap="innerHTML">Review again</a>
+      {% endif %}
+      <button type="button" class="btn btn--primary" data-dialog-close data-autofocus>Close</button>
+    </div>
+  </div>
+</dialog>
+{% endmacro %}

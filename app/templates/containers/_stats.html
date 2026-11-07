@@ -1,0 +1,27 @@
+{# The data attributes are raw values for the charts; the text is their only rendering. #}
+{% macro stats_panel(sample) %}
+<dl class="facts" data-stats-sample
+    {%- if sample.read_at %} data-read-microsecond="{{ sample.read_at.microsecond }}"{% endif %}
+    {%- if sample.cpu_percent is not none %} data-cpu="{{ sample.cpu_percent }}"{% endif %}
+    data-mem-used="{{ sample.memory_used }}" data-mem-limit="{{ sample.memory_limit }}"
+    data-net-rx="{{ sample.network_received }}" data-net-tx="{{ sample.network_sent }}"
+    data-blk-read="{{ sample.block_read }}" data-blk-write="{{ sample.block_written }}">
+  <dt>CPU</dt>
+  <dd>{{ ("%.1f%%"|format(sample.cpu_percent)) if sample.cpu_percent is not none else "—" }}</dd>
+  <dt>Memory</dt>
+  <dd>
+    {{ sample.memory_used|filesize }}
+    {%- if sample.memory_limit > 0 %} of {{ sample.memory_limit|filesize }}
+    {%- if sample.memory_percent is not none %} ({{ "%.1f%%"|format(sample.memory_percent) }}){% endif %}
+    {%- else %}, no limit set{% endif %}
+  </dd>
+  <dt>Network</dt>
+  <dd>{{ sample.network_received|filesize }} received, {{ sample.network_sent|filesize }} sent</dd>
+  <dt>Block I/O</dt>
+  <dd>{{ sample.block_read|filesize }} read, {{ sample.block_written|filesize }} written</dd>
+  <dt>Processes</dt>
+  <dd>{{ sample.processes }}</dd>
+  <dt>Read at</dt>
+  <dd><time datetime="{{ sample.read_at|timestamp_iso }}">{{ sample.read_at|timestamp(seconds=true) }}</time></dd>
+</dl>
+{% endmacro %}

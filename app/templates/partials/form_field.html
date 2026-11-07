@@ -1,0 +1,23 @@
+{% macro form_field(name, label, value=none, error=none, type="text", help=none, required=false, autocomplete="off") %}
+{% set type = choice(type, ["text", "email", "url", "number", "search", "tel", "password"]) %}
+{% set field_id = "field-" ~ name %}
+{% set described_by = (field_id ~ "-help " if help else "") ~ (field_id ~ "-error" if error else "") %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="{{ field_id }}">{{ label }}{% if required %} <span class="field__required" aria-hidden="true">*</span>{% endif %}</label>
+    {% if help %}
+    <p class="field__help" id="{{ field_id }}-help">{{ help }}</p>
+    {% endif %}
+  </div>
+  {# A password input never carries a value back to the browser. #}
+  <input class="field__input" id="{{ field_id }}" name="{{ name }}" type="{{ type }}"
+         {%- if value is not none and type != "password" %} value="{{ value }}"{% endif %}
+         {%- if required %} required{% endif %}
+         {%- if error %} aria-invalid="true"{% endif %}
+         {%- if described_by|trim %} aria-describedby="{{ described_by|trim }}"{% endif %}
+         autocomplete="{{ autocomplete }}">
+  {% if error %}
+  <p class="field__error" id="{{ field_id }}-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}

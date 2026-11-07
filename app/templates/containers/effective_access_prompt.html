@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Effective access - dockmin{% endblock %}
+{% set crumb_page = "Effective access" %}
+{% block content %}
+{% call page_header("Effective access", "What an account can reach among the containers on " ~ environment.name ~ ", and why.") %}
+<a class="btn" href="{{ route_path('environment_container_list', environment_id=environment.id) }}">Back to containers</a>
+{% endcall %}
+<form class="form" method="get" action="{{ route_path('environment_container_effective_access', environment_id=environment.id) }}">
+  {{ name_field("username", "Username", route_path("suggestions", kind="users"), value=username, error=error, required=true) }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Explain access</button>
+  </div>
+</form>
+{% endblock %}

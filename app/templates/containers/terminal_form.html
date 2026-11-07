@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Terminal in {{ form.name }} - dockmin{% endblock %}
+{% set crumb_object = form.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Terminal" %}
+{% block head_extra %}
+<script src="{{ static_path('js/terminal.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+{% call page_header("Terminal", form.name ~ " on " ~ form.environment_name) %}
+<a class="btn" href="{{ detail_href }}">Back to the container</a>
+{% endcall %}
+
+<nav aria-label="Terminal type">
+  <ul class="tabs__list">
+    <li><a class="tabs__link" href="{{ exec_href }}"{% if form.mode == "exec" %} aria-current="page"{% endif %}>Exec</a></li>
+    <li><a class="tabs__link" href="{{ attach_href }}"{% if form.mode == "attach" %} aria-current="page"{% endif %}>Attach</a></li>
+  </ul>
+</nav>
+
+<div class="terminal-form-body">
+{% if errors.get("user") and not form.offers_user %}
+{{ error_summary({"user": errors.get("user")}) }}
+{% endif %}
+{% if form.refusal %}
+<section class="state refusal" role="alert" aria-labelledby="refusal-heading">
+  <h2 class="state__title" id="refusal-heading">A terminal cannot be opened</h2>
+  <p class="state__body">{{ form.refusal.message }}</p>
+  <p class="form__actions">
+    {% if form.mode == "attach" and form.refusal.code in ("attach_unavailable", "attach_busy") %}
+    <a class="btn btn--primary" href="{{ exec_href }}">Open a terminal with exec instead</a>
+    {% endif %}
+    <a class="btn" href="{{ detail_href }}">Back to the container</a>
+  </p>
+</section>
+{% elif form.mode == "attach" %}
+<section class="panel panel--notice" aria-labelledby="attach-heading">
+  <h2 id="attach-heading">Attach to the main process</h2>
+  <p>Input goes to the container's main process, not to a new shell. Ctrl-C or Ctrl-D can stop the container. Closing this page detaches and leaves the container running.</p>
+  <p>Only one session can be attached to a container at a time.</p>
+</section>
+<form class="form form--wide terminal-form" method="post" action="{{ attach_href }}" data-terminal-form data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="rows" value="{{ values.rows }}" data-terminal-rows>
+  <input type="hidden" name="cols" value="{{ values.cols }}" data-terminal-cols>
+  <p class="field__help">The activity log records that a session was attached and for how long. What is typed and printed is not recorded.</p>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Connect</button>
+  </div>
+</form>
+{% else %}
+{% if not form.attach_available and form.attach_note %}
+<p class="field__help">Attach is not available: {{ form.attach_note }}</p>
+{% endif %}
+<form class="form form--wide terminal-form" method="post" action="{{ exec_href }}" data-terminal-form data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="rows" value="{{ values.rows }}" data-terminal-rows>
+  <input type="hidden" name="cols" value="{{ values.cols }}" data-terminal-cols>
+
+  <div class="field"{% if errors.get("command") %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-command">Command <span class="field__required" aria-hidden="true">*</span></label>
+      <p class="field__help" id="field-command-help">Starts a new process in the container with exec. The program name and the number of arguments are recorded in the activity log. Arguments, input and output are not.</p>
+    </div>
+    <input class="field__input mono" id="field-command" name="command" type="text" list="quick-commands" value="{{ values.command }}" required autocomplete="off" spellcheck="false" aria-describedby="field-command-help{% if errors.get('command') %} field-command-error{% endif %}"{% if errors.get("command") %} aria-invalid="true"{% endif %}>
+    <datalist id="quick-commands">
+      {% for command in form.quick_commands %}
+      <option value="{{ command }}"></option>
+      {% endfor %}
+    </datalist>
+    {% if errors.get("command") %}
+    <p class="field__error" id="field-command-error">{{ errors.get("command") }}</p>
+    {% endif %}
+    <div class="cluster" data-quick-commands hidden>
+      <span class="field__help">Quick choices</span>
+      {% for command in form.quick_commands %}
+      <button type="button" class="btn btn--compact mono" data-command-fill="{{ command }}">{{ command }}</button>
+      {% endfor %}
+    </div>
+  </div>
+
+  {{ form_field("working_dir", "Working directory", value=values.working_dir, error=errors.get("working_dir"), help="An absolute path in the container. Empty uses the container's own working directory.") }}
+
+  {% if form.offers_user %}
+  {{ form_field("user", "User", value=values.user, error=errors.get("user"), help="A name or numeric id, optionally followed by a colon and a group, such as app:app. Empty uses the container's configured user.") }}
+  {% endif %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Open terminal</button>
+  </div>
+</form>
+{% endif %}
+</div>
+
+<div class="terminal-probe" aria-hidden="true">
+  <div class="terminal-frame" data-terminal-probe></div>
+</div>
+{% endblock %}

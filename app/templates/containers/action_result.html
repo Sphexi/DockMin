@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "containers/_actions.html" import action_label, action_past with context %}
+{% from "containers/_confirm.html" import busy_notice with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ action_label(action) }} container - dockmin{% endblock %}
+{% set crumb_object = outcome.name if outcome is not none else container_id[:12] %}
+{% set crumb_object_href = none if action == "remove" else route_path('environment_container_detail', environment_id=environment_id, container_id=container_id) %}
+{% set crumb_page = action_label(action) ~ " result" %}
+{% block content %}
+{% set list_href = route_path("environment_container_list", environment_id=environment_id) %}
+{% set detail_href = route_path("environment_container_detail", environment_id=environment_id, container_id=container_id) %}
+{% set confirm_href = route_path("environment_container_action_confirm", environment_id=environment_id, container_id=container_id, action=action) ~ "?view=" ~ view %}
+{% if outcome is not none %}
+{% call page_header(action_past(action) ~ " " ~ outcome.name, "No change was needed: the container was already in that state." if outcome.result == "unchanged" else "The action finished.") %}
+<a class="btn btn--primary" href="{{ list_href }}">Back to containers</a>
+{% if action != "remove" %}
+<a class="btn" href="{{ detail_href }}">View container</a>
+{% endif %}
+{% endcall %}
+{% else %}
+{% call page_header(action_label(action) ~ " did not run", "The action was not carried out.") %}
+<a class="btn" href="{{ list_href }}">Back to containers</a>
+{% endcall %}
+{% if busy is not none %}
+<div class="panel panel--notice" role="note">
+  <h2>This container is busy</h2>
+  {{ busy_notice(busy, "try") }}
+</div>
+{% else %}
+{{ error_state(failure_title, failure_message) }}
+{% if action == "start" and can_retry %}
+<p>The container's <a href="{{ detail_href }}?tab=overview">Overview</a> shows the reason Docker recorded, if it recorded one.</p>
+{% endif %}
+{% endif %}
+{% if can_retry %}
+<p><a class="btn" href="{{ confirm_href }}">Review again</a></p>
+{% endif %}
+{% endif %}
+{% endblock %}

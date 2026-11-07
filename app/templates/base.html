@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# The Content-Security-Policy allows no inline style and no eval, so htmx must not generate either, run script tags in swapped content, or send cross-origin requests. #}
+  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"includeIndicatorStyles":false,"historyCacheSize":0,"historyRestoreAsHxRequest":false}'>
+  <title>{% block title %}dockmin{% endblock %}</title>
+  <link rel="icon" href="{{ static_path('icons/favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ static_path('css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ static_path('css/base.css') }}">
+  <link rel="stylesheet" href="{{ static_path('css/components.css') }}">
+  <noscript><link rel="stylesheet" href="{{ static_path('css/nojs.css') }}"></noscript>
+  {# htmx 2.0.11, npm htmx.org tarball integrity sha512-Thx/WtpeOQqSrqBCw/A1cwGJGg4UrVa3+sW0GmrM3p4gJgO89ecH4qtbnyzDDWFvBTqjnIMCgELTNt636dtamA==
+     The sha384 below is of the vendored dist/htmx.min.js itself.
+     Update both hashes when the file changes. #}
+  <script src="{{ static_path('vendor/htmx/htmx.min.js') }}" integrity="sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg" defer></script>
+  <script src="{{ static_path('js/app.js') }}" defer></script>
+  <script src="{{ static_path('js/nav.js') }}" defer></script>
+  {% block head_extra %}{% endblock %}
+</head>
+{% from "partials/icon.html" import icon with context %}
+{% set active = nav_key %}
+{% set nav_labels = {
+  "dashboard": "Dashboard", "containers": "Containers", "images": "Images", "volumes": "Volumes",
+  "networks": "Networks", "stacks": "Stacks", "swarm": "Swarm", "services": "Services",
+  "nodes": "Nodes", "configs": "Configs", "secrets": "Secrets", "swarm-stacks": "Swarm stacks",
+  "environments": "Environments", "groups": "Groups", "tags": "Tags", "registries": "Registries",
+  "jobs": "Jobs", "activity": "Activity", "storage": "Object storage", "backups": "Backups",
+  "certificate": "Certificate", "automation": "Automation", "teams": "Teams", "users": "Users",
+  "ui-kit": "UI kit", "account": "Account", "tokens": "API tokens", "instance": "Instance",
+  "notifications": "Notifications", "encryption": "Encryption",
+  "template-catalogues": "Template catalogues", "templates": "Templates",
+} %}
+{% set list_routes = {
+  "containers": "environment_container_list", "images": "environment_image_list",
+  "volumes": "environment_volume_list", "networks": "environment_network_list",
+  "stacks": "environment_stack_list", "swarm": "environment_swarm_overview",
+  "services": "environment_swarm_service_list", "nodes": "environment_swarm_node_list",
+  "configs": "environment_swarm_config_list", "secrets": "environment_swarm_secret_list",
+  "swarm-stacks": "environment_swarm_stack_list",
+  "environments": "index", "groups": "groups", "tags": "tags", "registries": "registries",
+  "jobs": "jobs", "activity": "activity", "storage": "object_storage_targets",
+  "backups": "backups", "certificate": "server_certificate", "automation": "automation",
+  "teams": "teams", "users": "users", "instance": "server_instance",
+  "account": "account", "tokens": "tokens", "ui-kit": "ui_kit",
+  "notifications": "notification_channels", "encryption": "server_encryption",
+  "template-catalogues": "template_catalogues", "templates": "templates",
+} %}
+{% set env_keys = ["dashboard", "containers", "images", "volumes", "networks", "stacks", "swarm", "services", "nodes", "configs", "secrets", "swarm-stacks"] %}
+<body class="app" hx-headers="{{ {csrf_header: csrf_token}|tojson|forceescape }}">
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="topbar">
+    {% if principal %}
+    <button type="button" class="btn btn--quiet btn--icon topbar__menu" data-nav-toggle hidden aria-controls="sidenav" aria-expanded="false">{{ icon("menu") }}<span class="visually-hidden">Menu</span></button>
+    {% endif %}
+    <a class="topbar__brand" href="{{ route_path('index') }}">{{ icon("container") }}<span>dockmin</span></a>
+    {% if principal and active %}
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <ol>
+        {% block breadcrumbs %}
+        {% set object_name = crumb_object if crumb_object is defined else none %}
+        {% set object_href = crumb_object_href if crumb_object_href is defined else none %}
+        {% set page_name = crumb_page if crumb_page is defined else none %}
+        {% set in_environment = active in env_keys and nav_environment %}
+        {% set list_route = list_routes.get(active) %}
+        {% set resource_href = route_path(list_route, environment_id=nav_environment.id) if list_route and in_environment else (route_path(list_route) if list_route and active not in env_keys else none) %}
+        {% if in_environment %}
+        <li><a href="{{ route_path('index') }}">Environments</a></li>
+        {% if active == "dashboard" %}
+        {% if page_name %}
+        <li><a href="{{ route_path('environment_detail', environment_id=nav_environment.id) }}">{{ nav_environment.name }}</a></li>
+        <li><span aria-current="page">{{ page_name }}</span></li>
+        {% else %}
+        <li><span aria-current="page">{{ nav_environment.name }}</span></li>
+        {% endif %}
+        {% else %}
+        <li><a href="{{ route_path('environment_detail', environment_id=nav_environment.id) }}">{{ nav_environment.name }}</a></li>
+        {% endif %}
+        {% endif %}
+        {% if not (in_environment and active == "dashboard") %}
+        {% if resource_href and (object_name or page_name) %}
+        <li><a href="{{ resource_href }}">{{ nav_labels.get(active, "") }}</a></li>
+        {% else %}
+        <li><span aria-current="page">{{ nav_labels.get(active, "") }}</span></li>
+        {% endif %}
+        {% if object_name and page_name %}
+        <li>{% if object_href %}<a href="{{ object_href }}">{{ object_name }}</a>{% else %}<span>{{ object_name }}</span>{% endif %}</li>
+        <li><span aria-current="page">{{ page_name }}</span></li>
+        {% elif object_name %}
+        <li><span aria-current="page">{{ object_name }}</span></li>
+        {% elif page_name %}
+        <li><span aria-current="page">{{ page_name }}</span></li>
+        {% endif %}
+        {% endif %}
+        {% endblock %}
+      </ol>
+    </nav>
+    {% endif %}
+    <div class="topbar__tools">
+      <button type="button" class="btn btn--quiet btn--icon theme-toggle" data-theme-toggle hidden aria-pressed="false" title="Dark theme">
+        <span class="theme-toggle__light">{{ icon("sun") }}</span><span class="theme-toggle__dark">{{ icon("moon") }}</span><span class="visually-hidden">Dark theme</span>
+      </button>
+      {% if principal %}
+      <details class="user-menu" data-menu>
+        <summary class="user-menu__toggle">{{ icon("user") }}<span>{{ principal.username }}</span>{{ icon("chevron-down", "icon--sm") }}</summary>
+        <div class="user-menu__panel">
+          <a class="user-menu__item" href="{{ route_path('account') }}"{% if active == "account" %} aria-current="page"{% endif %}>{{ icon("settings-2") }}Account</a>
+          <a class="user-menu__item" href="{{ route_path('tokens') }}"{% if active == "tokens" %} aria-current="page"{% endif %}>{{ icon("key") }}API tokens</a>
+          <hr class="user-menu__sep">
+          <form class="topbar__form" method="post" action="{{ route_path('logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="user-menu__item">{{ icon("log-out") }}Sign out</button>
+          </form>
+        </div>
+      </details>
+      {% endif %}
+    </div>
+  </header>
+
+  <div class="shell{% if not principal %} shell--bare{% endif %}">
+    {% if principal %}
+    {% include "_sidebar.html" %}
+    {% endif %}
+
+    <div class="shell__main">
+      <div id="restore-banner">
+        {% from "restore/_banner.html" import gate_banner with context %}
+        {{ gate_banner() }}
+      </div>
+
+      {% from "partials/toast.html" import toast %}
+      <div id="toasts" class="toasts" role="region" aria-label="Notifications">
+        {% for flash in flashes %}
+        {{ toast(flash.level, flash.message) }}
+        {% endfor %}
+      </div>
+      <template id="toast-template">{{ toast("info", "") }}</template>
+
+      <main id="main" class="page" tabindex="-1">
+        {% block content %}{% endblock %}
+      </main>
+
+      <footer class="footer">
+        <span>dockmin <span class="mono">{{ product_version }}</span></span>
+        <span aria-hidden="true">&middot;</span>
+        <span>Compose CLI
+          {% if compose_version %}<span class="mono">{{ compose_version }}</span>{% else %}not detected{% endif %}
+        </span>
+      </footer>
+    </div>
+  </div>
+</body>
+</html>

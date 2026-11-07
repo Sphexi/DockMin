@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/radio_field.html" import radio_field %}
+{% block title %}Prune images on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Prune images" %}
+{% block content %}
+{% call page_header("Prune images", environment.name) %}
+<a class="btn" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("Check the selection", message) }}
+{% endfor %}
+
+<form class="form form--wide" method="get" action="{{ prune_href }}">
+  <fieldset class="choice-group">
+    <legend>What to prune</legend>
+    {{ radio_field("mode", "Dangling images", "dangling", checked=(mode == "dangling"), help="Images with no reference that no container uses.") }}
+    {{ radio_field("mode", "Unused images", "unused", checked=(mode == "unused"), help="Every image that no container uses, tagged or not.") }}
+  </fieldset>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">List the images</button>
+  </div>
+</form>
+
+{% if plan %}
+<section class="section" aria-labelledby="prune-heading">
+  <h2 id="prune-heading">{{ plan.candidates|length }} {{ "image" if plan.candidates|length == 1 else "images" }} would be removed</h2>
+  {% if plan.candidates %}
+  {% set items = [] %}
+  {% for candidate in plan.candidates %}
+  {% set references = candidate.references|join(", ") if candidate.references else "dangling" %}
+  {% set _ = items.append({"name": candidate.short_id, "detail": references ~ ", " ~ candidate.size|filesize}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "image") }}
+  {% if plan.truncated %}
+  <div class="panel panel--notice" role="note">
+    {% set left = plan.total - plan.candidates|length %}
+    <p>{{ left }} more {{ "image is" if left == 1 else "images are" }} not in this prune. Run it again afterwards for the rest.</p>
+  </div>
+  {% endif %}
+  <p>Up to {{ plan.reclaimable|filesize }} would be freed. Layers shared with images that stay are not freed, so the real figure can be lower. Credential bindings are kept.</p>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="mode" value="{{ plan.mode }}">
+    {% for candidate in plan.candidates %}
+    <input type="hidden" name="target" value="{{ candidate.id }}:{{ candidate.references_digest }}">
+    {% endfor %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Remove {{ plan.candidates|length }} {{ "image" if plan.candidates|length == 1 else "images" }}</button>
+      <a class="btn" href="{{ list_href }}">Cancel</a>
+    </div>
+  </form>
+  {% else %}
+  <p>Nothing to prune.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

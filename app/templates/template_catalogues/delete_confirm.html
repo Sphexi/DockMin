@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Delete {{ preview.name }} - dockmin{% endblock %}
+{% set crumb_object = preview.name %}
+{% set crumb_object_href = route_path('template_catalogue_detail', catalogue_id=preview.catalogue_id) %}
+{% set crumb_page = "Delete" %}
+{% block content %}
+{% call page_header("Delete template catalogue", "Review what is removed. Nothing is deleted until you confirm.") %}
+<a class="btn" href="{{ route_path('template_catalogue_detail', catalogue_id=preview.catalogue_id) }}">Back to the catalogue</a>
+{% endcall %}
+
+{% for message in errors.values() %}
+{{ error_state("The catalogue was not deleted", message) }}
+{% endfor %}
+
+<section class="section" aria-labelledby="delete-catalogue-heading">
+  <h2 id="delete-catalogue-heading">{{ preview.name }}</h2>
+  <dl class="facts">
+    <dt>Address</dt>
+    <dd class="mono cell-wrap">{{ preview.url }}</dd>
+    <dt>Templates</dt>
+    <dd>{{ preview.entry_count }}</dd>
+  </dl>
+  <ul>
+    <li>The fetched templates are deleted with the catalogue.</li>
+    <li>Containers and stacks already created from its templates are not touched.</li>
+    <li>The remote address is not contacted.</li>
+  </ul>
+</section>
+
+<form class="form" method="post" action="{{ route_path('template_catalogue_delete', catalogue_id=preview.catalogue_id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_name" value="{{ preview.name }}">
+  {{ confirm_targets([preview.name], "template catalogue") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Delete catalogue</button>
+    <a class="btn" href="{{ route_path('template_catalogue_detail', catalogue_id=preview.catalogue_id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

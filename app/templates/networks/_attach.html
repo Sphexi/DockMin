@@ -1,0 +1,176 @@
+{# Import with context: forms carry the CSRF token and links come from route names. #}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/toast.html" import toast %}
+
+{% macro attach_fields(offer, values, errors) %}
+{% set network_error = errors.get("network") %}
+{% if errors.get("form") %}
+{{ error_state("The attachment did not run", errors.get("form")) }}
+{% endif %}
+{% if errors.get("container") %}
+{{ error_state("This container cannot join networks", errors.get("container")) }}
+{% endif %}
+<div class="field"{% if network_error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-network">Network <span class="field__required" aria-hidden="true">*</span></label>
+  </div>
+  <select class="field__input" id="field-network" name="network" required
+          {%- if network_error %} aria-invalid="true" aria-describedby="field-network-error"{% endif %}>
+    {% for choice_ in offer.networks %}
+    <option value="{{ choice_.id }}"{% if choice_.id == values.get("network") %} selected{% endif %}>{{ choice_.name }} ({{ choice_.driver }}{% if choice_.subnets %}, {{ choice_.subnets|join(", ") }}{% endif %})</option>
+    {% endfor %}
+  </select>
+  {% if network_error %}
+  <p class="field__error" id="field-network-error">{{ network_error }}</p>
+  {% endif %}
+</div>
+{{ form_field("aliases", "Aliases", value=values.get("aliases", ""), error=errors.get("aliases"), help="Names other containers use to reach this one on the network. Separate them with spaces or commas; at most 16. Not available on Docker's own networks.") }}
+{{ form_field("ipv4", "IPv4 address", value=values.get("ipv4", ""), error=errors.get("ipv4"), help="Leave empty to let Docker assign one. A fixed address needs a network with a configured subnet.") }}
+{{ form_field("ipv6", "IPv6 address", value=values.get("ipv6", ""), error=errors.get("ipv6"), help="Leave empty to let Docker assign one. The network needs IPv6 enabled.") }}
+{% endmacro %}
+
+{% macro attach_unavailable(offer, errors) %}
+{% for message in errors.values() %}
+{{ error_state("The attachment did not run", message) }}
+{% endfor %}
+{% if offer.blocked %}
+<p>{{ offer.blocked }}</p>
+{% else %}
+<p>There is no further network this container can join. Networks it is already on, the host and none networks, and networks you cannot change are not offered.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro attach_panel(offer, values, errors) %}
+{% set post_href = route_path("environment_container_network_connect_run", environment_id=offer.environment_id, container_id=offer.container_id) %}
+<section id="attach-panel" class="panel" aria-labelledby="attach-heading">
+  <h3 id="attach-heading">Attach to a network</h3>
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if offer.blocked or not offer.networks %}
+  {{ attach_unavailable(offer, errors) }}
+  {% else %}
+  <form class="form" method="post" action="{{ post_href }}" hx-post="{{ post_href }}" hx-target="#attach-panel" hx-swap="outerHTML" hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ attach_fields(offer, values, errors) }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Attach</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro attach_done(message) %}
+<section id="attach-panel" class="panel" aria-labelledby="attach-heading">
+  <h3 id="attach-heading">Attach to a network</h3>
+  <p class="loading" role="status">Loading&hellip;</p>
+  {{ toast("ok", message) }}
+</section>
+{% endmacro %}
+
+{% macro attach_section(panel) %}
+{% if panel.offer is not none %}
+{{ attach_panel(panel.offer, {}, {}) }}
+{% elif panel.failure %}
+<section class="panel" aria-labelledby="attach-heading">
+  <h3 id="attach-heading">Attach to a network</h3>
+  <p>{{ panel.failure }}</p>
+</section>
+{% endif %}
+{% endmacro %}
+
+{% macro connect_page_form(offer, values, errors) %}
+{% set post_href = route_path("environment_container_network_connect_run", environment_id=offer.environment_id, container_id=offer.container_id) %}
+{% if offer.blocked or not offer.networks %}
+{{ attach_unavailable(offer, errors) }}
+{% else %}
+<form class="form form--wide" method="post" action="{{ post_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ attach_fields(offer, values, errors) }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Attach</button>
+    <a class="btn" href="{{ route_path('environment_container_detail', environment_id=offer.environment_id, container_id=offer.container_id) }}?tab=networks">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro detach_facts(impact) %}
+{{ confirm_targets([{"name": impact.container_name, "detail": "leaves network " ~ impact.network_name}], "container") }}
+<dl class="facts">
+  <dt>State</dt>
+  <dd>{{ container_state_badge(impact.state) }}</dd>
+  <dt>Network</dt>
+  <dd class="mono">{{ impact.network_name }}</dd>
+  <dt>IPv4 address</dt>
+  <dd class="mono">{{ impact.ipv4_address or "—" }}</dd>
+  <dt>IPv6 address</dt>
+  <dd class="mono">{{ impact.ipv6_address or "—" }}</dd>
+  <dt>Aliases</dt>
+  <dd class="mono cell-wrap">{{ impact.aliases|join(", ") if impact.aliases else "—" }}</dd>
+  <dt>Environment</dt>
+  <dd>{{ impact.environment_name }}</dd>
+</dl>
+{% endmacro %}
+
+{% macro detach_effect(impact) %}
+{% if impact.state == "running" %}
+<p>The container leaves the network at once. Connections through it are dropped, and the address and aliases above are released. It can be attached again.</p>
+{% else %}
+<p>The container is not running. It will no longer join this network when it starts. It can be attached again.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro detach_dialog(impact) %}
+{% set run_href = route_path("environment_container_network_disconnect_run", environment_id=impact.environment_id, container_id=impact.container_id, network_id=impact.network_id) %}
+<dialog id="action-dialog" class="dialog dialog--inline" open aria-labelledby="action-dialog-title" aria-describedby="action-dialog-body" data-confirm-dialog>
+  <form class="dialog__form" method="post" action="{{ run_href }}" hx-post="{{ run_href }}" hx-target="#action-region" hx-swap="innerHTML" hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h2 class="dialog__title" id="action-dialog-title">Detach <span class="mono">{{ impact.container_name }}</span> from <span class="mono">{{ impact.network_name }}</span>?</h2>
+    <div id="action-dialog-body">
+      {{ detach_effect(impact) }}
+      {{ detach_facts(impact) }}
+    </div>
+    <div class="dialog__actions">
+      <button type="button" class="btn" data-dialog-close data-autofocus>Cancel</button>
+      <button type="submit" class="btn btn--danger">Detach container</button>
+    </div>
+  </form>
+</dialog>
+{% endmacro %}
+
+{% macro detach_form(impact, cancel_href) %}
+{% set run_href = route_path("environment_container_network_disconnect_run", environment_id=impact.environment_id, container_id=impact.container_id, network_id=impact.network_id) %}
+<form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ detach_effect(impact) }}
+  {{ detach_facts(impact) }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Detach container</button>
+    <a class="btn" href="{{ cancel_href }}">Cancel</a>
+  </div>
+</form>
+{% endmacro %}
+
+{% macro detach_notice(title, message, retry_href=none) %}
+<dialog id="action-dialog" class="dialog dialog--inline" open role="alertdialog" aria-labelledby="action-dialog-title" aria-describedby="action-dialog-body" data-confirm-dialog>
+  <div class="dialog__form">
+    <h2 class="dialog__title" id="action-dialog-title">{{ title }}</h2>
+    <div id="action-dialog-body">
+      <p>{{ message }}</p>
+    </div>
+    <div class="dialog__actions">
+      {% if retry_href %}
+      <a class="btn" href="{{ retry_href }}" hx-get="{{ retry_href }}" hx-target="#action-region" hx-swap="innerHTML">Review again</a>
+      {% endif %}
+      <button type="button" class="btn btn--primary" data-dialog-close data-autofocus>Close</button>
+    </div>
+  </div>
+</dialog>
+{% endmacro %}
+
+{% macro detach_done(message) %}
+{{ toast("ok", message) }}
+{% endmacro %}

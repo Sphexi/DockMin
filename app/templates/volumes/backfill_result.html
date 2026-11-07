@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Assign volume owners result - dockmin{% endblock %}
+{% set crumb_page = "Assign volume owners result" %}
+{% block content %}
+{% set labels = {
+  "assigned": ("Assigned", "ok"),
+  "controlled": ("Skipped: has access settings now", "warn"),
+  "gone": ("Skipped: gone", "neutral"),
+  "changed": ("Skipped: changed since you reviewed it", "warn"),
+  "busy": ("Skipped: busy", "warn"),
+  "unreachable": ("Skipped: host unreachable", "danger"),
+  "failed": ("Failed", "danger"),
+} %}
+{% set total = result.items|length %}
+{% call page_header("Assign volume owners result", environment.name) %}
+<a class="btn btn--primary" href="{{ list_href }}">Back to volumes</a>
+{% endcall %}
+
+<div class="panel" role="status">
+  <p>{{ result.assigned }} of {{ total }} {{ "volume" if total == 1 else "volumes" }} assigned. Each volume was handled on its own.</p>
+</div>
+
+{% if result.items %}
+<div class="data-table__scroll" role="region" aria-label="Results" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Result for each volume</caption>
+    <thead>
+      <tr>
+        <th scope="col">Volume</th>
+        <th scope="col">Owner</th>
+        <th scope="col">Result</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in result.items %}
+      {% set shown = labels[item.status] %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ item.name }}</th>
+        <td>{{ item.owner_name }}</td>
+        <td>{{ badge(shown[0], shown[1]) }}</td>
+        <td>{{ item.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

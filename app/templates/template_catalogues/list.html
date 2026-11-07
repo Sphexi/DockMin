@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "template_catalogues/_table.html" import catalogues_table with context %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Template catalogues - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Template catalogues", "Remote lists of applications that fill in the container and stack create forms. Nothing is contacted until you enable a catalogue.") %}
+{% endcall %}
+
+{% call list_bar(list_count(total|default(none), "catalogue")) %}
+<a class="btn btn--primary" href="{{ route_path('template_catalogue_new') }}">Add catalogue</a>
+{% endcall %}
+{{ catalogues_table(rows, columns, pager) }}
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ target.name }} on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = target.name %}
+{% block content %}
+{% call page_header(target.name, "File read from " ~ environment.name) %}
+<a class="btn" href="{{ back_href }}">Back to the review</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="source-heading">
+  <h2 id="source-heading">What would be stored</h2>
+  <dl class="facts">
+    <dt>{{ "Namespace" if target.kind == "swarm" else "Project" }}</dt>
+    <dd class="mono cell-wrap">{{ target.name }}</dd>
+    <dt>How the file was obtained</dt>
+    <dd>{{ source }}</dd>
+    <dt>Services</dt>
+    <dd class="mono cell-wrap">{{ services|join(", ") or "—" }}</dd>
+  </dl>
+  {% if files %}
+  <h3>Files</h3>
+  <ul class="ref-list">
+    {% for name, secret, size in files %}
+    <li class="ref-list__item"><span class="mono cell-wrap">{{ name }}</span> <span class="cell-note">{{ "Secret file. Stored encrypted and never shown." if secret else "Plain file, " ~ size ~ " bytes" }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if variables %}
+  <h3>Variables</h3>
+  <ul class="ref-list">
+    {% for name, secret, value in variables %}
+    <li class="ref-list__item"><span class="mono cell-wrap">{{ name }}</span> {% if secret %}{{ badge("Secret", "info") }} <span class="cell-note">Not shown</span>{% else %}<span class="mono cell-wrap">{{ value }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if losses %}
+  <h3>What is not carried over</h3>
+  <ul>
+    {% for loss in losses %}<li>{{ loss }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <details class="stderr" open>
+    <summary>The file that would be stored</summary>
+    <pre class="stderr__text" tabindex="0">{{ text }}</pre>
+  </details>
+</section>
+{% endblock %}

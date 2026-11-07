@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Forget stack {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Forget" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Forget stack", "Review the stack below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="forget-heading">
+  <h2 id="forget-heading">Forget stack <span class="mono cell-wrap">{{ review.stack }}</span> on {{ review.environment_name }}?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  <p>dockmin deletes its record of the stack, its stored file and variables, and its access control. Nothing on the host is touched.{% if review.containers %} The {{ review.containers }} {{ "container" if review.containers == 1 else "containers" }} of the project keep running and appear again as a Compose project not managed here.{% endif %} Use this when the host is gone or cannot be reached.</p>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_stack_id" value="{{ review.stack_id }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Forget stack</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

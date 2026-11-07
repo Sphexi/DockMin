@@ -1,0 +1,123 @@
+{% from "partials/data_table.html" import data_table %}
+{% from "partials/error_state.html" import error_state %}
+{% from "stacks/_parts.html" import changed_chip, dismiss_form, dismissal_state, dismissed_line, last_operation, leftover_links, leftover_summary, origin_text, restore_form, status_badge with context %}
+
+{% macro stack_actions(row) %}
+<div class="row-actions">
+  <a class="btn btn--compact" href="{{ route_path('environment_stack_detail', environment_id=row.environment_id, stack_name=row.name) }}" aria-label="Details of stack {{ row.name }}">Details</a>
+</div>
+{% endmacro %}
+
+{% macro stack_row(row) %}
+<tr id="stack-{{ row.name }}">
+  <th scope="row">
+    <div class="cell-stack">
+      <a class="mono cell-wrap" href="{{ route_path('environment_stack_detail', environment_id=row.environment_id, stack_name=row.name) }}">{{ row.name }}</a>
+      {% if row.changed_since_deploy %}<span class="cell-note">{{ changed_chip(row) }}</span>{% endif %}
+    </div>
+  </th>
+  <td>{{ status_badge(row) }}</td>
+  <td>{{ last_operation(row) }}</td>
+  <td>{{ origin_text(row.origin) }}</td>
+  <td>{{ stack_actions(row) }}</td>
+</tr>
+{% endmacro %}
+
+{% macro stacks_table(rows, columns, pager, filtered, environment_id=none, can_create=false) %}
+{% set empty_body = "Change the name, or clear the filter to see every stack." if filtered else ("There are no stacks on this environment." if principal.is_administrator else "You cannot see any stacks on this environment. Ask an administrator for access to more stacks.") %}
+{% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
+{% call data_table("stacks-table", "Stacks", columns, pager, empty_title=("No matching stacks" if filtered else "No stacks"), empty_body=empty_body, empty_action_label=("Create stack" if show_create else none), empty_action_href=(route_path("environment_stack_new", environment_id=environment_id) if show_create else none), filtered=filtered) %}
+{% for row in rows %}
+{{ stack_row(row) }}
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{# Outside the swapped table, so a table response carries it out of band. #}
+{% macro results_summary(visible_count, filtered, oob=false) %}
+<p id="results-summary" class="results-summary" role="status"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
+  {%- if visible_count is not none %}{{ visible_count }} {{ "stack" if visible_count == 1 else "stacks" }}{% if filtered %} {{ "matches" if visible_count == 1 else "match" }} this name{% endif %}.{% endif -%}
+</p>
+{% endmacro %}
+
+{% macro unmanaged_section(projects, unavailable, environment_id, dismissed_hidden=0, show_dismissed=false) %}
+{% set list_href = route_path("environment_stack_list", environment_id=environment_id) %}
+<section id="stacks-unmanaged" class="section" aria-labelledby="unmanaged-heading">
+  <h2 id="unmanaged-heading">Compose projects not managed here</h2>
+  {% if unavailable %}
+  <p class="field__help">The Compose projects on the host could not be read.</p>
+  {% else %}
+  {{ dismissed_line(dismissed_hidden, show_dismissed, list_href) }}
+  {% if projects %}
+  <p class="field__help">These projects run on the host without a stack here. Adopting one stores the file you paste for it and puts it under your control. It changes nothing on the host.</p>
+  <div class="data-table__scroll" role="region" aria-label="Unmanaged Compose projects" tabindex="0">
+    <table class="table" data-optional="3">
+      <caption class="visually-hidden">Compose projects on the host that no stack covers</caption>
+      <thead>
+        <tr><th scope="col">Project</th><th scope="col">Containers</th><th scope="col" class="col-optional">Services</th><th scope="col">Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for project in projects %}
+        <tr id="project-{{ project.name }}">
+          <th scope="row" class="cell-wrap">
+            <div class="cell-stack">
+              <span class="mono cell-wrap">{{ project.name }}</span>
+              {{ dismissal_state(project.dismissal, show_dismissed) }}
+            </div>
+          </th>
+          <td>
+            {% if project.leftovers_only %}
+            <div class="cell-stack">
+              <span>{{ leftover_summary("No containers.", [("volume", "volumes", project.volumes), ("network", "networks", project.networks)]) }}</span>
+              {{ leftover_links("Volumes", project.leftover_volumes, project.volumes, environment_id, "environment_volume_detail", "volume_name", "name") }}
+              {{ leftover_links("Networks", project.leftover_networks, project.networks, environment_id, "environment_network_detail", "network_id", "id") }}
+            </div>
+            {% else %}
+            {{ project.running }} of {{ project.containers }} running
+            {% endif %}
+          </td>
+          <td class="mono cell-wrap">{{ project.services|join(", ") or "—" }}</td>
+          <td>
+            <div class="row-actions">
+              {% if project.adoptable %}
+              <a class="btn btn--compact" href="{{ route_path('environment_stack_adopt', environment_id=environment_id, project=project.name) }}" aria-label="Adopt project {{ project.name }}">Adopt</a>
+              {% else %}
+              <span class="cell-note">The name cannot be used for a stack</span>
+              {% endif %}
+              {% if project.leftovers_only and project.dismissible and (not project.dismissal or project.dismissal.changed_since) %}
+              {{ dismiss_form(route_path("environment_stack_unmanaged_dismiss", environment_id=environment_id, project=project.name), project.objects_digest, project.name) }}
+              {% endif %}
+              {% if project.dismissal %}
+              {{ restore_form(project.dismissal, route_path("environment_stack_unmanaged_restore", environment_id=environment_id, project=project.name), project.name) }}
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="field__help">Every Compose project on the host is managed here{{ " or dismissed" if dismissed_hidden and not show_dismissed else "" }}.</p>
+  {% endif %}
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro stacks_results(rows, columns, pager, filtered, errors, failure, retry_href, environment_id, visible_count, unmanaged, unmanaged_unavailable, is_administrator, oob=false, can_create=false, dismissed_hidden=0, show_dismissed=false) %}
+{% if oob %}
+{{ results_summary(none if (errors or failure) else visible_count, filtered, true) }}
+{% endif %}
+{% if errors %}
+{% for message in errors %}
+{{ error_state("Check the filter", message) }}
+{% endfor %}
+{% elif failure %}
+{{ error_state("Stacks cannot be listed", failure, retry_href=retry_href, region_id="stacks-results", swap="innerHTML") }}
+{% else %}
+{{ stacks_table(rows, columns, pager, filtered, environment_id, can_create) }}
+{% if is_administrator and not filtered and pager.is_first_page %}
+{{ unmanaged_section(unmanaged, unmanaged_unavailable, environment_id, dismissed_hidden, show_dismissed) }}
+{% endif %}
+{% endif %}
+{% endmacro %}

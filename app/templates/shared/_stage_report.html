@@ -1,0 +1,48 @@
+{% from "partials/badge.html" import badge %}
+
+{% macro outcome_badge(outcome) -%}
+{% if outcome == "passed" -%}
+{{ badge("Passed", "ok") }}
+{%- elif outcome == "failed" -%}
+{{ badge("Failed", "danger") }}
+{%- elif outcome == "skipped" -%}
+{{ badge("Skipped", "neutral") }}
+{%- else -%}
+{{ badge("Not run", "neutral") }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro stage_table(stages, labels) %}
+<div class="data-table__scroll" role="region" aria-label="Connection test stages" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Connection test stages</caption>
+    <thead>
+      <tr>
+        <th scope="col">Stage</th>
+        <th scope="col">Outcome</th>
+        <th scope="col" class="is-numeric">Time</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for stage in stages %}
+      <tr>
+        <th scope="row">{{ labels.get(stage.stage, stage.stage) }}</th>
+        <td>{{ outcome_badge(stage.outcome) }}</td>
+        <td class="is-numeric">{{ stage.duration_ms }} ms</td>
+        <td>
+          {{ stage.message }}
+          {% if stage.facts %}
+          <ul class="inline-list">
+            {% for key, value in stage.facts.items() %}
+            <li class="mono">{{ key }}: {{ value }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}

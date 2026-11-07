@@ -1,0 +1,13 @@
+{# id names the element and the open query parameter; open is true when the content holds an error or a refusal; level is h2, h3 or h4. Import with context. The content is the call block. #}
+{% macro disclosure(id, title, open=false, level="h2") %}
+{% set tag = level if level in ["h3", "h4"] else "h2" %}
+{% set named = request is defined and request.query_params is defined and request.query_params.get("open") == id %}
+<details class="panel disclosure" id="{{ id }}"{% if open or named %} open{% endif %}>
+  <summary class="disclosure__summary">
+    <{{ tag }} class="disclosure__title" id="{{ id }}-heading">{{ title }}</{{ tag }}>
+  </summary>
+  {% if caller is defined %}
+  <div class="disclosure__body">{{ caller() }}</div>
+  {% endif %}
+</details>
+{% endmacro %}

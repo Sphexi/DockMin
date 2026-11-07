@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "automation/_parts.html" import rule_facts, what_runs_do with context %}
+{% from "automation/_target_preview.html" import target_preview %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Enable {{ view.rule.name }} - dockmin{% endblock %}
+{% set crumb_object = view.rule.name %}
+{% set crumb_object_href = route_path('automation_rule_detail', rule_id=view.rule.id) %}
+{% set crumb_page = "Enable" %}
+{% block content %}
+{% set rule = view.rule %}
+{% call page_header("Enable automation", "Review what the automation will act on. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Back to the automation</a>
+{% endcall %}
+
+{{ rule_facts(view, parameters) }}
+
+{{ target_preview(target) }}
+
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What changes</h2>
+  <ul>
+    {% if view.job.schedule_kind == "webhook" %}
+    <li>From now each call to the automation's webhook URL starts a run that acts on <strong>{{ view.target }}</strong>{% if view.environment_name %} in <strong>{{ view.environment_name }}</strong>{% endif %}. Until it is enabled, calls are refused.</li>
+    {% else %}
+    <li>From the next due time the automation runs on its schedule, <strong>{{ view.schedule }}</strong>, and acts on <strong>{{ view.target }}</strong>{% if view.environment_name %} in <strong>{{ view.environment_name }}</strong>{% endif %}.</li>
+    {% endif %}
+    {{ what_runs_do(view, parameters, target_kind, stack_kind) }}
+    {% if not view.job.is_enabled %}
+    <li>The automation's job was disabled after {{ view.job.consecutive_failures }} failed {{ "run" if view.job.consecutive_failures == 1 else "runs" }} in a row. Enabling the automation enables the job again and clears that count.</li>
+    {% elif view.job.consecutive_failures %}
+    <li>The job has {{ view.job.consecutive_failures }} failed {{ "run" if view.job.consecutive_failures == 1 else "runs" }} in a row on record.</li>
+    {% endif %}
+    {% if not view.subsystem_enabled %}
+    <li>The subsystem is switched off, so the automation still does not run until it is switched on.</li>
+    {% endif %}
+    {% if rule.is_enabled and view.job.is_enabled %}
+    <li>The automation is already enabled. Confirming changes nothing.</li>
+    {% endif %}
+  </ul>
+  {% if view.supports_dry_run %}
+  <p class="field__help">A dry run reports what the automation would do and changes no container, stack or automation. Run one first to check the target.</p>
+  {% endif %}
+</section>
+
+<div class="job-actions">
+  <form class="form" method="post" action="{{ route_path('automation_rule_enable', rule_id=rule.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_updated_at" value="{{ rule.updated_at }}">
+    <input type="hidden" name="expected_digest" value="{{ digest }}">
+    {{ confirm_targets([rule.name], "automation") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Enable automation</button>
+      <a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Cancel</a>
+    </div>
+  </form>
+  {% if view.supports_dry_run %}
+  <form class="form" method="post" action="{{ route_path('automation_rule_dry_run', rule_id=rule.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form__actions">
+      <button type="submit" class="btn">Dry run first</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

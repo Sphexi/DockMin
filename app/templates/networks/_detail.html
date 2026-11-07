@@ -1,0 +1,182 @@
+{# Import with context: links and forms read the request. #}
+{% from "access/_panel.html" import access_panel with context %}
+{% from "environments/_parts.html" import kind_badge as host_badge, when with context %}
+{% from "networks/_parts.html" import container_base, flags, kind_badge, stack_cell with context %}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/object_users.html" import object_users, users_overflow %}
+
+{% macro network_summary(detail) %}
+<section id="network-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span>{{ kind_badge(detail.kind) }}</span>
+      <span class="mono">{{ detail.short_id }}</span>
+      <span class="cell-note">{{ detail.driver }} network on {{ detail.environment_name }} {{ host_badge(true) if detail.is_local else "" }}</span>
+    </div>
+    <div class="row-actions">
+      {% if detail.can_remove %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_network_remove', environment_id=detail.environment_id, network_id=detail.id) }}">Remove</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro value_table(rows, label, caption, note) %}
+<div class="data-table__scroll" role="region" aria-label="{{ label }}" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead><tr><th scope="col">Key</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for item in rows %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ item.key }}</th>
+        <td class="cell-wrap mono">{% if item.redacted %}<span class="chip">Redacted</span>{% else %}{{ item.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if note %}
+<p class="field__help">{{ note }}</p>
+{% endif %}
+{% endmacro %}
+
+{% macro overview_tab(detail) %}
+<h2 id="tab-heading">Overview</h2>
+<dl class="facts">
+  <dt>Name</dt>
+  <dd class="mono cell-wrap">{{ detail.name }}</dd>
+  <dt>ID</dt>
+  <dd class="mono cell-wrap">{{ detail.id }}</dd>
+  <dt>Driver</dt>
+  <dd class="mono">{{ detail.driver }}</dd>
+  <dt>Scope</dt>
+  <dd>{{ detail.scope }}</dd>
+  <dt>Created</dt>
+  <dd>{{ when(detail.created_at, "—") }}</dd>
+  <dt>Flags</dt>
+  <dd>{{ flags(detail.internal, detail.attachable, detail.ipv6) }}</dd>
+  <dt>Stack</dt>
+  <dd>{{ stack_cell(detail.stack, detail.environment_id) }}</dd>
+  <dt>Used by</dt>
+  <dd>{{ detail.container_count }} {{ "container" if detail.container_count == 1 else "containers" }}{% if detail.service_count %} and {{ detail.service_count }} {{ "service" if detail.service_count == 1 else "services" }}{% endif %}{% if not detail.services_known %}; service use is unknown{% endif %}</dd>
+</dl>
+
+<h3>Address pools</h3>
+{% if detail.pools %}
+<div class="data-table__scroll" role="region" aria-label="Address pools" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Address pools of this network</caption>
+    <thead>
+      <tr><th scope="col">Subnet</th><th scope="col">Gateway</th><th scope="col">IP range</th></tr>
+    </thead>
+    <tbody>
+      {% for pool in detail.pools %}
+      <tr>
+        <th scope="row" class="mono">{{ pool.subnet or "—" }}</th>
+        <td class="mono">{{ pool.gateway or "—" }}</td>
+        <td class="mono">{{ pool.ip_range or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>This network has no configured address pool.</p>
+{% endif %}
+
+<h3>Driver options</h3>
+{% if detail.options is none %}
+<p class="field__help">Not shown for your role.</p>
+{% elif detail.options %}
+{{ value_table(detail.options, "Driver options", "Driver options of this network", "Values of options whose names look like secrets are redacted.") }}
+{% else %}
+<p>The network sets no driver options.</p>
+{% endif %}
+
+<h3>Labels</h3>
+{% if detail.labels %}
+{{ value_table(detail.labels, "Labels", "Labels of this network", ("" if principal.is_administrator else "Values of keys that look like secrets are redacted for your role.")) }}
+{% else %}
+<p>The network has no labels.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro containers_tab(detail) %}
+{% set base = container_base(detail.environment_id) %}
+<h2 id="tab-heading">Containers</h2>
+<h3>Connected now</h3>
+{% if detail.endpoints %}
+<div class="data-table__scroll" role="region" aria-label="Running endpoints" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Running containers with an endpoint on this network</caption>
+    <thead>
+      <tr>
+        <th scope="col">Container</th>
+        <th scope="col">IPv4 address</th>
+        <th scope="col">IPv6 address</th>
+        <th scope="col">MAC address</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for endpoint in detail.endpoints %}
+      <tr>
+        <th scope="row" class="cell-wrap"><a href="{{ base }}/{{ endpoint.container_id }}?tab=networks">{{ endpoint.name }}</a></th>
+        <td class="mono">{{ endpoint.ipv4_address or "—" }}</td>
+        <td class="mono">{{ endpoint.ipv6_address or "—" }}</td>
+        <td class="mono">{{ endpoint.mac_address or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif not detail.endpoints_hidden %}
+<p>No running container is connected.</p>
+{% endif %}
+{% if detail.endpoints_more or detail.endpoints_hidden %}
+<p class="field__help">{{ users_overflow(detail.endpoints_more, detail.endpoints_hidden, "running container") }}.</p>
+{% endif %}
+
+<h3>Configured, not running</h3>
+{{ object_users(detail.stopped, detail.stopped_more, detail.stopped_hidden, detail.stopped|length + detail.stopped_more + detail.stopped_hidden, base, "No stopped container is attached to this network.") }}
+
+{% if detail.service_count %}
+<h3>Services</h3>
+<p class="field__help">A service that attaches to this network keeps it in use, whether or not its tasks are running.</p>
+{{ object_users(detail.services, detail.services_more, detail.services_hidden, detail.service_count, route_path("environment_swarm_service_list", environment_id=detail.environment_id)) }}
+{% elif not detail.services_known %}
+<h3>Services</h3>
+<p class="field__help">The host's services could not be read, so service use of this network is unknown.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro access_tab(detail, panel, values, fields) %}
+{% set base = route_path("environment_network_access_save", environment_id=detail.environment_id, network_id=detail.id) %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, base, route_path("environment_network_access_delete", environment_id=detail.environment_id, network_id=detail.id), values=values, fields=fields) }}
+{% endmacro %}
+
+{% macro network_tabs(detail, tab, tabs, panel, values, fields) %}
+{% set detail_href = route_path("environment_network_detail", environment_id=detail.environment_id, network_id=detail.id) %}
+{% set labels = {"overview": "Overview", "containers": "Containers", "access": "Access"} %}
+<div id="network-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Network sections">
+    <ul class="tabs__list">
+      {% for key in tabs %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#network-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% elif tab == "containers" %}{{ containers_tab(detail) }}
+    {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

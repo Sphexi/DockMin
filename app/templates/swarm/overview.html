@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import kind_badge, when with context %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/resource_tiles.html" import resource_tile, resource_tiles %}
+{% block title %}Swarm on {{ overview.environment_name }} - dockmin{% endblock %}
+{% block content %}
+{% set services_href = route_path("environment_swarm_service_list", environment_id=overview.environment_id) %}
+{% call page_header("Swarm", overview.environment_name) %}
+{{ kind_badge(overview.is_local) if overview.is_local else "" }}
+{% if overview.can_create %}
+<a class="btn btn--primary" href="{{ route_path('environment_swarm_service_new', environment_id=overview.environment_id) }}">Create service</a>
+{% endif %}
+<a class="btn" href="{{ route_path('environment_detail', environment_id=overview.environment_id) }}">Back to environment</a>
+{% endcall %}
+
+{% set scope = " you can see" if not overview.administrator else "" %}
+{% call resource_tiles("Cluster counts") %}
+{{ resource_tile(("Service" if overview.services == 1 else "Services") ~ scope, overview.services, services_href) }}
+{{ resource_tile("Tasks running", overview.tasks_running ~ " of " ~ overview.tasks_desired) }}
+{{ resource_tile(("Config" if overview.configs == 1 else "Configs") ~ scope, overview.configs, route_path('environment_swarm_config_list', environment_id=overview.environment_id)) }}
+{{ resource_tile(("Secret" if overview.secrets == 1 else "Secrets") ~ scope, overview.secrets, route_path('environment_swarm_secret_list', environment_id=overview.environment_id)) }}
+{% if overview.administrator %}
+{{ resource_tile("Node" if overview.nodes == 1 else "Nodes", overview.nodes, route_path('environment_swarm_node_list', environment_id=overview.environment_id)) }}
+{{ resource_tile("Manager" if overview.managers == 1 else "Managers", overview.managers) }}
+{% endif %}
+{% endcall %}
+
+{% if overview.administrator %}
+<section class="section" aria-labelledby="cluster-heading">
+  <h2 id="cluster-heading">Cluster</h2>
+  <dl class="facts">
+    <dt>Cluster ID</dt>
+    <dd class="mono">{{ overview.cluster_id }}</dd>
+    <dt>Created</dt>
+    <dd>{{ when(overview.created_at, "—") }}</dd>
+    <dt>This manager</dt>
+    <dd class="mono">{{ overview.manager_node_id or "—" }}</dd>
+    <dt>Nodes ready</dt>
+    <dd>{{ overview.nodes_ready }} of {{ overview.nodes }}</dd>
+    <dt>Availability</dt>
+    <dd>{{ overview.nodes_active }} active, {{ overview.nodes_paused }} paused, {{ overview.nodes_drained }} drained</dd>
+  </dl>
+</section>
+{% else %}
+<p class="field__help">Cluster and node details are shown to administrators only. The counts above cover the services, configs and secrets you can see.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "partials/ports.html" import port_list %}
+{% from "swarm/_parts.html" import node_counts %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Remove service {{ impact.name }} - dockmin{% endblock %}
+{% set crumb_object = impact.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Remove" %}
+{% block content %}
+{% call page_header("Remove service", "Review the service below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the service</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Remove service <span class="mono">{{ impact.name }}</span>?</h2>
+  {{ confirm_targets([{"name": impact.name, "detail": "on " ~ impact.environment_name}], "service") }}
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ impact.environment_name }}</dd>
+    <dt>Mode</dt>
+    <dd>{{ impact.mode|capitalize }}{% if impact.replicas is not none %}, {{ impact.replicas }} {{ "replica" if impact.replicas == 1 else "replicas" }}{% endif %}</dd>
+    <dt>Stack</dt>
+    <dd>{{ impact.stack or "None" }}</dd>
+    <dt>Published ports</dt>
+    <dd>{{ port_list(impact.ports) }}</dd>
+    <dt>Tasks</dt>
+    <dd>
+      {% if impact.states %}
+      <ul class="review__values">
+        {% for item in impact.states %}
+        <li>{{ item.tasks }} {{ item.state }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      None are running.
+      {% endif %}
+    </dd>
+    {% if impact.nodes %}
+    <dt>On nodes</dt>
+    <dd>{{ node_counts(impact.nodes, impact.nodes_more) }}</dd>
+    {% endif %}
+  </dl>
+  <div class="panel panel--alert" role="note">
+    <h3>The tasks and their containers are removed</h3>
+    <p>Every task of this service stops and its container is removed, on every node. Volumes the tasks used are kept. Access control set on the service is dropped. This cannot be undone.</p>
+  </div>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_name" value="{{ impact.name }}">
+    <input type="hidden" name="expected_version" value="{{ impact.version }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Remove service</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

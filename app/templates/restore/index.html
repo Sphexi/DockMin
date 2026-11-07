@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Restore - dockmin{% endblock %}
+{% set crumb_page = "Restore" %}
+{% block content %}
+{% call page_header("Restore", "Replace this instance's data with the contents of a backup archive.") %}
+<a class="btn" href="{{ route_path('backups') }}">Back to backups</a>
+{% endcall %}
+
+{% for key, text in errors.items() if key not in ["archive", "confirm_offline"] %}
+{{ error_state("The restore cannot continue", text) }}
+{% endfor %}
+
+{% if status is none %}
+<section class="section" aria-labelledby="steps-heading">
+  <h2 id="steps-heading">How a restore runs</h2>
+  <ol>
+    <li>Take this instance offline.</li>
+    <li>Upload the archive and review what it holds and what it replaces.</li>
+    <li>Enter the encryption key the archive was made with. Nothing changes before the key is accepted.</li>
+    <li>dockmin verifies the archive, stages its database, migrates it and checks it, then replaces this instance's data and restarts on it.</li>
+  </ol>
+  <h3>While the instance is offline</h3>
+  <ul>
+    <li>Every request that changes something is refused with status 503. Pages can still be read, and signing in and out still works.</li>
+    <li>Scheduled jobs stop, and a run in progress is interrupted.</li>
+    <li>Backup downloads are refused.</li>
+    <li>The instance accepts changes again when the restore is cancelled, when 15 minutes pass without a restore request before the key is confirmed, and when the application stops.</li>
+  </ul>
+  <h3>What a restore changes</h3>
+  <ul>
+    <li>Users, environments, stacks, credentials, rules and the activity log are replaced by the archive's. Changes made after the backup are lost.</li>
+    <li>Every session ends, yours included. Sign in again with an administrator account from the archive. Your user name must match an enabled administrator in the archive.</li>
+    <li>The data being replaced is moved aside and kept. dockmin never deletes it.</li>
+  </ul>
+</section>
+
+<form class="form" method="post" action="{{ route_path('restore_begin') }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ checkbox_field("confirm_offline", "Take this instance offline for a restore", value="yes", help="Changes are refused until the restore finishes or is cancelled.", error=errors.get("confirm_offline")) }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Take the instance offline</button>
+  </div>
+</form>
+{% else %}
+<section class="section" aria-labelledby="state-heading">
+  <h2 id="state-heading">A restore is in progress</h2>
+  <dl class="facts">
+    <dt>Started by</dt>
+    <dd>{{ status.owner_username|visible_text }}</dd>
+    <dt>Started</dt>
+    <dd>{{ when(status.started_at, "") }}</dd>
+    <dt>Step</dt>
+    <dd>
+      {%- if status.stage == "awaiting_archive" %}Waiting for the archive
+      {%- elif status.stage == "fetching" %}Fetching the archive from object storage
+      {%- elif status.stage == "awaiting_key" %}Archive uploaded, waiting for the key
+      {%- else %}Running{% endif -%}
+    </dd>
+  </dl>
+</section>
+
+{% if status.owned_by_caller %}
+{% if status.stage == "running" %}
+<p><a class="btn btn--primary" href="{{ route_path('restore_progress', restore_id=status.restore_id) }}">Follow the restore</a></p>
+{% elif status.stage == "fetching" %}
+<p><a class="btn btn--primary" href="{{ route_path('restore_review') }}">Follow the fetch</a></p>
+{% else %}
+{% if status.fetch_error %}
+{{ error_state("The archive could not be fetched", status.fetch_error) }}
+{% endif %}
+{% if status.stage == "awaiting_key" %}
+<p><a class="btn btn--primary" href="{{ route_path('restore_review') }}">Review the archive and enter the key</a></p>
+{% endif %}
+<section class="section" aria-labelledby="upload-heading">
+  <h2 id="upload-heading">{{ "Upload a different archive" if status.stage == "awaiting_key" else "Upload the archive" }}</h2>
+  <form class="form" method="post" action="{{ route_path('restore_archive') }}" enctype="multipart/form-data" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field"{% if errors.get("archive") %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="field-archive">Backup archive</label>
+        <p class="field__help" id="field-archive-help">A .tar.gz file made by dockmin, up to 7 GiB. A reverse proxy in front of dockmin must allow a request body this large. The file is only read; nothing changes until you confirm the key.</p>
+      </div>
+      <input class="field__input" type="file" id="field-archive" name="archive" accept=".gz,.tar.gz,application/gzip" required
+             aria-describedby="field-archive-help{% if errors.get('archive') %} field-archive-error{% endif %}"
+             {%- if errors.get("archive") %} aria-invalid="true"{% endif %}>
+      {% if errors.get("archive") %}
+      <p class="field__error" id="field-archive-error">{{ errors["archive"] }}</p>
+      {% endif %}
+    </div>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Upload and inspect</button>
+    </div>
+  </form>
+</section>
+<section class="section" aria-labelledby="remote-heading">
+  <h2 id="remote-heading">From object storage</h2>
+  {% if targets %}
+  <form class="form" method="get" action="{{ route_path('restore_remote') }}">
+    <div class="field">
+      <div class="field__head">
+        <label class="field__label" for="field-target_id">Object storage target</label>
+        <p class="field__help" id="field-target_id-help">Lists the archives under the target's backup folder. The target's credential must be able to list and read it.</p>
+      </div>
+      <select class="field__input" id="field-target_id" name="target_id" required aria-describedby="field-target_id-help">
+        {% for id, name in targets %}
+        <option value="{{ id }}">{{ name|visible_text }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">List archives</button>
+    </div>
+  </form>
+  {% else %}
+  <p>No object storage target is configured. <a href="{{ route_path('object_storage_target_new') }}">Add an object storage target</a> to restore from a bucket.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% else %}
+<div class="panel panel--notice" role="note">
+  <p>Another session began this restore, so only that session can continue it.{% if status.stage != "running" %} Any administrator can cancel it.{% else %} It is running and can no longer be cancelled.{% endif %}</p>
+</div>
+{% endif %}
+
+{% if status.stage != "running" %}
+<form class="form" method="post" action="{{ route_path('restore_cancel') }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="form__actions">
+    <button type="submit" class="btn">Cancel the restore</button>
+  </div>
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

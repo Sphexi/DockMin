@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "containers/_confirm.html" import busy_notice with context %}
+{% from "partials/engine_detail.html" import engine_detail_block %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Recreate did not complete - dockmin{% endblock %}
+{% set crumb_page = "Recreate" %}
+{% block content %}
+{% if failure.outcome_unknown %}
+{% call page_header("Recreate result unknown", "Check the container list before trying again.") %}
+<a class="btn" href="{{ list_href }}">Back to containers</a>
+{% endcall %}
+{% else %}
+{% call page_header("Recreate did not complete", "The container was not recreated.") %}
+<a class="btn" href="{{ list_href }}">Back to containers</a>
+{% endcall %}
+{% endif %}
+{% if failure.busy is not none %}
+<div class="panel panel--notice" role="note">
+  <h2>{{ failure.title }}</h2>
+  {{ busy_notice(failure.busy, "try") }}
+</div>
+{% else %}
+{{ error_state(failure.title, failure.message) }}
+{{ engine_detail_block(engine_detail) }}
+{% endif %}
+{% if failure.status in (409, 502, 503) %}
+<p><a class="btn" href="{{ confirm_href }}">Review again</a></p>
+{% endif %}
+{% endblock %}

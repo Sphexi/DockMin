@@ -1,0 +1,67 @@
+{# Shown to administrators. Import with context. #}
+{% from "partials/form_field.html" import form_field %}
+
+{% macro contexts_section(detail) %}
+{% set args = {"environment_id": detail.row.environment_id, "stack_name": detail.row.name} %}
+<section class="section" aria-labelledby="contexts-heading">
+  <h2 id="contexts-heading">Build contexts</h2>
+  <p class="field__help">Source archives the stack's services build images from, stored in the database and included in backups. A context is not encrypted. Nothing is built until the stack is deployed.</p>
+  {% if detail.contexts %}
+  <div class="data-table__scroll" role="region" aria-label="Build contexts of the stack" tabindex="0">
+    <table class="table" data-optional="3 4">
+      <caption class="visually-hidden">Build contexts of the stack</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th><th scope="col">Used by</th>
+          <th scope="col" class="is-numeric">Archive</th>
+          <th scope="col" class="col-optional is-numeric">Extracted</th><th scope="col" class="col-optional">Digest</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for context in detail.contexts %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ context.name }}</th>
+          <td>
+            {% if context.uses %}
+            <ul class="ref-list">
+              {% for path in context.uses %}<li class="ref-list__item"><span class="mono cell-wrap">{{ path }}</span></li>{% endfor %}
+            </ul>
+            {% else %}
+            <span class="cell-note">Not used</span>
+            {% endif %}
+          </td>
+          <td class="is-numeric">{{ context.size|filesize }}</td>
+          <td class="col-optional is-numeric">{{ context.extracted_size|filesize }} in {{ context.member_count }} entries</td>
+          <td class="col-optional"><span class="mono" title="{{ context.digest }}">{{ context.digest[:12] }}</span></td>
+          <td>
+            <span class="row-actions">
+              <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_stack_context_remove', file=context.name, **args) }}" aria-label="Remove build context {{ context.name }}">Remove</a>
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>The stack has no build contexts.</p>
+  {% endif %}
+
+  <h3 id="context-upload-heading">Add or replace a build context</h3>
+  <form class="form" method="post" action="{{ route_path('environment_stack_context_upload', **args) }}" enctype="multipart/form-data" data-submit-once aria-labelledby="context-upload-heading">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("name", "Name", required=true, help="1 to 128 letters, digits, '.', '_' and '-', starting with a letter or digit. A service builds from it with build: name or build: ./name. An existing name is replaced.") }}
+    <div class="field">
+      <div class="field__head">
+        <label class="field__label" for="field-archive">Archive <span class="field__required" aria-hidden="true">*</span></label>
+        <p class="field__help" id="field-archive-help">A .tar or .tar.gz file of regular files and directories, up to 16 MiB as uploaded and 256 MiB extracted. A stack holds up to 64 MiB of archives. Links, devices, absolute names and names containing .. are refused.</p>
+      </div>
+      <input class="field__input" type="file" id="field-archive" name="archive" accept=".tar,.gz,.tgz,application/x-tar,application/gzip" required aria-describedby="field-archive-help">
+    </div>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Upload build context</button>
+    </div>
+  </form>
+</section>
+{% endmacro %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/list_bar.html" import list_bar %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "stacks/_tables.html" import results_summary, stacks_results with context %}
+{% block title %}Stacks on {{ environment.name }} - dockmin{% endblock %}
+{% block content %}
+{% set list_href = route_path("environment_stack_list", environment_id=environment.id) %}
+{% call page_header("Stacks", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ route_path('environment_detail', environment_id=environment.id) }}">Back to environment</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if refusal %}
+{{ error_state(refusal.title, refusal.message) }}
+{% endif %}
+{% if environment.type == "swarm" %}
+<p class="field__help">Swarm stacks are listed under <a href="{{ route_path('environment_swarm_stack_list', environment_id=environment.id) }}">Swarm stacks</a>. This list shows Compose stacks only.</p>
+{% endif %}
+
+{% call list_bar(results_summary(none if (errors or failure) else visible_count, filtered)) %}
+<form id="stack-filters" class="list-bar__filter" method="get" action="{{ list_href }}" role="search" aria-label="Filter stacks"
+      hx-get="{{ list_href }}" hx-target="#stacks-results" hx-swap="innerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#stack-filters select, #stack-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
+  <button type="submit" class="btn btn--primary">Apply filter</button>
+  <a class="btn" href="{{ list_href }}">Reset</a>
+</form>
+{% if can_create %}
+<a class="btn btn--primary" href="{{ route_path('environment_stack_new', environment_id=environment.id) }}">Create stack</a>
+{% endif %}
+{% endcall %}
+<div id="stacks-results">
+  {{ stacks_results(rows, columns, pager, filtered, errors, failure, retry_href, environment_id, visible_count, unmanaged, unmanaged_unavailable, is_administrator, can_create=can_create, dismissed_hidden=dismissed_hidden, show_dismissed=show_dismissed) }}
+</div>
+{% endblock %}

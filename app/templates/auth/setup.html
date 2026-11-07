@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import password_rule, unplaced_errors, wait_message %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Set up - dockmin{% endblock %}
+{% block content %}
+<div class="auth-card">
+  {{ page_header("Set up dockmin", "Create the first administrator. This page closes for good once an account exists.") }}
+
+  {% if error %}
+  {{ error_state("Setup is paused", error ~ (" " ~ wait_message(retry_after) if retry_after else "")) }}
+  {% endif %}
+  {{ unplaced_errors(fields, ["setup_token", "username", "password", "password_confirm"]) }}
+
+  <form class="form" method="post" action="{{ route_path('setup') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("setup_token", "Setup token", type="password", error=fields.get("setup_token"), help="Printed in the dockmin server log when it started.", required=true) }}
+    {{ form_field("username", "Administrator username", value=username, error=fields.get("username"), required=true, autocomplete="username") }}
+    {{ form_field("password", "Password", type="password", error=fields.get("password"), help=password_rule(password_policy), required=true, autocomplete="new-password") }}
+    {{ form_field("password_confirm", "Confirm password", type="password", error=fields.get("password_confirm"), required=true, autocomplete="new-password") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Create administrator</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

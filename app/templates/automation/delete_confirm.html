@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Delete {{ preview.rule.name }} - dockmin{% endblock %}
+{% set crumb_object = preview.rule.name %}
+{% set crumb_object_href = route_path('automation_rule_detail', rule_id=preview.rule.id) %}
+{% set crumb_page = "Delete" %}
+{% block content %}
+{% set rule = preview.rule %}
+{% call page_header("Delete automation", "Review what is removed. Nothing is deleted until you confirm.") %}
+<a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Back to the automation</a>
+{% endcall %}
+
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+
+<dl class="facts">
+  <dt>Name</dt>
+  <dd>{{ rule.name }}</dd>
+  <dt>Type</dt>
+  <dd class="mono">{{ rule.subsystem }}</dd>
+  <dt>Environment</dt>
+  <dd>{{ preview.environment_name or "All environments" }}</dd>
+  <dt>Acts on</dt>
+  <dd>{{ preview.target }}</dd>
+</dl>
+
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What is deleted</h2>
+  <ul>
+    <li>The automation and its schedule.</li>
+    {% if rule.subsystem == "webhook-receiver" %}
+    <li>The webhook URL stops working.</li>
+    {% endif %}
+    <li>{{ preview.runs }} recorded {{ "run" if preview.runs == 1 else "runs" }} of the automation. Runs started before you confirm are deleted too.</li>
+    <li>The activity log keeps every event the automation wrote, with its id and name.</li>
+    <li>Nothing the automation already did to a container or stack is undone.</li>
+    {% if waiting is not none and waiting.count %}
+    <li>{{ waiting.count }} replaced {{ "image" if waiting.count == 1 else "images" }} waiting for removal {{ "is" if waiting.count == 1 else "are" }} kept on the host and will not be removed.</li>
+    {% endif %}
+  </ul>
+</section>
+
+{% if preview.export_release is not none %}
+{% set release = preview.export_release %}
+<section class="section" aria-labelledby="hold-heading">
+  <h2 id="hold-heading">Activity held for export</h2>
+  <p>
+    {% if release.rows == 0 %}
+    This automation holds no activity events back from retention.
+    {% else %}
+    {{ "More than " if release.more_than else "" }}{{ "{:,}".format(release.rows) }} activity {{ "event is" if release.rows == 1 else "events are" }} held back from retention until this automation has copied {{ "it" if release.rows == 1 else "them" }}. Deleting the automation ends the hold.{% if retention_on %} Retention may then remove {{ "it" if release.rows == 1 else "them" }}.{% endif %}
+    {% endif %}
+  </p>
+</section>
+{% endif %}
+
+<form class="form" method="post" action="{{ route_path('automation_rule_delete', rule_id=rule.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_name" value="{{ rule.name }}">
+  {{ confirm_targets([rule.name], "automation") }}
+  <div class="field"{% if errors.get("typed_name") %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-typed_name">Type the automation's name to confirm</label>
+      <p class="field__help" id="field-typed_name-help">The name is <strong class="mono">{{ rule.name }}</strong>.</p>
+    </div>
+    <input class="field__input" id="field-typed_name" name="typed_name" type="text" required autocomplete="off" aria-describedby="field-typed_name-help{% if errors.get('typed_name') %} field-typed_name-error{% endif %}"{% if errors.get("typed_name") %} aria-invalid="true"{% endif %}>
+    {% if errors.get("typed_name") %}
+    <p class="field__error" id="field-typed_name-error">{{ errors["typed_name"] }}</p>
+    {% endif %}
+  </div>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Delete automation</button>
+    <a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

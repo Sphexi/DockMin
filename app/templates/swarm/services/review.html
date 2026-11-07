@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "images/_parts.html" import credential_fieldset with context %}
+{% from "swarm/_parts.html" import category_list with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Review changes to {{ review.name }} - dockmin{% endblock %}
+{% set crumb_object = review.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Review changes" %}
+{% block content %}
+{% call page_header("Review changes", "Nothing changes until you confirm.") %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ detail_href }}">Cancel</a>
+{% endcall %}
+
+{% if restricted %}
+<div class="panel panel--notice" role="note">
+  <h2>Administrator options in use</h2>
+  <p>This configuration uses options only administrators may set:</p>
+  <ul>
+    {% for label in restricted %}
+    <li>{{ label }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ confirm_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_version" value="{{ review.version }}">
+  <input type="hidden" name="form_version" value="{{ view.get('form_version') }}">
+  {% for name, value in view.hidden_fields() %}
+  <input type="hidden" name="{{ name }}" value="{{ value }}">
+  {% endfor %}
+
+  <section class="panel create-section" aria-labelledby="review-summary-title">
+    <h2 class="create-section__title" id="review-summary-title">Service <span class="mono">{{ review.name }}</span></h2>
+    <dl class="facts">
+      <dt>Environment</dt>
+      <dd>{{ review.environment_name }}</dd>
+      <dt>Changes</dt>
+      <dd>
+        {% if review.categories %}
+        {{ category_list(review.categories) }}
+        {% else %}
+        No setting differs from the stored configuration. Confirming changes nothing.
+        {% endif %}
+      </dd>
+      {% if review.image_changed %}
+      <dt>Image now</dt>
+      <dd class="mono cell-wrap">{{ review.image_before or "—" }}</dd>
+      <dt>Image after</dt>
+      <dd class="mono cell-wrap">{{ review.image_after or "—" }}</dd>
+      {% endif %}
+      <dt>Running tasks</dt>
+      <dd>
+        {% if review.tasks_replaced %}
+        All {{ review.running_tasks }} running {{ "task is" if review.running_tasks == 1 else "tasks are" }} replaced as the update rolls out, according to the service's update configuration.
+        {% else %}
+        Running tasks are not replaced by this change.
+        {% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  {% if offer %}
+  <section class="panel create-section" aria-labelledby="review-credentials-title">
+    <h2 class="create-section__title" id="review-credentials-title">Credential set for the pull</h2>
+    <p class="field__help">The nodes pull <span class="mono cell-wrap">{{ offer.reference.familiar }}</span> with the set chosen here, which Swarm keeps with the service. The set is bound to the image, so later updates use it too.</p>
+    {{ credential_fieldset(offer, selected, choice_error, catalogue) }}
+  </section>
+  {% endif %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Update service</button>
+    <button type="submit" class="btn" name="step" value="edit" formaction="{{ edit_href }}" formnovalidate>Back to edit</button>
+    <a class="btn" href="{{ detail_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

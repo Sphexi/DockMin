@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "swarm/_parts.html" import task_state_badge, value_table with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}Node {{ detail.row.hostname }} - dockmin{% endblock %}
+{% set crumb_object = detail.row.hostname %}
+{% block content %}
+{% set row = detail.row %}
+{% set args = {"environment_id": detail.environment_id, "node_id": row.id} %}
+{% call page_header(row.hostname, "Node of " ~ detail.environment_name) %}
+{{ back_actions(route_path('environment_swarm_node_list', environment_id=detail.environment_id), "Back to nodes", origin) }}
+{% endcall %}
+
+<section class="panel" aria-labelledby="node-heading">
+  <h2 id="node-heading">Node</h2>
+  <dl class="facts">
+    <dt>ID</dt>
+    <dd class="mono cell-wrap">{{ row.id }}</dd>
+    <dt>Role</dt>
+    <dd>{{ row.role|capitalize }}{% if row.is_this_manager %} {{ badge("This manager", "info") }}{% endif %}{% if row.leader %} <span class="cell-note">Leader</span>{% elif row.reachability %} <span class="cell-note">{{ row.reachability|capitalize }}</span>{% endif %}</dd>
+    <dt>State</dt>
+    <dd>{{ badge(row.state|capitalize, "ok" if row.state == "ready" else "danger") }}</dd>
+    <dt>Availability</dt>
+    <dd>{{ badge(row.availability|capitalize, "ok" if row.availability == "active" else "warn") }}</dd>
+    <dt>Address</dt>
+    <dd class="mono">{{ row.address or "—" }}</dd>
+    <dt>Engine</dt>
+    <dd class="mono">{{ row.engine_version or "—" }}</dd>
+    <dt>Platform</dt>
+    <dd>{{ detail.os or "—" }} {{ detail.architecture }}</dd>
+    <dt>CPUs</dt>
+    <dd>{{ detail.cpus }}</dd>
+    <dt>Memory</dt>
+    <dd>{{ detail.memory_bytes|filesize }}</dd>
+  </dl>
+
+  {% if detail.can_change %}
+  <h3>Availability</h3>
+  <p class="field__help">Active nodes receive new tasks. A paused node keeps its running tasks and receives no new ones. A drained node has its tasks moved to other nodes.</p>
+  <div class="row-actions">
+    {% if row.availability != "active" %}
+    <form class="inline-form" method="post" action="{{ route_path('environment_swarm_node_availability_run', **args) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="availability" value="active">
+      <input type="hidden" name="expected_version" value="{{ detail.version }}">
+      <input type="hidden" name="expected_availability" value="{{ row.availability }}">
+      <button type="submit" class="btn btn--compact btn--primary">Set active</button>
+    </form>
+    {% endif %}
+    {% if row.availability != "pause" %}
+    <a class="btn btn--compact" href="{{ route_path('environment_swarm_node_availability', **args) }}?availability=pause">Pause&hellip;</a>
+    {% endif %}
+    {% if row.availability != "drain" %}
+    <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_node_availability', **args) }}?availability=drain">Drain&hellip;</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <h3>Labels</h3>
+  {% if detail.labels %}
+  {{ value_table(detail.labels, "Node labels", "Labels set on this node") }}
+  {% else %}
+  <p>The node has no labels.</p>
+  {% endif %}
+  <h3>Engine labels</h3>
+  {% if detail.engine_labels %}
+  {{ value_table(detail.engine_labels, "Engine labels", "Labels the engine on this node reports") }}
+  {% else %}
+  <p>The engine reports no labels.</p>
+  {% endif %}
+
+  <h3>Tasks on this node</h3>
+  {% if detail.tasks %}
+  <div class="data-table__scroll" role="region" aria-label="Tasks on this node" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Tasks placed on this node, newest first</caption>
+      <thead><tr><th scope="col">Service</th><th scope="col">Slot</th><th scope="col">Task</th><th scope="col">State</th><th scope="col">Desired</th></tr></thead>
+      <tbody>
+        {% for task in detail.tasks %}
+        <tr>
+          <th scope="row"><a href="{{ route_path('environment_swarm_service_detail', environment_id=detail.environment_id, service_id=task.service_id) }}">{{ task.service_name }}</a></th>
+          <td>{{ task.slot if task.slot is not none else "—" }}</td>
+          <td><a class="mono" href="{{ route_path('environment_swarm_task_detail', environment_id=detail.environment_id, task_id=task.id) }}">{{ task.short_id }}</a></td>
+          <td>{{ task_state_badge(task.state) }}</td>
+          <td>{{ task.desired_state|capitalize }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if detail.tasks_more %}<p class="field__help">and {{ detail.tasks_more }} older {{ "task" if detail.tasks_more == 1 else "tasks" }} not listed.</p>{% endif %}
+  {% else %}
+  <p>No task is placed on this node.</p>
+  {% endif %}
+</section>
+{% endblock %}

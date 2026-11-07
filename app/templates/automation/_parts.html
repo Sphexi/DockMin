@@ -1,0 +1,203 @@
+{# Import with context: links read the request. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/job_state_badge.html" import job_state_badge %}
+{% from "jobs/_parts.html" import outcome_badge, trigger_label %}
+
+{% macro rule_state(view) -%}
+{% if view.state == "paused" %}{% set paused_until %}until <time datetime="{{ view.paused_until|timestamp_iso }}">{{ view.paused_until|timestamp }}</time>{% endset %}{{ job_state_badge("paused", paused_until) }}
+{%- elif view.state == "unscheduled" %}{{ badge("Nothing scheduled", "warn") }}
+{%- elif view.state == "auto_disabled" %}{{ job_state_badge("auto_disabled", view.job.consecutive_failures ~ (" failure" if view.job.consecutive_failures == 1 else " failures")) }}
+{%- else %}{{ job_state_badge(view.state) }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro run_marker(run) -%}
+{% if run.trigger == "dry_run" %}{{ badge("Dry run", "neutral") }}{% else %}{{ outcome_badge(run.outcome) }}{% endif %}
+{%- endmacro %}
+
+{% macro environment_link(view) -%}
+{% if view.environment_name %}<a href="{{ route_path('environment_detail', environment_id=view.rule.environment_id) }}">{{ view.environment_name }}</a>{% else %}All environments{% endif %}
+{%- endmacro %}
+
+{% macro updates_summary(view) %}
+{% if view.rule.subsystem != "container-updater" %}
+<span class="cell-note">&mdash;</span>
+{% elif not view.last_run %}
+<span class="cell-note">Not run yet</span>
+{% else %}
+{% set detail = view.last_run.detail %}
+{% set mode = detail.get("mode") %}
+{% set unknown = detail.get("unknown", 0) %}
+{% set refreshed = detail.get("refreshed", 0) %}
+{% if mode == "update" %}
+<div class="cell-stack">
+  <span>{{ detail.get("updated", 0) }} updated</span>
+  {% if detail.get("rolled_back", 0) %}
+  <span>{{ badge(detail.get("rolled_back") ~ " rolled back", "warn") }}</span>
+  {% endif %}
+  {% if refreshed %}
+  <span>{{ refreshed }} {{ "credential" if refreshed == 1 else "credentials" }} renewed</span>
+  {% endif %}
+  {% if unknown %}
+  <span>{{ badge(unknown ~ " unknown", "warn") }}</span>
+  {% endif %}
+</div>
+{% elif mode == "report" %}
+{% set available = detail.get("update_available", 0) %}
+{% if available and unknown %}
+<div class="cell-stack">
+  <span>{{ available }} {{ "update" if available == 1 else "updates" }} available</span>
+  {% if unknown %}
+  <span>{{ badge(unknown ~ " unknown", "warn") }}</span>
+  {% endif %}
+</div>
+{% elif available %}{{ available }} {{ "update" if available == 1 else "updates" }} available
+{%- elif unknown %}{{ badge(unknown ~ " unknown", "warn") }}
+{%- else %}None available{% endif %}
+{% else %}
+<span class="cell-note">No result</span>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro rule_facts(view, parameters, environment_text=none) %}
+<dl class="facts">
+  <dt>Name</dt>
+  <dd>{{ view.rule.name }}</dd>
+  <dt>Type</dt>
+  <dd class="mono">{{ view.rule.subsystem }}</dd>
+  <dt>Environment</dt>
+  <dd>{% if environment_text %}{{ environment_text }}{% else %}{{ environment_link(view) }}{% endif %}</dd>
+  <dt>Acts on</dt>
+  <dd>{{ view.target }}</dd>
+  <dt>Schedule</dt>
+  <dd>{{ view.schedule }}</dd>
+  {% for key, value in parameters %}
+  <dt class="mono">{{ key }}</dt>
+  <dd>{{ value }}</dd>
+  {% endfor %}
+  <dt>State</dt>
+  <dd>{{ rule_state(view) }}</dd>
+</dl>
+{% endmacro %}
+
+{# parameters is a list of (name, value) pairs; target_kind is container, stack, labels, service or environment; stack_kind is compose, swarm or none. #}
+{% macro what_runs_do(view, parameters, target_kind=none, stack_kind=none) %}
+{% set values = dict(parameters) %}
+{% set updates_applied = view.rule.subsystem == "container-updater" and values.get("action", "report") == "update" %}
+{% set prunes = updates_applied and values.get("prune_replaced", "false")|lower == "true" %}
+{% set hours = values.get("prune_after_hours", "24")|int(24) %}
+{% if view.rule.subsystem == "container-updater" %}
+{% if updates_applied and target_kind == "service" %}
+<li>The service is updated in place by the rolling update its own update settings define. Swarm replaces its tasks across the nodes.</li>
+<li>An update that pauses or leaves fewer tasks running is rolled back to the service's previous configuration.</li>
+<li>A service bound to an Amazon ECR credential set has its stored registry credential renewed every 6 hours without replacing tasks.</li>
+<li>Nothing is removed. Images stay on the nodes.</li>
+{% elif updates_applied and target_kind == "stack" and stack_kind == "swarm" %}
+<li>The stack is redeployed from its deployed file; only services whose image changed are updated. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
+<li>Nothing is removed. Images stay on the nodes.</li>
+{% elif updates_applied %}
+<li>Matching containers are recreated from their own configuration with the newer image; containers that match later are included.</li>
+<li>A container that fails verification is restored to its previous image.</li>
+{% if target_kind == "stack" %}
+<li>The stack is redeployed from its deployed file; only containers whose image changed are recreated; a failed redeploy is not rolled back.</li>
+{% if stack_kind is none %}
+<li>If the name is a Swarm stack instead, it is redeployed from its deployed file; only services whose image changed are updated. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back. Nothing is removed and images stay on the nodes.</li>
+{% endif %}
+{% endif %}
+{% if prunes %}
+<li>Each image an update replaces is removed {{ hours }} {{ "hour" if hours == 1 else "hours" }} after the update, and only if no container uses it, it carries no tag, no other image depends on it and no Swarm service names it. A removal is never forced.</li>
+<li>Nothing else is removed except the container each update replaces.</li>
+{% else %}
+<li>Nothing is removed except the container each update replaces. Old images are kept.</li>
+{% endif %}
+{% else %}
+<li>Each run compares the images of the target with their registries and reports the ones that have a newer version. It pulls nothing and changes no container.</li>
+{% endif %}
+{% elif view.rule.subsystem == "webhook-receiver" %}
+{% set redeploys = values.get("action", "update") == "redeploy" %}
+{% if redeploys and target_kind == "service" %}
+<li>Each call forces an update of the service: Swarm replaces its tasks with the same configuration and image. No registry is contacted. A forced update is not rolled back.</li>
+{% elif redeploys and target_kind == "stack" and stack_kind == "swarm" %}
+<li>Each call redeploys the stack from its deployed file without pulling images. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
+{% elif redeploys and target_kind == "stack" %}
+<li>Each call redeploys the stack from its deployed file without pulling images. A failed redeploy is not rolled back.</li>
+{% if stack_kind is none %}
+<li>If the name is a Swarm stack instead, it is redeployed from its deployed file without pulling images. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
+{% endif %}
+{% elif redeploys %}
+<li>Each call recreates the container from its own configuration with the image it already has. No registry is contacted.</li>
+<li>A container that fails verification is restored to its previous state.</li>
+{% elif target_kind == "service" %}
+<li>Each call checks the service's image at its registry. When a newer version exists it is pulled with the credential set the image is bound to, and the service is updated in place by the rolling update its own update settings define.</li>
+<li>An update that pauses or leaves fewer tasks running is rolled back to the service's previous configuration.</li>
+{% elif target_kind == "stack" and stack_kind == "swarm" %}
+<li>Each call checks the images of the stack's services at their registries. When one has a newer version it is pulled with the credential set it is bound to, and the stack is redeployed from its deployed file; only services whose image changed are updated. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
+{% elif target_kind == "stack" %}
+<li>Each call checks the images of the stack's containers at their registries. When one has a newer version it is pulled with the credential set it is bound to, and the stack is redeployed from its deployed file; only containers whose image changed are recreated. A failed redeploy is not rolled back.</li>
+{% if stack_kind is none %}
+<li>If the name is a Swarm stack instead, it is redeployed from its deployed file; only services whose image changed are updated. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
+{% endif %}
+{% else %}
+<li>Each call checks the container's image at its registry. When a newer version exists it is pulled with the credential set the image is bound to, and the container is recreated from its own configuration with it.</li>
+<li>A container that fails verification is restored to its previous image.</li>
+{% endif %}
+{% if not redeploys %}
+<li>A call that finds nothing new pulls nothing and changes nothing.</li>
+{% endif %}
+<li>No image is removed.</li>
+<li>Anyone holding the webhook URL can start this automation. Runs start at most once a minute.</li>
+{% elif view.rule.subsystem == "container-health-checker" %}
+<li>Each run restarts the running containers of the target that report <strong>unhealthy</strong>.</li>
+<li>A container is restarted at most {{ values.get("max_restarts", "3") }} {{ "time" if values.get("max_restarts", "3") == "1" else "times" }} in {{ values.get("window_seconds", "3600") }} seconds. After that it is left alone until someone acts on it or the automation is edited, and the run reports it.</li>
+<li>A restart interrupts whatever the container is doing.</li>
+{% elif view.rule.subsystem == "container-log-exporter" %}
+<li>Each run reads the log lines every matching container has written since the last run and uploads them as one gzip-compressed NDJSON file per container. A Swarm service target gets one file per task.</li>
+<li>Reading a log changes no container. A container whose logs the automation's owner may not read is skipped.</li>
+<li>A run reads at most a fixed number of lines and bytes from each container or service; the rest is picked up by the next run.</li>
+{% elif view.rule.subsystem == "stack-restarter" %}
+<li>Each run restarts the target: a container is restarted, and a Compose stack has its running services stopped and then started in dependency order.</li>
+<li>The target is briefly unavailable during every run.</li>
+{% else %}
+<li>Each run performs the {{ view.rule.subsystem }} action on the target.</li>
+{% endif %}
+<li>It acts as {{ view.rule.subsystem }}, within the access of the automation's owner at the time of each run. A run stops at anything the owner may not change.</li>
+{% if view.rule.subsystem != "container-updater" or updates_applied %}
+<li>Activity events record each action with this automation.</li>
+{% endif %}
+{% endmacro %}
+
+{% macro what_is(name) -%}
+{{ {"container-health-checker": "Restarts running containers that report unhealthy, a few times at most.", "stack-restarter": "Restarts a container or a Compose stack on a schedule, in dependency order.", "webhook-receiver": "Updates or redeploys named containers, stacks and services each time a secret URL is called. Nothing runs on a schedule.", "container-updater": "Reports containers, Swarm services and stacks whose image has a newer version at its registry, or applies it: containers are recreated, services get a rolling update, stacks are redeployed.", "activity-log-exporter": "Copies the activity log to an object storage target as gzip-compressed CSV or NDJSON files.", "container-log-exporter": "Copies the new log lines of containers and Swarm service tasks to an object storage target as gzip-compressed NDJSON files. Administrators only.", "backup-syncer": "Makes a backup archive on a schedule, uploads it to an object storage target and deletes older archives beyond the target's retention."}.get(name, "") }}
+{%- endmacro %}
+
+{% macro detail_label(subsystem, key) -%}
+{%- if subsystem == "container-log-exporter" -%}
+{{ {
+  "exported": "Files exported",
+  "would_export_count": "Logs that would be exported",
+  "would_export": "Logs that would be exported (names)",
+  "failed": "Containers that failed",
+  "not_permitted": "Containers the owner may not read",
+  "suppressed": "Containers left alone after a recent action",
+  "deferred": "Containers left for the next run",
+  "up_to_date": "Containers with no new lines",
+  "gone": "Containers removed before they were read",
+  "unaddressable": "Containers skipped: identifier not usable",
+  "no_timestamps": "Containers skipped: lines without timestamps",
+  "targets": "Named targets found",
+  "target_outcomes": "Outcome for each named target",
+  "not_found": "Named targets not found",
+  "not_found_names": "Named targets not found (names)",
+  "target_id": "Object storage target",
+  "services": "Services read",
+  "tasks": "Tasks listed",
+  "unlisted_task": "Lines skipped: task not listed",
+  "lines": "Lines exported",
+  "more_pending": "More lines wait for the next run",
+  "with_cursor": "Logs that would continue where the last run stopped",
+  "without_cursor": "Logs that would start from their creation",
+  "next_object_path": "First file would be stored under",
+}.get(key, "") }}
+{%- endif -%}
+{%- endmacro %}

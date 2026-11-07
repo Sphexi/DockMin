@@ -1,0 +1,146 @@
+{# Import with context: links are built from route names. Without script the form is a plain GET carrying recent=1, for which the server renders a bounded tail. #}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/error_state.html" import error_state %}
+
+{% macro log_error(errors, key, field_id) %}
+{% if errors.get(key) %}
+<p class="field__error" id="{{ field_id }}-error">{{ errors.get(key) }}</p>
+{% endif %}
+{% endmacro %}
+
+{% macro logs_tab(detail, logs) %}
+{% set values = logs.selection %}
+{% set errors = logs.errors %}
+<h2 id="tab-heading">Logs</h2>
+<div class="log-view" data-log-view data-log-labelled data-log-subject="service" data-log-stream="{{ logs.stream_href }}" data-log-download="{{ logs.download_base }}" data-log-running="{{ 'true' if detail.desired else 'false' }}"{% if errors %} data-log-invalid{% endif %}>
+  <form class="filters log-form" method="get" action="{{ logs.action_href }}" data-log-form>
+    <input type="hidden" name="tab" value="logs">
+    <input type="hidden" name="recent" value="1">
+    {% if errors %}
+    <div class="error-summary filters__wide state state--error" role="alert">
+      <p class="state__body">Check the highlighted fields.</p>
+    </div>
+    {% endif %}
+
+    <div class="field"{% if errors.get("tail") %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="log-tail">Newest lines</label>
+      </div>
+      <select class="field__input" id="log-tail" name="tail"{% if errors.get("tail") %} aria-invalid="true" aria-describedby="log-tail-error"{% endif %}>
+        {% for option in logs.tail_options %}
+        <option value="{{ option }}"{% if option == values.tail %} selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+      </select>
+      {{ log_error(errors, "tail", "log-tail") }}
+    </div>
+
+    <div class="field"{% if errors.get("since") %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="log-since">Since (UTC)</label>
+      </div>
+      <input class="field__input" id="log-since" name="since" type="text" list="log-since-presets" value="{{ values.since }}" placeholder="all" maxlength="40" autocomplete="off" aria-describedby="log-time-help{% if errors.get('since') %} log-since-error{% endif %}"{% if errors.get("since") %} aria-invalid="true"{% endif %}>
+      <datalist id="log-since-presets">
+        {% for preset in logs.since_presets %}
+        <option value="{{ preset }}"></option>
+        {% endfor %}
+      </datalist>
+      {{ log_error(errors, "since", "log-since") }}
+    </div>
+
+    <div class="field"{% if errors.get("until") %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="log-until">Until (UTC)</label>
+      </div>
+      <input class="field__input" id="log-until" name="until" type="text" value="{{ values.until }}" placeholder="now" maxlength="40" autocomplete="off" aria-describedby="log-time-help{% if errors.get('until') %} log-until-error{% endif %}"{% if errors.get("until") %} aria-invalid="true"{% endif %}>
+      {{ log_error(errors, "until", "log-until") }}
+    </div>
+
+    <div class="field"{% if errors.get("q") %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="log-filter">Filter</label>
+      </div>
+      <input class="field__input" id="log-filter" name="q" type="search" value="{{ values.q }}" maxlength="{{ logs.max_filter }}" autocomplete="off"{% if errors.get("q") %} aria-invalid="true" aria-describedby="log-filter-error"{% endif %}>
+      {{ log_error(errors, "q", "log-filter") }}
+    </div>
+
+    <p class="field__help filters__wide" id="log-time-help">Since and Until take a duration back from now, such as 15m, 6h or 7d, or a date and time in UTC, such as 2026-10-19T14:30. Setting Until stops following. Each line starts with the task that wrote it, as service.slot.task for a replicated service and service.node.task for a global one.</p>
+
+    <fieldset class="choice-group"{% if errors.get("streams") %} data-invalid{% endif %}>
+      <legend>Streams</legend>
+      <input type="hidden" name="stdout" value="0">
+      {{ checkbox_field("stdout", "stdout", "1", values.stdout, group_error="log-streams-error" if errors.get("streams") else none) }}
+      <input type="hidden" name="stderr" value="0">
+      {{ checkbox_field("stderr", "stderr", "1", values.stderr, group_error="log-streams-error" if errors.get("streams") else none) }}
+      {% if errors.get("streams") %}
+      <p class="field__error" id="log-streams-error">{{ errors.get("streams") }}</p>
+      {% endif %}
+    </fieldset>
+
+    <fieldset class="choice-group">
+      <legend>Display</legend>
+      <input type="hidden" name="timestamps" value="0">
+      {{ checkbox_field("timestamps", "Show timestamps", "1", values.timestamps) }}
+    </fieldset>
+
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Apply</button>
+      <a class="btn" href="{{ logs.action_href }}?tab=logs">Reset</a>
+    </div>
+  </form>
+
+  <div class="toolbar log-toolbar" data-log-controls hidden>
+    <div class="choice">
+      <input class="choice__input" type="checkbox" id="log-follow" data-log-follow{% if detail.desired %} checked{% else %} disabled{% endif %}>
+      <label class="choice__label" for="log-follow">Follow new output</label>
+    </div>
+    <div class="log-toolbar__budget">
+      <label for="log-budget">Keep at most</label>
+      <select class="field__input field__input--auto" id="log-budget" data-log-budget>
+        {% for option in logs.budget_options %}
+        <option value="{{ option }}"{% if option == 5000 %} selected{% endif %}>{{ option }} lines</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="button" class="btn btn--compact" data-log-jump hidden>Jump to latest</button>
+  </div>
+
+  <p class="field__help log-status" role="status" data-log-status data-state="idle" hidden></p>
+  <p class="field__help" data-log-count hidden></p>
+  <p class="visually-hidden" role="status" data-log-announce></p>
+  <div class="log-output" role="log" aria-live="off" aria-label="Output of {{ detail.name }}" tabindex="0" data-log-output data-timestamps="{{ 'on' if values.timestamps else 'off' }}" hidden></div>
+
+  {% if logs.static %}
+  <div data-log-static>
+    {% if logs.failure %}
+    {{ error_state(logs.failure.title, logs.failure.message, retry_href=logs.refresh_href) }}
+    {% elif not logs.recent %}
+    <p><a class="btn" href="{{ logs.recent_href }}">Show recent lines</a></p>
+    {% else %}
+    <p class="field__help">
+      {%- if logs.total == 0 %}This service has written no output in the selected range.
+      {%- else %}The newest {{ logs.total }} {{ "line" if logs.total == 1 else "lines" }} across {{ logs.tasks }} {{ "task" if logs.tasks == 1 else "tasks" }} (at most {{ logs.page_tail }}) as of this page load{% if values.q %}; {{ logs.lines|length }} contain the filter{% endif %}.
+      {%- endif %}
+      {%- if logs.clamped %} Without script this page shows at most 1000 lines.{% endif %}
+      {%- if logs.cut %} Older lines were left out: the output is cut at 1 MiB, and each task answers with its own newest lines.{% endif %}
+    </p>
+    {% if logs.lines %}
+    <pre class="log-output log-output--static" role="region" aria-label="Output of {{ detail.name }}" tabindex="0" data-timestamps="{{ 'on' if values.timestamps else 'off' }}">
+{%- for line in logs.lines -%}
+<span class="log-line{% if line.stderr %} log-line--err{% endif %}">{% if line.time %}<span class="log-line__time">{{ line.time }} </span>{% endif %}{% if line.stderr %}<span class="visually-hidden">stderr </span>{% endif %}<span class="log-line__task">{{ line.task }}</span>{{ " " }}<span class="log-line__text">{{ line.text }}</span></span>{% if not loop.last %}{{ "\n" }}{% endif %}
+{%- endfor -%}
+</pre>
+    {% elif logs.total %}
+    <p>No line contains the filter.</p>
+    {% endif %}
+    <p><a class="btn" href="{{ logs.refresh_href }}">Refresh</a></p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <p class="toolbar">
+    <a class="btn" href="{{ logs.download_href }}{{ '&' if '?' in logs.download_href else '?' }}format=text" data-log-download-link>Download text</a>
+    <a class="btn" href="{{ logs.download_href }}{{ '&' if '?' in logs.download_href else '?' }}format=ndjson" data-log-download-ndjson>Download NDJSON</a>
+    <span class="field__help">Every line in the selected range that matches the filter, up to 100,000 lines or 32 MiB. Without a tail the output arrives task by task.</span>
+  </p>
+</div>
+{% endmacro %}

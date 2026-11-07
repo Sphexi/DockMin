@@ -1,0 +1,48 @@
+{# Import with context: the roster rows hold forms that carry the request CSRF token. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/data_table.html" import data_table %}
+
+{% macro teams_table(rows, columns, pager, can_create) %}
+{% call data_table("teams-table", "Teams", columns, pager, empty_title="No teams", empty_body=("Create a team to grant a group of users access together." if can_create else "You are not a member of any team yet. Ask an administrator to add you to one."), empty_action_label=("New team" if can_create else none), empty_action_href=(route_path('team_new') if can_create else none)) %}
+{% for row in rows %}
+<tr>
+  <th scope="row"><a href="{{ route_path('team_detail', team_id=row.id) }}">{{ row.name }}</a></th>
+  <td><time datetime="{{ row.created_at|timestamp_iso }}">{{ row.created_at|timestamp }}</time></td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{# Buttons are gated on the TeamDetail flags; removing a leader needs can_manage_leaders. #}
+{% macro roster_table(rows, columns, pager, team, can_manage_members, can_manage_leaders) %}
+{% call data_table("roster-table", "Members of " ~ team.name, columns, pager, empty_title="No members", empty_body=("Add a user to give them this team's access." if can_manage_members else "Only a team leader or an administrator can add members."), empty_action_label=("Add a member" if can_manage_members else none), empty_action_href=("#team-add-heading" if can_manage_members else none)) %}
+{% for row in rows %}
+<tr>
+  <th scope="row">
+    {{ row.username }}
+    {% if principal and row.user_id == principal.user_id %}{{ badge("You", "info") }}{% endif %}
+  </th>
+  <td>{% if row.is_leader %}{{ badge("Leader", "info") }}{% else %}{{ badge("Member") }}{% endif %}</td>
+  <td><time datetime="{{ row.created_at|timestamp_iso }}">{{ row.created_at|timestamp }}</time></td>
+  {% if can_manage_members %}
+  <td>
+    <div class="row-actions">
+      {% if can_manage_leaders %}
+      <form class="inline-form" method="post" action="{{ route_path('team_member_leader', team_id=team.id, user_id=row.user_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="is_leader" value="{{ 'false' if row.is_leader else 'true' }}">
+        <button type="submit" class="btn" aria-label="{{ 'Remove as leader: ' if row.is_leader else 'Make leader: ' }}{{ row.username }}">{{ "Remove as leader" if row.is_leader else "Make leader" }}</button>
+      </form>
+      {% endif %}
+      {% if can_manage_leaders or not row.is_leader %}
+      {{ confirm_button("remove-member-" ~ row.user_id, "Remove " ~ row.username) }}
+      {{ confirmation_dialog("remove-member-" ~ row.user_id, "Remove this member?", "This removes the member from the team and the access they have through it.", route_path('team_member_remove', team_id=team.id, user_id=row.user_id), "Remove member", targets=[row.username], noun="member") }}
+      {% endif %}
+    </div>
+  </td>
+  {% endif %}
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

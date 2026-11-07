@@ -1,0 +1,33 @@
+{# Import with context. #}
+{% from "environments/_parts.html" import kind_badge with context %}
+{% from "images/_parts.html" import using_containers with context %}
+
+{% macro container_use(impact) %}
+<dt>Used by</dt>
+<dd>{{ using_containers(impact.containers, impact.containers_hidden, impact.in_use, impact.environment_id) }}</dd>
+{% endmacro %}
+
+{% macro image_facts(impact, is_local=false) %}
+<dl class="facts">
+  <dt>Environment</dt>
+  <dd>{{ impact.environment_name }} {{ kind_badge(true) if is_local else "" }}</dd>
+  {% if impact.references is defined %}
+  <dt>References</dt>
+  <dd>
+    {% if impact.references %}
+    <ul class="chip-list mono">
+      {% for reference in impact.references %}
+      <li>{{ reference }}</li>
+      {% endfor %}
+    </ul>
+    {% if impact.references_hidden %}<span class="cell-note">and {{ impact.references_hidden }} more</span>{% endif %}
+    {% else %}
+    <span class="cell-note">None. The image is dangling.</span>
+    {% endif %}
+  </dd>
+  <dt>Size</dt>
+  <dd>{{ impact.size|filesize }}</dd>
+  {% endif %}
+  {{ container_use(impact) }}
+</dl>
+{% endmacro %}

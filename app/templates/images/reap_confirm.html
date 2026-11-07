@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "images/_parts.html" import binding_text with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Image bindings on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Image bindings" %}
+{% block content %}
+{% call page_header("Image bindings", environment.name) %}
+<a class="btn" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+{% if reapable.bindings %}
+<p>A binding records which credential set pulled a reference, and it stays after the image is removed so that a later pull reuses the set. These references are on no image and in no container on this host. Removing a binding only forgets the set; the next pull of the reference asks again.</p>
+{% set items = [] %}
+{% for binding in reapable.bindings %}
+{% set _ = items.append({"name": binding.display, "detail": binding_text(binding)}) %}
+{% endfor %}
+{{ confirm_targets(items, "binding") }}
+{% if reapable.more %}
+<div class="panel panel--notice" role="note">
+  <p>Showing the first {{ max_reap }}. Run this again for the rest.</p>
+</div>
+{% endif %}
+<form class="form" method="post" action="{{ run_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for binding in reapable.bindings %}
+  <input type="hidden" name="binding" value="{{ binding.id }}:{{ binding.reference }}">
+  {% endfor %}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Remove {{ reapable.bindings|length }} {{ "binding" if reapable.bindings|length == 1 else "bindings" }}</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% else %}
+{{ empty_state("No bindings to remove", "Every binding on this environment refers to an image or a container that is still on the host.") }}
+{% endif %}
+{% endblock %}

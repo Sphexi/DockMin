@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dockmin"
+dynamic = ["version"]
+description = "Web interface for managing Docker hosts."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "httpx",
+    "pydantic",
+    "pydantic-settings",
+    "python-multipart",
+    "cryptography",
+    "anyio",
+    "pyyaml",
+    "tzdata",
+    "pyjwt",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+    "types-PyYAML",
+    "pytest-xdist>=3.8.0",
+]
+
+[tool.hatch.version]
+source = "code"
+path = "build_version.py"
+expression = "version"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "C4", "PTH", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app", "tests", "updater"]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+norecursedirs = [".venv"]
+markers = ["integration: needs a real local Docker socket; skips when there is none"]

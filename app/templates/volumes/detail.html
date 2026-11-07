@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% from "volumes/_detail.html" import volume_summary, volume_tabs with context %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}Volume {{ detail.short_name }} - dockmin{% endblock %}
+{% set crumb_object = detail.short_name %}
+{% block content %}
+{% call page_header(detail.short_name, "Volume on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to volumes", origin) }}
+{% endcall %}
+
+{{ volume_summary(detail) }}
+{{ volume_tabs(detail, tab, tabs, panel, values, fields) }}
+{% endblock %}

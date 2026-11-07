@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "automation/_parts.html" import rule_facts, what_runs_do with context %}
+{% from "automation/_target_preview.html" import target_preview %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Run {{ view.rule.name }} - dockmin{% endblock %}
+{% set crumb_object = view.rule.name %}
+{% set crumb_object_href = route_path('automation_rule_detail', rule_id=view.rule.id) %}
+{% set crumb_page = "Run now" %}
+{% block content %}
+{% set rule = view.rule %}
+{% call page_header("Run automation now", "Review what runs. Nothing starts until you confirm.") %}
+<a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Back to the automation</a>
+{% endcall %}
+
+{{ rule_facts(view, parameters, environment_text) }}
+
+{% if blocked %}
+{{ error_state("The automation cannot run now", blocked) }}
+{% else %}
+{% if automation_paused %}
+<div class="panel panel--notice" role="note">
+  <p><strong>Automation is paused after a restore.</strong> Scheduled jobs are not running. An administrator can resume automation from the notice at the top of the page.</p>
+</div>
+{% endif %}
+{{ target_preview(target) }}
+
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What changes</h2>
+  <ul>
+    <li>The automation runs once, now, and acts on <strong>{{ view.target }}</strong>{% if environment_text %} on <strong>{{ environment_text|lower }}</strong>{% elif view.environment_name %} in <strong>{{ view.environment_name }}</strong>{% endif %} as a scheduled run does.</li>
+    {{ what_runs_do(view, parameters, target_kind, stack_kind) }}
+    <li>The schedule is not changed.</li>
+    {% if view.paused_until %}
+    <li>The automation is paused. This run goes ahead anyway, and the pause stays.</li>
+    {% endif %}
+  </ul>
+</section>
+
+<form class="form" method="post" action="{{ route_path('automation_rule_run_now', rule_id=rule.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_updated_at" value="{{ rule.updated_at }}">
+  <input type="hidden" name="expected_digest" value="{{ digest }}">
+  {{ confirm_targets([rule.name], "automation") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Run automation now</button>
+    <a class="btn" href="{{ route_path('automation_rule_detail', rule_id=rule.id) }}">Cancel</a>
+  </div>
+</form>
+{% if view.supports_dry_run and view.rule.subsystem == "container-updater" and dict(parameters).get("action") == "update" %}
+<form class="form" method="post" action="{{ route_path('automation_rule_dry_run', rule_id=rule.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <p class="field__help">
+    {%- if target_kind == "service" -%}
+    A dry run lists which services would be updated and which registry credentials would be renewed, and changes no service, credential or automation.
+    {%- elif target_kind == "stack" and stack_kind == "swarm" -%}
+    A dry run reports whether the stack would be redeployed, and changes no stack, service or automation.
+    {%- elif target_kind == "stack" and stack_kind is none -%}
+    A dry run lists what would be updated: images pulled and services recreated for a Compose stack, or whether a Swarm stack would be redeployed. It changes no stack, service or automation.
+    {%- elif target_kind == "stack" -%}
+    A dry run lists what would be pulled and recreated, and changes no stack or automation.
+    {%- else -%}
+    A dry run lists what would be pulled and recreated, and changes no container or automation.
+    {%- endif -%}
+  </p>
+  <div class="form__actions">
+    <button type="submit" class="btn">Dry run instead</button>
+  </div>
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

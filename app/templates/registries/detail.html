@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% from "registries/_access.html" import environments_section, grantees_section with context %}
+{% from "registries/_parts.html" import authentication_badge, ca_certificates, registry_test_result, tls_badge with context %}
+{% from "environments/_parts.html" import when with context %}
+{% block title %}{{ detail.name }} - dockmin{% endblock %}
+{% set crumb_object = detail.name %}
+{% block content %}
+{% set presentation = catalogue[detail.provider] %}
+{% call page_header(detail.name, presentation.label) %}
+<a class="btn" href="{{ route_path('registries') }}">Back to registries</a>
+<a class="btn" href="{{ route_path('registry_edit', credential_id=detail.id) }}">Edit</a>
+<a class="btn btn--danger-quiet" href="{{ route_path('registry_delete_confirm', credential_id=detail.id) }}">Delete</a>
+{% endcall %}
+
+{{ unplaced_errors(fields, ["environment", "grantee"]) }}
+
+{% if not detail.verify_tls %}
+<div class="panel panel--alert" role="note">
+  <p><strong>Certificate verification is off.</strong> The registry's certificate is not checked for this set.</p>
+</div>
+{% endif %}
+{% if detail.duplicates %}
+<div class="panel panel--notice" role="note">
+  <p>Another set uses the same address {% if detail.authentication_enabled %}and username{% else %}and also has no authentication{% endif %}:
+    {% for duplicate in detail.duplicates -%}
+    <a href="{{ route_path('registry_detail', credential_id=duplicate.id) }}">{{ duplicate.name }}</a>{% if not loop.last %}, {% endif %}
+    {%- endfor %}.</p>
+  <p>Both are kept. Each image is bound to the set that pulled it.</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="settings-heading">
+  <h2 id="settings-heading">Settings</h2>
+  <dl class="facts">
+    <dt>Provider</dt>
+    <dd>{{ presentation.label }}</dd>
+    <dt>Registry address</dt>
+    <dd class="mono">{{ detail.address }}</dd>
+    <dt>Authentication</dt>
+    <dd>{{ authentication_badge(detail.authentication_enabled) }}</dd>
+    {% if detail.authentication_enabled %}
+    <dt>{{ presentation.username_label }}</dt>
+    <dd class="mono">{{ detail.username }}</dd>
+    <dt>{{ presentation.secret_label }}</dt>
+    <dd>{% if detail.secret_stored %}Stored. It is never shown.{% else %}None stored{% endif %}</dd>
+    {% endif %}
+    <dt>Certificate verification</dt>
+    <dd>{% if detail.verify_tls %}{{ badge("On", "ok") }}{% else %}{{ tls_badge(false) }}{% endif %}</dd>
+    <dt>Default for this address</dt>
+    <dd>
+      <div class="cell-stack">
+        <span>{% if detail.is_default_for_host %}{{ badge("Default", "ok") }}{% else %}No{% endif %}</span>
+        <form class="inline-form" method="post" action="{{ route_path('registry_default', credential_id=detail.id) }}" data-submit-once>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="enabled" value="{{ 'no' if detail.is_default_for_host else 'yes' }}">
+          <button type="submit" class="btn btn--compact">{{ "Clear the default" if detail.is_default_for_host else "Make the default" }}</button>
+        </form>
+        <span class="cell-note">The default is preselected when an image from this address is pulled. It never decides a pull on its own.</span>
+      </div>
+    </dd>
+    <dt>Images bound</dt>
+    <dd>{{ detail.bound_images }}</dd>
+    {% for extra in presentation.extras %}
+    {% set value = detail.extras[extra.name] %}
+    <dt>{{ extra.label }}</dt>
+    <dd>
+      {%- if extra.input == "checkbox" %}{{ "Yes" if value else "No" }}
+      {%- elif value %}<span class="mono">{{ value }}</span>
+      {%- else %}Not set{% endif -%}
+    </dd>
+    {% endfor %}
+    <dt>Added</dt>
+    <dd>{{ when(detail.created_at, "") }}</dd>
+    <dt>Last changed</dt>
+    <dd>{{ when(detail.updated_at, "") }}</dd>
+  </dl>
+  {% if detail.ca_bundle %}
+  <h3>CA certificates</h3>
+  <p class="field__help">Added to the system trust store for this registry. Only these details are kept on view; the certificates are never shown.</p>
+  {{ ca_certificates(detail.ca_bundle) }}
+  {% endif %}
+</section>
+
+{% if detail.derived is not none %}
+{% set derived = detail.derived %}
+<section class="section" aria-labelledby="derived-heading">
+  <h2 id="derived-heading">Registry token</h2>
+  <p>The access key is exchanged for a short-lived registry token when one is needed. The token is never shown.</p>
+  <dl class="facts">
+    <dt>Cached token</dt>
+    <dd>
+      {%- if not derived.cached %}None yet. One is requested the next time the set is used.
+      {%- elif derived.expired %}{{ badge("Expired", "warn") }} It is refreshed the next time the set is used.
+      {%- else %}{{ badge("Valid", "ok") }}{% endif -%}
+    </dd>
+    {% if derived.cached %}
+    <dt>Expires</dt>
+    <dd>{{ when(derived.expires_at, "") }}</dd>
+    <dt>Last refreshed</dt>
+    <dd>{{ when(derived.refreshed_at, "Not recorded") }}</dd>
+    {% endif %}
+  </dl>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="test-heading">
+  <h2 id="test-heading">Connection</h2>
+  <div class="row-actions">
+    <form class="inline-form" method="post" action="{{ route_path('registry_test', credential_id=detail.id) }}"
+          hx-post="{{ route_path('registry_test', credential_id=detail.id) }}" hx-target="#registry-test" hx-swap="outerHTML"
+          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn btn--primary">Test connection</button>
+    </form>
+  </div>
+  <p class="field__help">A test connects from this server to the registry with the saved settings. It checks the name lookup, the connection, the certificate, the registry API and the credentials, and reports the stage that failed.</p>
+  {{ registry_test_result(report, test_error) }}
+</section>
+
+{{ environments_section(detail, fields.get("environment"), environment_name) }}
+{{ grantees_section(detail, fields.get("grantee"), grantee_kind, grantee_name) }}
+{% endblock %}

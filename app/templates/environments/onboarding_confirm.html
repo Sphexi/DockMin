@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Confirm adopting everything on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Confirm adopting everything" %}
+{% block content %}
+{% call page_header("Confirm adopting everything", environment.name) %}
+<a class="btn" href="{{ review_href }}">Back to the review</a>
+{% endcall %}
+
+<div class="panel" role="note">
+  <p>Nothing is pulled, redeployed or restarted. No container, service, network, volume, config or secret on the host is changed, and no image is downloaded. dockmin records stacks, image bindings and access settings, each as its own entry in the activity log.</p>
+</div>
+
+{% if plan.dropped %}
+<section class="section" aria-labelledby="dropped-heading">
+  <h2 id="dropped-heading">Left out: changed since the review</h2>
+  {% set items = [] %}
+  {% for item in plan.dropped %}{% set _ = items.append({"name": item.label, "detail": item.reason}) %}{% endfor %}
+  {{ confirm_targets(items, "target") }}
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="stacks-heading">
+  <h2 id="stacks-heading">Stacks to adopt as is</h2>
+  {% if plan.stacks %}
+  {% set items = [] %}
+  {% for item in plan.stacks %}{% set _ = items.append({"name": item.target.name, "detail": ("Swarm namespace" if item.target.kind == "swarm" else "Compose project")}) %}{% endfor %}
+  {{ confirm_targets(items, "stack") }}
+  {% else %}
+  <p>No stack is ticked.</p>
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="images-heading">
+  <h2 id="images-heading">Images to bind without a pull</h2>
+  {% if plan.images %}
+  {% set items = [] %}
+  {% for item in plan.images %}{% set _ = items.append({"name": item.target.reference, "detail": "to " ~ (item.set_name if item.set_name else "an anonymous pull")}) %}{% endfor %}
+  {{ confirm_targets(items, "image") }}
+  {% else %}
+  <p>No image is ticked.</p>
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="objects-heading">
+  <h2 id="objects-heading">Access settings to create</h2>
+  {% if plan.controls %}
+  {% set items = [] %}
+  {% for item in plan.controls %}
+  {% set parts = [] %}
+  {% if item.owner_user_id is not none %}{% set _ = parts.append("owner " ~ item.owner_name) %}{% endif %}
+  {% if item.team_id is not none %}{% set _ = parts.append("team " ~ item.team_name ~ " (" ~ item.level ~ ")") %}{% endif %}
+  {% set _ = items.append({"name": item.target.type ~ " " ~ item.target.name, "detail": parts|join(", ")}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "object") }}
+  {% else %}
+  <p>No object gets access settings.</p>
+  {% endif %}
+  {% if plan.left %}
+  <p>{{ plan.left }} ticked {{ "object stays" if plan.left == 1 else "objects stay" }} visible to administrators only: no owner or team applies.</p>
+  {% endif %}
+  {% if plan.stacks and not plan.ownership.assigns %}
+  <p>The stacks adopted here get no access settings either, so they stay visible to administrators only.</p>
+  {% endif %}
+</section>
+
+{% if plan.empty %}
+<p>The selection writes nothing.</p>
+<p><a class="btn" href="{{ review_href }}">Back to the review</a></p>
+{% else %}
+<form class="form" method="post" action="{{ apply_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_plan" value="{{ plan.digest }}">
+  <p>Each target is checked again as it is written, and skipped if it changed. The whole request is refused if the host changed since this page was built.</p>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Adopt everything listed</button>
+    <a class="btn" href="{{ review_href }}">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

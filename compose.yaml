@@ -1,0 +1,57 @@
+services:
+  dockmin:
+    image: ${DOCKMIN_IMAGE:-dockmin:local}
+    ports:
+      - "127.0.0.1:${DOCKMIN_PORT:-8000}:${DOCKMIN_PORT:-8000}"
+    environment:
+      DOCKMIN_HOST: 0.0.0.0
+      DOCKMIN_PORT: ${DOCKMIN_PORT:-8000}
+      DOCKMIN_DATA_DIR: /data
+      DOCKMIN_SESSION_LIFETIME: ${DOCKMIN_SESSION_LIFETIME:-43200}
+      DOCKMIN_COOKIE_SECURE: ${DOCKMIN_COOKIE_SECURE:-true}
+      DOCKMIN_LOG_LEVEL: ${DOCKMIN_LOG_LEVEL:-INFO}
+      DOCKMIN_DB_BUSY_TIMEOUT_MS: ${DOCKMIN_DB_BUSY_TIMEOUT_MS:-5000}
+      DOCKMIN_SNAPSHOT_INTERVAL_SECONDS: ${DOCKMIN_SNAPSHOT_INTERVAL_SECONDS:-60}
+      DOCKMIN_ACTIVITY_RETENTION_DAYS: ${DOCKMIN_ACTIVITY_RETENTION_DAYS:-}
+      DOCKMIN_MAX_CONCURRENT_REQUESTS: ${DOCKMIN_MAX_CONCURRENT_REQUESTS:-256}
+      DOCKMIN_PERMITTED_INTERNAL_NETWORKS: ${DOCKMIN_PERMITTED_INTERNAL_NETWORKS:-}
+      DOCKMIN_TRUSTED_PROXIES: ${DOCKMIN_TRUSTED_PROXIES:-}
+      DOCKMIN_TRUSTED_ORIGINS: ${DOCKMIN_TRUSTED_ORIGINS:-}
+      DOCKMIN_SECRET_KEY_FILE: /run/secrets/dockmin_secret_key
+      DOCKMIN_TLS_SELF_SIGNED: "false"
+    secrets:
+      - dockmin_secret_key
+    volumes:
+      - dockmin-data:/data
+      # Socket access is root on the host. Read-write: a read-only mount does not restrict the Docker API.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The non-root user needs membership in the socket's owning group.
+    group_add:
+      - "${DOCKER_GID:-999}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+          pids: 512
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    restart: unless-stopped
+
+secrets:
+  dockmin_secret_key:
+    file: ./secrets/dockmin_secret_key
+
+volumes:
+  dockmin-data:

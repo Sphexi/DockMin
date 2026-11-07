@@ -1,0 +1,25 @@
+{# A tile with an href is one link holding its label and count; a count of none shows a dash. #}
+{% macro resource_tiles(label) %}
+<ul class="resource-tiles" aria-label="{{ label }}">{{ caller() }}</ul>
+{% endmacro %}
+
+{% macro resource_tile(label, count, href=none) %}
+{% set tag = "a" if href else "div" %}
+<li class="resource-tiles__item">
+  <{{ tag }} class="resource-tile"{% if href %} href="{{ href }}"{% endif %}>
+    <span class="resource-tile__label">{{ label }}</span>
+    <span class="resource-tile__count">{{ "—" if count is none else count }}</span>
+  </{{ tag }}>
+</li>
+{% endmacro %}
+
+{# links is a sequence of (text, href) pairs, each its own link beside the tiles it breaks down. #}
+{% macro resource_links(label, links) %}
+{% if links %}
+<ul class="resource-links" aria-label="{{ label }}">
+  {% for link in links %}
+  <li><a class="btn btn--compact" href="{{ link|last }}">{{ link|first }}</a></li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endmacro %}

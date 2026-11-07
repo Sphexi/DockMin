@@ -1,0 +1,110 @@
+{% from "partials/badge.html" import badge %}
+{% from "swarm/stacks/_parts.html" import object_items %}
+
+{% set kind_labels = {"create": "Create and deploy", "redeploy": "Redeploy", "remove": "Remove"} %}
+
+{# Also rendered as each stream event, so it reads only the job and route names. #}
+{% macro swarm_job_progress(job) %}
+{% set state = choice(job.state, ["running", "succeeded", "failed", "cancelled"]) %}
+{% set tones = {"running": "info", "succeeded": "ok", "failed": "danger", "cancelled": "warn"} %}
+{% set progress = job.progress %}
+{% set outcome = job.outcome %}
+<div class="job" data-state="{{ state }}">
+  <div class="job__head">
+    {{ badge(state|capitalize, tones[state]) }}
+    <span>{{ kind_labels.get(job.kind, "Operation") }}</span>
+    <span class="mono cell-wrap">{{ job.stack }}</span>
+  </div>
+  {% if job.running %}
+  <progress class="progress-panel__bar" aria-label="Operation progress">Working</progress>
+  {% endif %}
+
+  {% if progress.resources %}
+  <h2 class="job__subheading">Objects</h2>
+  <div class="data-table__scroll" role="region" aria-label="Objects" tabindex="0">
+    <table class="table job__layers">
+      <caption class="visually-hidden">What was done with each object so far</caption>
+      <thead>
+        <tr><th scope="col">Object</th><th scope="col">Status</th><th scope="col">Detail</th></tr>
+      </thead>
+      <tbody>
+        {% for resource in progress.resources %}
+        {% set tone = "danger" if resource.is_error else {"working": "info", "done": "ok"}.get(resource.status, "neutral") %}
+        <tr>
+          <th scope="row" class="cell-wrap"><span class="cell-note">{{ resource.kind }}</span> <span class="mono">{{ resource.name }}</span></th>
+          <td>{{ badge(("Error" if resource.is_error else (resource.status|capitalize or "—")), tone) }}</td>
+          <td class="cell-wrap">{{ resource.text or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if progress.untracked_resources %}
+  <p class="field__help">and {{ progress.untracked_resources }} more {{ "object" if progress.untracked_resources == 1 else "objects" }} not listed.</p>
+  {% endif %}
+  {% elif job.running %}
+  <p class="job__summary">Working on the cluster.</p>
+  {% endif %}
+
+  {% if outcome %}
+  {% set result = outcome.result %}
+  <div class="job__outcome" role="{{ 'status' if outcome.ok else 'alert' }}">
+    <p><strong>{{ outcome.message }}</strong></p>
+    {% if outcome.ok %}
+    {% if result and result.created is defined %}
+    {% if result.interrupted %}
+    <p>The request was interrupted; this is the result that was recorded afterwards.</p>
+    {% endif %}
+    {% for heading, items in [("Created", result.created), ("Updated", result.updated), ("Removed", result.removed), ("Kept", result.kept), ("Unchanged", result.unchanged)] if items %}
+    <h2 class="job__subheading">{{ heading }}</h2>
+    {{ object_items(items) }}
+    {% endfor %}
+    {% if result.kept %}
+    <p class="field__help">Kept objects were not removed because a service still uses them.</p>
+    {% endif %}
+    {% if result.unpinned %}
+    <div class="panel panel--notice" role="note">
+      <p>The digest of these images could not be looked up, so they were deployed as written and nodes may run different images of the same tag:</p>
+      <ul>
+        {% for reference in result.unpinned %}
+        <li class="mono cell-wrap">{{ reference }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if result.volumes_kept %}
+    <p>Kept {{ result.volumes_kept }} {{ "volume" if result.volumes_kept == 1 else "volumes" }} with their data.</p>
+    {% endif %}
+    {% endif %}
+    {% else %}
+    {% if outcome.reason == "outcome_unknown" %}
+    <p>Check the stack's services before trying again. The cluster may have changed.</p>
+    {% elif job.kind == "remove" %}
+    <p>Objects already removed stay removed. Remove the stack again to take away the rest.</p>
+    {% else %}
+    <p>Objects already created or updated stay as they are, and nothing is rolled back. Fix the cause and redeploy the stack: a redeploy continues from where the cluster is now.</p>
+    {% endif %}
+    {% if result and result.created is defined %}
+    {% if result.failed_object %}
+    <h2 class="job__subheading">Failed on</h2>
+    {{ object_items([result.failed_object]) }}
+    {% endif %}
+    {% for heading, items in [("Created", result.created), ("Updated", result.updated), ("Removed", result.removed), ("Kept", result.kept), ("Unchanged", result.unchanged)] if items %}
+    <h2 class="job__subheading">{{ heading }}</h2>
+    {{ object_items(items) }}
+    {% endfor %}
+    {% endif %}
+    {% if outcome.progress %}
+    <p class="field__help">Last events: <span class="cell-wrap">{{ outcome.progress }}</span></p>
+    {% endif %}
+    {% endif %}
+  </div>
+  <p class="row-actions">
+    {% if not (outcome.ok and job.kind == "remove") %}
+    <a class="btn btn--primary" href="{{ route_path('environment_swarm_stack_detail', environment_id=job.environment_id, namespace=job.stack) }}">Open stack</a>
+    {% endif %}
+    <a class="btn" href="{{ route_path('environment_swarm_stack_list', environment_id=job.environment_id) }}">Back to Swarm stacks</a>
+  </p>
+  {% endif %}
+</div>
+{% endmacro %}

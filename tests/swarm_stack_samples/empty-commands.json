@@ -1,0 +1,61 @@
+{
+  "name": "shop",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "shop_default"
+    }
+  },
+  "services": {
+    "a": {
+      "command": [
+        "x y",
+        "z"
+      ],
+      "entrypoint": [
+        "sh",
+        "-c",
+        "echo 'a b' && sleep 1"
+      ],
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "b": {
+      "command": [],
+      "entrypoint": [],
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "c": {
+      "command": null,
+      "entrypoint": [],
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "d": {
+      "command": [
+        "foo",
+        "$$BAR",
+        "$$BAZ"
+      ],
+      "entrypoint": null,
+      "environment": {
+        "PAIR": "a=b",
+        "SP": "has space"
+      },
+      "image": "registry:2",
+      "labels": {
+        "a.b/c": "multi $$ dollar $$$$ two"
+      },
+      "networks": {
+        "default": null
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{# Import with context. live adds role="alert" for a banner inserted after load. #}
+{% from "partials/restore_banner.html" import restore_banner %}
+
+{% macro gate_banner(live=false) %}
+{% set gate = request.app.state.restore_gate if request.app.state.restore_gate is defined else none %}
+{% set is_admin = principal is not none and principal.is_administrator %}
+{% if gate is not none and gate.banner_message %}
+{% if gate.phase == "engaged" and gate.purpose == "rekey" %}
+{{ restore_banner(gate.banner_message, "warn", live=live) }}
+{% elif gate.phase == "engaged" %}
+{{ restore_banner(gate.banner_message, "warn", route_path('restore') if is_admin else none, "Open the restore", live=live) }}
+{% elif gate.phase == "swapping" %}
+{{ restore_banner(gate.banner_message, "warn", route_path('restore_progress', restore_id=gate.restore_id) if is_admin and gate.restore_id else none, "Follow the restore", live=live) }}
+{% elif gate.phase == "failed" %}
+{{ restore_banner(gate.banner_message, "danger", live=live) }}
+{% else %}
+{{ restore_banner(gate.banner_message, "warn", resume_action=route_path('restore_resume_automation') if is_admin else none, csrf_token=csrf_token, live=live) }}
+{% endif %}
+{% endif %}
+{% endmacro %}

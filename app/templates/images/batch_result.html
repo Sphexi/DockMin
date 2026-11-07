@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Remove images result - dockmin{% endblock %}
+{% set crumb_page = "Remove images result" %}
+{% block content %}
+{% set labels = {
+  "removed": ("Removed", "ok"),
+  "in_use": ("Kept: in use", "warn"),
+  "changed": ("Skipped: changed since you reviewed it", "warn"),
+  "busy": ("Skipped: busy", "warn"),
+  "gone": ("Already gone", "neutral"),
+  "unreachable": ("Unreachable", "danger"),
+  "failed": ("Failed", "danger"),
+} %}
+{% set total = result.items|length %}
+{% call page_header("Remove images result", environment.name) %}
+<a class="btn btn--primary" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+<div class="panel" role="status">
+  <p>{{ result.removed }} of {{ total }} {{ "image" if total == 1 else "images" }} removed. Each image was handled on its own.
+    {%- if result.removed %} Up to {{ result.reclaimed_up_to|filesize }} freed; layers shared with other images are not counted twice by Docker, so the real figure can be lower.{% endif %}</p>
+</div>
+
+<div class="data-table__scroll" role="region" aria-label="Results" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Result for each image</caption>
+    <thead>
+      <tr>
+        <th scope="col">Image</th>
+        <th scope="col">Result</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in result.items %}
+      {% set shown = labels[item.status] %}
+      <tr>
+        <th scope="row">
+          <div class="cell-stack">
+            <span class="cell-wrap mono">{{ item.label if item.label else item.short_id }}</span>
+            {% if item.label and item.label != item.short_id %}<span class="cell-note mono">{{ item.short_id }}</span>{% endif %}
+          </div>
+        </th>
+        <td>{{ badge(shown[0], shown[1]) }}</td>
+        <td>
+          {{ item.message }}
+          {% if item.status == "in_use" %}
+          <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_image_remove', environment_id=environment.id, image_id=item.image_id) }}?force=1" aria-label="Force remove image {{ item.label if item.label else item.short_id }}">Force remove...</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

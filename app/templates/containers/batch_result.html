@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "containers/_actions.html" import action_label with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ action_label(result.action) }} result - dockmin{% endblock %}
+{% set crumb_page = action_label(result.action) ~ " result" %}
+{% block content %}
+{% set total = result.items|length %}
+{% call page_header(action_label(result.action) ~ " result", result.succeeded ~ " of " ~ total ~ " " ~ ("container" if total == 1 else "containers") ~ " done. Each container was handled on its own.") %}
+<a class="btn btn--primary" href="{{ route_path('environment_container_list', environment_id=environment_id) }}">Back to containers</a>
+{% endcall %}
+
+<div class="data-table__scroll" role="region" aria-label="Results" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Result for each container</caption>
+    <thead>
+      <tr>
+        <th scope="col">Container</th>
+        <th scope="col">Result</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in result.items %}
+      <tr>
+        <th scope="row">
+          <div class="cell-stack">
+            <span class="cell-wrap mono">{{ item.name if item.name else item.short_id }}</span>
+            {% if item.name %}<span class="cell-note mono">{{ item.short_id }}</span>{% endif %}
+          </div>
+        </th>
+        <td>
+          {% if item.status == "done" %}{{ badge("Done", "ok") }}
+          {% elif item.status == "unchanged" %}{{ badge("No change", "neutral") }}
+          {% elif item.status == "not_found" %}{{ badge("Not found", "neutral") }}
+          {% elif item.status == "forbidden" %}{{ badge("Read only", "warn") }}
+          {% elif item.status == "busy" %}{{ badge("Busy", "warn") }}
+          {% elif item.status == "conflict" %}{{ badge("Conflict", "warn") }}
+          {% elif item.status == "protected" %}{{ badge("Protected", "info") }}
+          {% elif item.status == "unreachable" %}{{ badge("Unreachable", "danger") }}
+          {% else %}{{ badge("Failed", "danger") }}{% endif %}
+        </td>
+        <td>
+          {{ item.message }}
+          {% if item.holder is not none %}
+          <span class="cell-note">
+            A {{ item.holder.action }} started {{ item.holder.age_seconds }} {{ "second" if item.holder.age_seconds == 1 else "seconds" }} ago by {{ "you" if item.holder.held_by_you else item.holder.holder }} is still running.
+          </span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

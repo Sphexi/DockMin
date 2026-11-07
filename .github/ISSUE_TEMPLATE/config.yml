@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting
+    url: https://github.com/Sphexi/DockMin/wiki/Troubleshooting
+    about: Symptoms, causes and actions for common problems.
+  - name: Report a vulnerability
+    url: https://github.com/Sphexi/DockMin/security/advisories/new
+    about: Private vulnerability reporting. Do not open a public issue for a vulnerability.

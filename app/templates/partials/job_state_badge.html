@@ -1,0 +1,10 @@
+{% from "partials/badge.html" import badge %}
+
+{# The words name the state, so the tone never carries it alone; detail completes the label, for example "5 failures". #}
+{% macro job_state_badge(status, detail=none) -%}
+{% set labels = {"running": "Running", "scheduled": "Scheduled", "on_call": "Waits for calls", "paused": "Paused", "rule_disabled": "Automation disabled", "auto_disabled": "Disabled after", "subsystem_disabled": "Subsystem disabled", "unavailable": "Not available"} %}
+{% set tones = {"running": "info", "scheduled": "ok", "on_call": "neutral", "paused": "warn", "rule_disabled": "neutral", "auto_disabled": "danger", "subsystem_disabled": "neutral", "unavailable": "warn"} %}
+{% set base = labels.get(status, status) %}
+{% if status == "auto_disabled" and not detail %}{% set base = "Disabled after failures" %}{% endif %}
+{{ badge(base ~ (" " ~ detail if detail else ""), tones.get(status, "neutral")) }}
+{%- endmacro %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "jobs/_parts.html" import job_name, job_target with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Run {{ job_name(view) }} - dockmin{% endblock %}
+{% set crumb_object = job_name(view) %}
+{% set crumb_object_href = route_path('job_detail', job_id=view.summary.job.id) %}
+{% set crumb_page = "Run now" %}
+{% block content %}
+{% set job = view.summary.job %}
+{% call page_header("Run job now", "Review what runs. Nothing starts until you confirm.") %}
+<a class="btn" href="{{ route_path('job_detail', job_id=job.id) }}">Back to the job</a>
+{% endcall %}
+
+{{ job_target(view) }}
+
+{% if blocked %}
+{{ error_state("The job cannot run now", blocked) }}
+{% else %}
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What changes</h2>
+  <ul>
+    <li>The job runs once, now, and acts on {% if view.summary.environment_name %}<strong>{{ view.summary.environment_name }}</strong>{% else %}its subsystem's targets{% endif %} exactly as a scheduled run does.</li>
+    <li>The schedule is not changed.</li>
+    {% if view.paused_until %}
+    <li>The job is paused. This run goes ahead anyway, and the pause stays.</li>
+    {% endif %}
+  </ul>
+</section>
+
+<form class="form" method="post" action="{{ route_path('job_run', job_id=job.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_digest" value="{{ digest }}">
+  {{ confirm_targets([job_name(view)|trim], "job") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Run job now</button>
+    <a class="btn" href="{{ route_path('job_detail', job_id=job.id) }}">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,50 @@
+{% from "jobs/_parts.html" import outcome_badge, trigger_label with context %}
+
+{% macro run_region(view, row, detail, finished, region_href) %}
+{% set run = row.run %}
+<div id="run-region" class="run-region" aria-busy="{{ 'false' if finished else 'true' }}"
+     {%- if not finished %} hx-get="{{ region_href }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <p class="visually-hidden" role="status">{{ "Run finished." if finished else "Run in progress. This page updates itself." }}</p>
+  <section class="section" aria-labelledby="run-heading">
+    <h2 id="run-heading">Outcome</h2>
+    <dl class="facts">
+      <dt>Outcome</dt>
+      <dd>{{ outcome_badge(run.outcome) }}</dd>
+      {% if run.reason %}
+      <dt>Reason</dt>
+      <dd class="mono">{{ run.reason }}</dd>
+      {% endif %}
+      {% if run.message %}
+      <dt>Message</dt>
+      <dd>{{ run.message }}</dd>
+      {% endif %}
+      <dt>Trigger</dt>
+      <dd>{{ trigger_label(run.trigger) }}</dd>
+      {% if run.scheduled_for %}
+      <dt>Scheduled for</dt>
+      <dd><time datetime="{{ run.scheduled_for|timestamp_iso }}">{{ run.scheduled_for|timestamp(seconds=True) }}</time></dd>
+      {% endif %}
+      <dt>Started</dt>
+      <dd><time datetime="{{ run.started_at|timestamp_iso }}">{{ run.started_at|timestamp(seconds=True) }}</time></dd>
+      <dt>Finished</dt>
+      <dd>{% if run.finished_at %}<time datetime="{{ run.finished_at|timestamp_iso }}">{{ run.finished_at|timestamp(seconds=True) }}</time>{% else %}Still running{% endif %}</dd>
+      <dt>Took</dt>
+      <dd>{{ row.elapsed|duration }}</dd>
+    </dl>
+  </section>
+
+  <section class="section" aria-labelledby="detail-heading">
+    <h2 id="detail-heading">Detail</h2>
+    {% if detail %}
+    <dl class="facts">
+      {% for key, value in detail %}
+      <dt class="mono">{{ key }}</dt>
+      <dd>{% if value is sameas true %}Yes{% elif value is sameas false %}No{% elif value is none %}&mdash;{% else %}{{ value }}{% endif %}</dd>
+      {% endfor %}
+    </dl>
+    {% else %}
+    <p>This run recorded no detail.</p>
+    {% endif %}
+  </section>
+</div>
+{% endmacro %}

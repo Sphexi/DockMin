@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "partials/engine_detail.html" import engine_detail_block %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "networks/_form.html" import network_form with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Create network on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Create network" %}
+{% block content %}
+{% call page_header("Create network", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ list_href }}">Cancel</a>
+{% endcall %}
+
+{% if banner %}
+{{ error_state(banner.title, banner.message) }}
+{{ engine_detail_block(engine_detail) }}
+{% endif %}
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+{% if environment.is_local and is_admin %}
+<div class="panel panel--notice" role="note">
+  <p>This environment is the host dockmin runs on. Changes here affect that host.</p>
+</div>
+{% endif %}
+{{ network_form(offered, driver, values, errors, is_admin, option_keys, option_count, label_count, row_cap, post_href, list_href) }}
+{% endblock %}

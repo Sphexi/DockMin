@@ -1,0 +1,11 @@
+{# errors maps a field to its message; a single message is shown as one item. #}
+{% macro error_summary(errors) %}
+<div class="panel panel--alert error-summary" role="alert">
+  <h2>Check the form</h2>
+  <ul>
+    {% for message in (errors.values() if errors is mapping else [errors]) %}
+    <li>{{ message }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}

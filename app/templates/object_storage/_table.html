@@ -1,0 +1,22 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+
+{% macro targets_table(rows, columns, pager) %}
+{% call data_table("targets-table", "Object storage targets", columns, pager, empty_title="No object storage targets", empty_body="Add a target to send backup archives or the exported activity log to an S3-compatible bucket.", empty_action_label="Add target", empty_action_href=route_path('object_storage_target_new')) %}
+{% for row in rows %}
+<tr>
+  <th scope="row"><a href="{{ route_path('object_storage_target_detail', target_id=row.id) }}">{{ row.name }}</a></th>
+  <td class="mono cell-wrap">{{ row.endpoint_url }}</td>
+  <td class="mono cell-wrap">{{ row.bucket }}</td>
+  <td>{{ "Path-style" if row.use_path_style else "Virtual-host" }}</td>
+  <td class="is-numeric">{% if row.retention_count is none %}Keeps every archive{% else %}{{ row.retention_count }}{% endif %}</td>
+  <td>
+    <div class="cell-stack">
+      {% if row.endpoint_url.startswith("http://") %}{{ badge("Plain http", "warn") }}{% endif %}
+      {% if not row.verify_tls %}{{ badge("TLS not verified", "danger") }}{% endif %}
+    </div>
+  </td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

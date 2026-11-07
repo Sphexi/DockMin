@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "jobs/_parts.html" import job_name, job_state, outcome_badge with context %}
+{% from "jobs/_runs.html" import runs_table with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ job_name(view) }} - dockmin{% endblock %}
+{% set crumb_object = job_name(view) %}
+{% block content %}
+{% set summary = view.summary %}
+{% set job = summary.job %}
+{% call page_header(job_name(view), job.subsystem) %}
+<a class="btn" href="{{ route_path('jobs') }}">Back to jobs</a>
+{% endcall %}
+
+{% for text in errors.values() %}
+{{ error_state("The job was not changed", text) }}
+{% endfor %}
+
+{% if system_note %}
+<div class="panel panel--notice" role="note">
+  <p>{{ system_note.text }}{% if system_note.route_name %} <a href="{{ route_path(system_note.route_name) }}">{{ system_note.link_label }}</a>.{% endif %}</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="job-heading">
+  <h2 id="job-heading">Job</h2>
+  <dl class="facts">
+    <dt>State</dt>
+    <dd>{{ job_state(view) }}</dd>
+    <dt>Kind</dt>
+    <dd>{{ "System task" if job.rule_id is none else "Automation" }}</dd>
+    <dt>Subsystem</dt>
+    <dd class="mono">{{ job.subsystem }}</dd>
+    <dt>Automation</dt>
+    <dd>{% if summary.rule_name %}<a href="{{ route_path('automation_rule_detail', rule_id=job.rule_id) }}">{{ summary.rule_name }}</a>{% else %}None. This job belongs to the subsystem.{% endif %}</dd>
+    <dt>Environment</dt>
+    <dd>{% if summary.environment_name %}<a href="{{ route_path('environment_detail', environment_id=summary.environment_id) }}">{{ summary.environment_name }}</a>{% else %}All environments{% endif %}</dd>
+    <dt>Schedule</dt>
+    <dd>{{ view.schedule }}</dd>
+    <dt>Next run</dt>
+    <dd>{% if job.schedule_kind == "webhook" %}{{ "Pending" if job.next_run_at else "When called" }}{% elif job.next_run_at %}<time datetime="{{ job.next_run_at|timestamp_iso }}">{{ job.next_run_at|timestamp }}</time>{% else %}&mdash;{% endif %}</dd>
+    <dt>Last run</dt>
+    <dd>
+      {% if view.last_run_at %}
+      {% if view.last_run_id %}<a href="{{ route_path('job_run_detail', run_id=view.last_run_id) }}">{{ outcome_badge(view.last_run_outcome) }}</a>{% else %}{{ outcome_badge(view.last_run_outcome) }}{% endif %}
+      <time datetime="{{ view.last_run_at|timestamp_iso }}">{{ view.last_run_at|timestamp }}</time>
+      {% else %}Never run{% endif %}
+    </dd>
+    {% if view.paused_until %}
+    <dt>Paused until</dt>
+    <dd><time datetime="{{ view.paused_until|timestamp_iso }}">{{ view.paused_until|timestamp }}</time></dd>
+    {% endif %}
+    <dt>If a run is still going when the next is due</dt>
+    <dd>{{ policy_label or job.overrun_policy }}</dd>
+    <dt>Missed runs</dt>
+    <dd>{% if job.catch_up %}Run once as soon as the application is running again{% else %}Skipped{% endif %}</dd>
+    <dt>Consecutive failures</dt>
+    <dd>{{ job.consecutive_failures }}{% if job.failure_threshold %} (disabled at {{ job.failure_threshold }}){% endif %}</dd>
+    <dt>Subsystem switch</dt>
+    <dd>{% if view.subsystem_enabled %}On{% else %}Off. <a href="{{ route_path('job_subsystems') }}">Subsystems</a>{% endif %}</dd>
+    {% if view.rule_enabled is not none %}
+    <dt>Automation status</dt>
+    <dd>{% if view.rule_enabled %}Enabled{% else %}Disabled{% endif %}</dd>
+    {% endif %}
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="actions-heading">
+  <h2 id="actions-heading">Actions</h2>
+  <div class="job-actions">
+  {% if not job.is_enabled %}
+  <div class="panel panel--notice" role="note">
+    <p>This job was disabled after {{ job.consecutive_failures }} {{ "failure" if job.consecutive_failures == 1 else "failures" }} in a row. It does not run until it is enabled.</p>
+    <p><a class="btn" href="{{ route_path('job_enable_confirm', job_id=job.id) }}">Enable job</a></p>
+  </div>
+  {% endif %}
+
+  <div class="row-actions">
+    {% if blocked %}
+    <p class="field__help">Cannot run now. {{ blocked }}</p>
+    {% else %}
+    <a class="btn btn--primary" href="{{ route_path('job_run_confirm', job_id=job.id) }}">Run now</a>
+    {% endif %}
+    {% if dry_run_offered %}
+    <form class="inline-form" method="post" action="{{ route_path('job_run', job_id=job.id) }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="dry_run" value="yes">
+      <button type="submit" class="btn">Dry run</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if view.paused_until %}
+  <form class="form" method="post" action="{{ route_path('job_resume', job_id=job.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p>{% if summary.rule_name %}The automation is paused, so this job is.{% else %}This job is paused.{% endif %}</p>
+    <div class="form__actions">
+      <button type="submit" class="btn">Resume</button>
+    </div>
+  </form>
+  {% elif job.is_enabled and view.available %}
+  <form class="form" method="post" action="{{ route_path('job_pause', job_id=job.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field"{% if errors.get('duration') %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="field-duration">Pause for</label>
+        <p class="field__help" id="field-duration-help">{% if summary.rule_name %}This pauses the automation. {% endif %}The job starts no new runs until the time is up. A run already going finishes.</p>
+      </div>
+      <select class="field__input" id="field-duration" name="duration" aria-describedby="field-duration-help">
+        {% for value, label in durations %}
+        <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form__actions">
+      <button type="submit" class="btn">Pause job</button>
+    </div>
+  </form>
+  {% endif %}
+  </div>
+</section>
+
+<section class="section" aria-labelledby="runs-heading">
+  <h2 id="runs-heading">Run history</h2>
+  {{ runs_table(rows, columns, pager) }}
+</section>
+{% endblock %}

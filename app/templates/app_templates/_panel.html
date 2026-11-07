@@ -1,0 +1,23 @@
+{% macro template_panel(panel, intro) %}
+<div class="panel panel--notice" role="note">
+  {% if panel.title %}
+  <h2>From the template {% if panel.href %}<a href="{{ panel.href }}">{{ panel.title }}</a>{% else %}{{ panel.title }}{% endif %}</h2>
+  <p class="field__help">Catalogue {{ panel.catalogue }}. {{ intro }}</p>
+  {% endif %}
+  {% if panel.notices %}
+  <ul>
+    {% for notice in panel.notices %}
+    <li>{{ notice }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if panel.hints %}
+  <p class="field__help">Values the template offers for an environment variable:</p>
+  <ul>
+    {% for hint in panel.hints %}
+    <li class="mono">{{ hint }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endmacro %}

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/key_value_rows.html" import key_value_rows with context %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Create {{ kind }} on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Create " ~ kind %}
+{% block content %}
+{% set field = "content" if kind == "config" else "value" %}
+{% set content_error = errors.get(field) %}
+{% call page_header("Create " ~ kind, environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ list_href }}">Cancel</a>
+{% endcall %}
+
+{% if banner %}
+{{ error_state(banner.title, banner.message) }}
+{% endif %}
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+{% if kind == "secret" %}
+<div class="panel panel--notice" role="note">
+  <h2>The value is write-only</h2>
+  <p>Swarm stores the value encrypted and hands it to the tasks that use the secret. dockmin does not keep it, and neither dockmin nor Docker shows it again. If a create is refused the value is not put back in the form: enter it again.</p>
+</div>
+{% else %}
+<p class="field__help">A config is not secret: its content is shown to everyone who can read it. A config cannot be changed after it is created; create a new one to replace it.</p>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ submit_href }}" enctype="multipart/form-data" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ form_field("name", "Name", value=values.get("name", ""), error=errors.get("name"), help="Letters, digits, hyphens, underscores and periods, starting and ending with a letter or digit. It cannot be changed.", required=true) }}
+
+  <div class="field field--wide"{% if content_error %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-{{ field }}">{{ "Content" if kind == "config" else "Value" }} <span class="field__required" aria-hidden="true">*</span></label>
+      <p class="field__help" id="field-{{ field }}-help">{% if kind == "config" %}Type or paste the content, or choose a file below.{% else %}Type or paste the value, or choose a file below. Some browsers show the value as you type.{% endif %} At most {{ max_kib }} KiB.</p>
+    </div>
+    {% if kind == "secret" %}
+    <textarea class="field__input field__input--code field__input--secret" id="field-{{ field }}" name="{{ field }}" rows="6"
+              spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"
+              {%- if content_error %} aria-invalid="true"{% endif %}
+              aria-describedby="field-{{ field }}-help{% if reenter %} field-{{ field }}-reenter{% endif %}{% if content_error %} field-{{ field }}-error{% endif %}"></textarea>
+    {% if reenter %}
+    <p class="field__help" id="field-{{ field }}-reenter" role="status"><strong>Enter the value again.</strong> It is not put back in the form.</p>
+    {% endif %}
+    {% else %}
+    <textarea class="field__input field__input--code" id="field-{{ field }}" name="{{ field }}" rows="12"
+              spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"
+              {%- if content_error %} aria-invalid="true"{% endif %}
+              aria-describedby="field-{{ field }}-help{% if content_error %} field-{{ field }}-error{% endif %}">
+{{ values.get(field, "") }}</textarea>
+    {% endif %}
+    <label class="field__label field__label--secondary" for="field-upload">Or choose a file</label>
+    <input class="field__input" type="file" id="field-upload" name="upload">
+    {% if content_error %}
+    <p class="field__error" id="field-{{ field }}-error">{{ content_error }}</p>
+    {% endif %}
+  </div>
+
+  <h2 class="create-section__title">Labels</h2>
+  {{ key_value_rows("label", "Labels", "Label", "Labels are kept with the " ~ kind ~ ". The stack membership labels cannot be set here.", label_count, row_cap, values, errors, submit_href) }}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Create {{ kind }}</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

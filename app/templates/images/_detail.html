@@ -1,0 +1,220 @@
+{% from "environments/_parts.html" import kind_badge, when with context %}
+{% from "images/_parts.html" import binding_state, update_form, update_results, using_containers with context %}
+{% from "partials/empty_state.html" import empty_state %}
+
+{% macro image_summary(detail) %}
+{% set tags = detail.references|selectattr("kind", "equalto", "tag")|list %}
+<section id="image-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span class="mono">{{ detail.short_id }}</span>
+      <span class="cell-note">{{ detail.size|filesize }} on {{ detail.environment_name }} {{ kind_badge(true) if detail.is_local else "" }}</span>
+    </div>
+    <div class="row-actions">
+      {% if detail.can_create and tags %}
+      <a class="btn btn--compact" href="{{ route_path('environment_image_pull', environment_id=detail.environment_id) }}?{{ {'reference': tags[0].text}|urlencode }}">Pull again</a>
+      {% endif %}
+      {% if principal.is_administrator %}
+      <a class="btn btn--compact" href="{{ route_path('environment_image_tag', environment_id=detail.environment_id, image_id=detail.id) }}">Tag</a>
+      {% endif %}
+      {% if detail.can_create and tags %}
+      <a class="btn btn--compact" href="{{ route_path('environment_image_push', environment_id=detail.environment_id, image_id=detail.id) }}">Push</a>
+      {% endif %}
+      {% if detail.can_remove %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_image_remove', environment_id=detail.environment_id, image_id=detail.id) }}">Remove</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro overview_tab(detail, checkable) %}
+<h2 id="tab-heading">Overview</h2>
+<dl class="facts">
+  <dt>ID</dt>
+  <dd class="mono cell-wrap">{{ detail.id }}</dd>
+  <dt>Size</dt>
+  <dd>{{ detail.size|filesize }}</dd>
+  <dt>Created</dt>
+  <dd>{{ when(detail.created_at, "—") }}</dd>
+  <dt>Platform</dt>
+  <dd class="mono">{% if detail.os or detail.architecture %}{{ detail.os or "—" }}/{{ detail.architecture or "—" }}{% else %}—{% endif %}</dd>
+  <dt>Used by</dt>
+  <dd>{{ using_containers(detail.containers, detail.containers_hidden, detail.containers_total, detail.environment_id) }}</dd>
+</dl>
+
+<h3>References</h3>
+{% if detail.references %}
+<div class="data-table__scroll" role="region" aria-label="References" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">References of this image and their bindings</caption>
+    <thead>
+      <tr><th scope="col">Reference</th><th scope="col">Binding</th><th scope="col">Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for reference in detail.references %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ reference.text }}{% if reference.kind == "digest" %} <span class="chip">digest</span>{% endif %}</th>
+        <td><div class="cell-stack">{{ binding_state(reference.binding, detail.environment_id, reference.kind == "digest") }}</div></td>
+        <td>
+          <div class="row-actions">
+            {% if detail.can_create and reference.kind == "tag" %}
+            <a class="btn btn--compact" href="{{ route_path('environment_image_pull', environment_id=detail.environment_id) }}?{{ {'reference': reference.text}|urlencode }}" aria-label="Pull again: {{ reference.text }}">Pull again</a>
+            {% endif %}
+            {% if detail.can_remove and reference.kind == "tag" %}
+            <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_image_untag', environment_id=detail.environment_id, image_id=detail.id) }}?{{ {'reference': reference.text}|urlencode }}" aria-label="Untag {{ reference.text }}">Untag</a>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if detail.references_hidden %}
+<p class="field__help">and {{ detail.references_hidden }} more references.</p>
+{% endif %}
+{% else %}
+<p>This image has no reference. It is dangling.</p>
+{% endif %}
+
+<h3>Updates</h3>
+{% if checkable %}
+<div class="toolbar">
+  {{ update_form(checkable, route_path("environment_image_updates", environment_id=detail.environment_id), back=detail.id) }}
+  <p class="field__help">Compares the bound tags of this image with their registries.</p>
+</div>
+{% else %}
+<p class="field__help">Only bound tags can be checked. Pull a tag to bind it to a credential set.</p>
+{% endif %}
+{{ update_results(none) }}
+{% endmacro %}
+
+{% macro configuration_tab(detail) %}
+<h2 id="tab-heading">Configuration</h2>
+<dl class="facts">
+  <dt>Entrypoint</dt>
+  <dd class="mono cell-wrap">{% if detail.entrypoint is none %}<span class="cell-note">Not shown for your role</span>{% else %}{{ detail.entrypoint or "—" }}{% endif %}</dd>
+  <dt>Command</dt>
+  <dd class="mono cell-wrap">{% if detail.command is none %}<span class="cell-note">Not shown for your role</span>{% else %}{{ detail.command or "—" }}{% endif %}</dd>
+  <dt>Working directory</dt>
+  <dd class="mono">{{ detail.working_dir or "—" }}</dd>
+  <dt>User</dt>
+  <dd class="mono">{{ detail.user or "—" }}</dd>
+  <dt>Exposed ports</dt>
+  <dd>
+    {% if detail.exposed_ports %}
+    <ul class="chip-list mono">
+      {% for port in detail.exposed_ports %}<li>{{ port }}</li>{% endfor %}
+    </ul>
+    {% else %}None{% endif %}
+  </dd>
+</dl>
+
+<h3>Environment variables</h3>
+{% if detail.variables is none %}
+<p class="field__help">Not shown for your role.</p>
+{% elif detail.variables %}
+<div class="data-table__scroll" role="region" aria-label="Environment variables" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Environment variables set by the image</caption>
+    <thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for variable in detail.variables %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ variable.key }}</th>
+        <td class="cell-wrap mono">{% if variable.redacted %}<span class="chip">Redacted</span>{% else %}{{ variable.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="field__help">Values of variables whose names look like secrets are redacted.</p>
+{% else %}
+<p>The image sets no environment variables.</p>
+{% endif %}
+
+<h3>Labels</h3>
+{% if detail.labels %}
+<div class="data-table__scroll" role="region" aria-label="Labels" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Labels set by the image</caption>
+    <thead><tr><th scope="col">Key</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for label in detail.labels %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ label.key }}</th>
+        <td class="cell-wrap mono">{% if label.redacted %}<span class="chip">Redacted</span>{% else %}{{ label.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if not principal.is_administrator %}
+<p class="field__help">Values of keys that look like secrets are redacted for your role.</p>
+{% endif %}
+{% else %}
+<p>The image has no labels.</p>
+{% endif %}
+{% if detail.truncated %}
+<p class="field__help">Only the first entries are shown.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro history_tab(detail, history) %}
+<h2 id="tab-heading">History</h2>
+{% if history %}
+<div class="data-table__scroll" role="region" aria-label="Layers" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Layers of this image, newest first</caption>
+    <thead>
+      <tr>
+        <th scope="col">Layer</th>
+        <th scope="col">Created</th>
+        <th scope="col">Created by</th>
+        <th scope="col" class="is-numeric">Size</th>
+        <th scope="col">Tags</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for layer in history %}
+      <tr>
+        <th scope="row" class="mono">{{ layer.layer or "—" }}</th>
+        <td>{{ when(layer.created_at, "—") }}</td>
+        <td class="cell-wrap mono">{% if layer.created_by is none %}<span class="cell-note">Not shown for your role</span>{% else %}{{ layer.created_by or "—" }}{% endif %}</td>
+        <td class="is-numeric">{{ layer.size|filesize }}</td>
+        <td class="cell-wrap mono">{{ layer.tags|join(", ") if layer.tags else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+{{ empty_state("No history", "The image reports no layers.") }}
+{% endif %}
+{% endmacro %}
+
+{% macro image_tabs(detail, tab, tabs, history, checkable) %}
+{% set detail_href = route_path("environment_image_detail", environment_id=detail.environment_id, image_id=detail.id) %}
+{% set labels = {"overview": "Overview", "configuration": "Configuration", "history": "History"} %}
+<div id="image-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Image sections">
+    <ul class="tabs__list">
+      {% for key in tabs %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#image-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" aria-labelledby="tab-heading">
+    {% if tab == "overview" %}{{ overview_tab(detail, checkable) }}
+    {% elif tab == "configuration" %}{{ configuration_tab(detail) }}
+    {% elif tab == "history" %}{{ history_tab(detail, history) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

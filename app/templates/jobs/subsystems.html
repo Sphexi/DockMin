@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "jobs/_subsystems.html" import subsystems_table with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Subsystems - dockmin{% endblock %}
+{% set crumb_page = "Subsystems" %}
+{% block content %}
+{% call page_header("Subsystems", "Switching a subsystem off stops every job it owns. Nothing is deleted.") %}
+<a class="btn" href="{{ route_path('jobs') }}">Back to jobs</a>
+{% endcall %}
+
+
+{{ subsystems_table(subsystems) }}
+{% endblock %}

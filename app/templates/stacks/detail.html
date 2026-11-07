@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_detail.html" import stack_summary, stack_tabs with context %}
+{% from "stacks/_parts.html" import busy_note, compose_banner with context %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}Stack {{ detail.row.name }} - dockmin{% endblock %}
+{% set crumb_object = detail.row.name %}
+{% block content %}
+{% call page_header(detail.row.name, "Stack on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to stacks", origin) }}
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{{ busy_note(busy_text) }}
+{{ stack_summary(detail) }}
+{{ stack_tabs(detail, tab, tab_keys, panel, values, fields, automation, activity_log, logs) }}
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_form.html" import stack_form with context %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Adopt {{ stack_name }} on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Adopt " ~ stack_name %}
+{% block content %}
+{% call page_header("Adopt project", stack_name ~ " on " ~ environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ cancel_href }}">Cancel</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if form.failure %}
+{{ error_state(form.failure.title, form.failure.message) }}
+{% endif %}
+{% if form.errors %}
+{{ error_summary(form.errors) }}
+{% endif %}
+<section class="panel" aria-labelledby="project-heading">
+  <h2 id="project-heading">Compose project on the host</h2>
+  <dl class="facts">
+    <dt>Project</dt>
+    <dd class="mono cell-wrap">{{ project.name }}</dd>
+    <dt>Containers</dt>
+    <dd>{{ project.running }} of {{ project.containers }} running</dd>
+    <dt>Services</dt>
+    <dd class="mono cell-wrap">{{ project.services|join(", ") or "—" }}</dd>
+    <dt>Networks</dt>
+    <dd>{{ project.networks }}</dd>
+    <dt>Volumes</dt>
+    <dd>{{ project.volumes }}</dd>
+  </dl>
+</section>
+<section class="panel" aria-labelledby="read-heading">
+  <h2 id="read-heading">Read from host</h2>
+  <p>dockmin reads the project's own files from the host through a helper container that is created and removed, never started. When the files are gone or cannot be read, it writes a file from the project's running containers instead. You review the result before anything is stored, and adopting it as is changes nothing on the host.</p>
+  <form class="form" method="post" action="{{ read_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Read from host</button>
+    </div>
+  </form>
+</section>
+<section class="panel" aria-labelledby="paste-heading">
+  <h2 id="paste-heading">Paste the file</h2>
+  <p>Paste the file the project was started from, with the variables it needs. Adopting stores them and puts the stack under your control; it changes nothing on the host unless you tick Deploy now.</p>
+</section>
+{{ stack_form(form, kind, stack_name, post_href, validate_href, cancel_href, compose, variable_cap, catalogue, project=project, file_cap=file_cap) }}
+{% endblock %}

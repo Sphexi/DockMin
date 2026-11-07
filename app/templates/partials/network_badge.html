@@ -1,0 +1,6 @@
+{% from "partials/badge.html" import badge %}
+
+{# The kind picks the tone; it never reaches a class name as text. #}
+{% macro network_badge(label, kind="predefined") -%}
+{{ badge(label, {"predefined": "neutral", "system": "info"}.get(kind, "neutral")) }}
+{%- endmacro %}

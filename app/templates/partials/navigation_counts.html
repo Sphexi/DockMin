@@ -1,0 +1,31 @@
+{% from "partials/icon.html" import icon with context %}
+
+{% macro nav_link(key, icon_name, label, href, active, count=none) -%}
+<li><a class="nav__link" href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}>{{ icon(icon_name) }}<span>{{ label }}</span>{% if count is not none %}<span class="nav__count">{{ count }}</span>{% endif %}</a></li>
+{%- endmacro %}
+
+{% macro navigation_counts(environment, active, pending=false) -%}
+{% set e = environment.id %}
+{% set counts = environment.counts %}
+{% set is_admin = principal is defined and principal.is_administrator %}
+<ul class="nav__list"
+    {%- if is_admin %} hx-get="{{ route_path('environment_navigation_counts', environment_id=e) }}?{{ {'active': active}|urlencode }}" hx-trigger="counts-changed from:body{% if pending %}, load{% endif %}" hx-swap="outerHTML" hx-sync="this:replace"{% endif %}>
+  {{ nav_link("dashboard", "layout-dashboard", "Dashboard", route_path("environment_detail", environment_id=e), active) }}
+  {{ nav_link("containers", "box", "Containers", route_path("environment_container_list", environment_id=e), active, counts.containers if counts else none) }}
+  {{ nav_link("images", "layers", "Images", route_path("environment_image_list", environment_id=e), active, counts.images if counts else none) }}
+  {{ nav_link("volumes", "hard-drive", "Volumes", route_path("environment_volume_list", environment_id=e), active, counts.volumes if counts else none) }}
+  {{ nav_link("networks", "network", "Networks", route_path("environment_network_list", environment_id=e), active, counts.networks if counts else none) }}
+  {{ nav_link("stacks", "boxes", "Stacks", route_path("environment_stack_list", environment_id=e), active, counts.stacks if counts else none) }}
+  {% if environment.is_swarm %}
+  <li><span class="nav__divider" id="nav-swarm">Swarm</span></li>
+  {{ nav_link("swarm", "share-2", "Overview", route_path("environment_swarm_overview", environment_id=e), active) }}
+  {{ nav_link("services", "workflow", "Services", route_path("environment_swarm_service_list", environment_id=e), active, counts.services if counts else none) }}
+  {% if is_admin %}
+  {{ nav_link("nodes", "server", "Nodes", route_path("environment_swarm_node_list", environment_id=e), active, counts.nodes if counts else none) }}
+  {% endif %}
+  {{ nav_link("configs", "file-cog", "Configs", route_path("environment_swarm_config_list", environment_id=e), active) }}
+  {{ nav_link("secrets", "lock", "Secrets", route_path("environment_swarm_secret_list", environment_id=e), active) }}
+  {{ nav_link("swarm-stacks", "boxes", "Swarm stacks", route_path("environment_swarm_stack_list", environment_id=e), active) }}
+  {% endif %}
+</ul>
+{%- endmacro %}

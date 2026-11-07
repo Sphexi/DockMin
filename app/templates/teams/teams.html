@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% from "teams/_tables.html" import teams_table with context %}
+{% block title %}Teams - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Teams", "Groups of users that access can be granted to together.") %}
+{% endcall %}
+
+{% call list_bar(list_count(total|default(none), "team")) %}
+{% if can_create %}
+<a class="btn btn--primary" href="{{ route_path('team_new') }}">New team</a>
+{% endif %}
+{% endcall %}
+{{ teams_table(rows, columns, pager, can_create) }}
+{% endblock %}

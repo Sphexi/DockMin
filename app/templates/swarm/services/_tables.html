@@ -1,0 +1,74 @@
+{# Import with context: rows link to routes. #}
+{% from "environments/_parts.html" import age with context %}
+{% from "partials/ports.html" import port_list %}
+{% from "swarm/_parts.html" import health_badge, replicas_text, stack_link with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+{% from "partials/error_state.html" import error_state %}
+
+{% macro service_row(row) %}
+<tr id="service-{{ row.id }}">
+  <th scope="row">
+    <div class="cell-stack">
+      <a href="{{ route_path('environment_swarm_service_detail', environment_id=row.environment_id, service_id=row.id) }}">{{ row.name }}</a>
+      <span class="cell-note mono">{{ row.short_id }}</span>
+    </div>
+  </th>
+  <td>{{ row.mode|capitalize }}</td>
+  <td>
+    <div class="cell-stack">
+      <span>{{ health_badge(row.running, row.desired) }}</span>
+      <span class="cell-note">{{ replicas_text(row.running, row.desired, row.replicas) }}</span>
+    </div>
+  </td>
+  <td class="cell-wrap mono">{{ row.image_display }}</td>
+  <td>{{ stack_link(row.stack, row.environment_id) }}</td>
+  <td>{{ port_list(row.ports) }}</td>
+  <td>
+    <div class="cell-stack">
+      <span>{{ age(row.updated_at, "—") }}</span>
+      {% if row.update_state and row.update_state != "completed" %}<span class="cell-note">{{ badge(row.update_state|replace("_", " ")|capitalize, "info") }}</span>{% endif %}
+    </div>
+  </td>
+  <td>
+    <div class="row-actions">
+      <a class="btn btn--compact" href="{{ route_path('environment_swarm_service_detail', environment_id=row.environment_id, service_id=row.id) }}" aria-label="Details of service {{ row.name }}">Details</a>
+      {% if row.can_write %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_service_remove', environment_id=row.environment_id, service_id=row.id) }}" aria-label="Remove service {{ row.name }}">Remove</a>
+      {% endif %}
+    </div>
+  </td>
+</tr>
+{% endmacro %}
+
+{% macro services_table(rows, columns, pager, filtered, environment_id=none, can_create=false) %}
+{% set empty_body = "Change the filters, or clear them to see every service." if filtered else ("This cluster has no services." if principal.is_administrator else "You cannot see any services on this cluster. Ask an administrator for access to more services.") %}
+{% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
+{% call data_table("services-table", "Services", columns, pager, empty_title=("No matching services" if filtered else "No services"), empty_body=empty_body, empty_action_label=("Create service" if show_create else none), empty_action_href=(route_path("environment_swarm_service_new", environment_id=environment_id) if show_create else none), filtered=filtered) %}
+{% for row in rows %}
+{{ service_row(row) }}
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{# Outside the swapped table, so a table response carries it out of band. #}
+{% macro results_summary(total, visible, filtered, oob=false) %}
+<p id="results-summary" class="results-summary" role="status"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
+  {%- if total is not none %}{{ total }} {{ "service" if total == 1 else "services" }}{% if filtered %} {{ "matches" if total == 1 else "match" }} these filters, of {{ visible }} you can see{% endif %}.{% endif -%}
+</p>
+{% endmacro %}
+
+{% macro services_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false) %}
+{% if oob %}
+{{ results_summary(none if (errors or failure) else total, visible, filtered, true) }}
+{% endif %}
+{% if errors %}
+{% for message in errors %}
+{{ error_state("Check the filters", message) }}
+{% endfor %}
+{% elif failure %}
+{{ error_state("Services cannot be listed", failure, retry_href=retry_href, region_id="services-results", swap="innerHTML") }}
+{% else %}
+{{ services_table(rows, columns, pager, filtered, environment_id, can_create) }}
+{% endif %}
+{% endmacro %}

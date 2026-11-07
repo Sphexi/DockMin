@@ -1,0 +1,123 @@
+{# Import with context: rows link to routes. #}
+{% from "containers/_actions.html" import action_buttons, action_label with context %}
+{% from "environments/_parts.html" import age with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/data_table.html" import data_table %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/ports.html" import port_list %}
+
+{# An image id names no reference, so it stays text. #}
+{% macro image_link(environment_id, image) -%}
+{%- if image and not image.startswith("sha256:") and image|length <= 128 -%}
+<a href="{{ route_path('environment_image_list', environment_id=environment_id) }}?{{ {'q': image}|urlencode }}">{{ image }}</a>
+{%- else -%}{{ image }}{%- endif -%}
+{%- endmacro %}
+
+{% macro ports_cell(row) %}
+{{ port_list(row.ports) }}
+{% if row.ports and row.ports_hidden %}
+<span class="cell-note">and {{ row.ports_hidden }} more</span>
+{% endif %}
+{% endmacro %}
+
+{% macro container_row(row, writable, may_create=false) %}
+{% set detail_href = route_path("environment_container_detail", environment_id=row.environment_id, container_id=row.id) %}
+<tr id="container-{{ row.id }}">
+  {% if writable %}
+  <td>
+    {% if row.can_write and row.is_self %}
+    <input class="choice__input" type="checkbox" disabled aria-label="{{ row.name }} is this dockmin instance and cannot be selected">
+    {% elif row.can_write %}
+    <input class="choice__input" type="checkbox" form="batch-form" name="container" value="{{ row.id }}" aria-label="Select {{ row.name }}">
+    {% endif %}
+  </td>
+  {% endif %}
+  <th scope="row">
+    <div class="cell-stack cell-stack--inline">
+      <a href="{{ detail_href }}">{{ row.name }}</a>
+      <span class="cell-note mono">{{ row.short_id }}</span>
+      {% if row.is_self %}{{ badge("This dockmin instance", "info") }}{% endif %}
+    </div>
+  </th>
+  <td><div class="cell-stack">{{ container_state_badge(row.state, row.health) }}</div></td>
+  <td class="cell-wrap mono">{{ image_link(row.environment_id, row.image) }}</td>
+  <td>
+    {% if row.stack %}
+    <a href="{{ route_path('environment_container_list', environment_id=row.environment_id) }}?stack={{ row.stack|urlencode }}">{{ row.stack }}</a>
+    {% elif not row.labels_truncated %}
+    <span class="cell-note">None</span>
+    {% endif %}
+    {% if row.labels_truncated %}
+    <span class="cell-note">Labels truncated</span>
+    {% endif %}
+  </td>
+  <td>{{ age(row.created_at, "") }}</td>
+  <td>{{ ports_cell(row) }}</td>
+  {% if writable or may_create %}
+  <td>
+    {% if row.can_write or may_create %}
+    {{ action_buttons(row.environment_id, row.id, row.name, row.actions, "list", row.state, row.can_write, may_create, row.is_self) }}
+    {% endif %}
+  </td>
+  {% endif %}
+</tr>
+{% endmacro %}
+
+{% macro containers_table(rows, columns, pager, writable, filtered, may_create=false, environment_id=none) %}
+{% set empty_body = "Change the filters, or clear them to see every container." if filtered else ("This host has no containers." if principal.is_administrator else "You cannot see any containers on this host. Ask an administrator for access to more containers.") %}
+{% set list_href = route_path("environment_container_list", environment_id=environment_id) if environment_id is not none else none %}
+{% set show_create = principal.is_administrator and may_create and not filtered and environment_id is not none %}
+{% call data_table("containers-table", "Containers", columns, pager, empty_title=("No matching containers" if filtered else "No containers"), empty_body=empty_body, empty_action_label=("Create container" if show_create else none), empty_action_href=(route_path("environment_container_new", environment_id=environment_id) if show_create else none), filtered=filtered, clear_href=list_href) %}
+{% for row in rows %}
+{{ container_row(row, writable, may_create) }}
+{% endfor %}
+{% endcall %}
+{% endmacro %}
+
+{# Outside the swapped table, so a table response carries it out of band. #}
+{% macro results_summary(total, filtered, oob=false) %}
+<p id="results-summary" class="results-summary" role="status"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
+  {%- if total is not none %}{{ total }} {{ "container" if total == 1 else "containers" }}{% if filtered %} {{ "matches" if total == 1 else "match" }} these filters{% endif %}.{% endif -%}
+</p>
+{% endmacro %}
+
+{% macro batch_form(environment_id, actions) %}
+<form id="batch-form" class="toolbar" method="get" action="{{ route_path('environment_container_batch_confirm', environment_id=environment_id) }}">
+  <label class="field__label" for="batch-action">With the selected containers</label>
+  <select class="field__input field__input--auto" id="batch-action" name="action">
+    {% for action in actions %}
+    <option value="{{ action }}">{{ action_label(action) }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn">Review selection</button>
+  <p class="field__help">Select containers in the table, then review them. Nothing changes until you confirm.</p>
+</form>
+{% endmacro %}
+
+{% macro containers_results(rows, columns, pager, total, writable, filtered, errors, failure, retry_href, environment_id, actions, health_unavailable, may_create=false, oob=false, instance_href=none) %}
+{% if oob %}
+{{ results_summary(none if (errors or failure) else total, filtered, true) }}
+{% endif %}
+{% if errors %}
+{% for message in errors %}
+{{ error_state("Check the filters", message) }}
+{% endfor %}
+{% elif failure %}
+{{ error_state("Containers cannot be listed", failure, retry_href=retry_href, region_id="containers-results", swap="innerHTML") }}
+{% else %}
+{% if health_unavailable %}
+<div class="panel panel--notice" role="status">
+  <p>Health could not be read from this host. Health badges and the health filter are incomplete.</p>
+</div>
+{% endif %}
+{% if rows|selectattr("is_self")|first is defined %}
+<p class="field__help" role="note">The container marked "This dockmin instance" is the one dockmin runs in. It cannot be stopped, restarted, killed, paused, removed or recreated from here.
+  {%- if instance_href %} Restart it from <a href="{{ instance_href }}">Administration &gt; Instance</a>.{% endif %}</p>
+{% endif %}
+{{ containers_table(rows, columns, pager, writable, filtered, may_create, environment_id) }}
+{% if writable %}
+{{ batch_form(environment_id, actions) }}
+{% endif %}
+{% endif %}
+{% endmacro %}

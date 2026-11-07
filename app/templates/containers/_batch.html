@@ -1,0 +1,98 @@
+{# Import with context: the form carries the CSRF token and links come from route names. #}
+{% from "environments/_parts.html" import kind_badge with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/container_state_label.html" import container_state_label %}
+
+{% macro batch_context(confirmation) %}
+<p>
+  Environment <strong>{{ confirmation.environment_name }}</strong> {{ kind_badge(true) if confirmation.is_local else "" }}
+</p>
+{% if confirmation.unavailable %}
+<div class="panel panel--notice" role="note">
+  <p>{{ confirmation.unavailable }} of the selected {{ "container is" if confirmation.unavailable == 1 else "containers are" }} left out: {{ "it does not exist or you may not change it" if confirmation.unavailable == 1 else "they do not exist or you may not change them" }}.</p>
+</div>
+{% endif %}
+{% endmacro %}
+
+{# protected_ids are the targets that are dockmin's own container; they are listed but never changed. #}
+{% macro batch_targets(confirmation, protected_ids=none, instance_href=none) %}
+{% set protected = protected_ids if protected_ids else [] %}
+{% set items = [] %}
+{% for target in confirmation.targets %}
+{% set kept = target.container_id in protected %}
+{% set _ = items.append({"name": target.name, "detail": target.short_id ~ ", " ~ container_state_label(target.state) ~ (", protected: this dockmin instance, not changed" if kept else "")}) %}
+{% endfor %}
+{{ confirm_targets(items, "container") }}
+{% if protected %}
+<div class="panel panel--notice" role="note">
+  <p>{{ "This container is" if protected|length == 1 else "These containers are" }} the one dockmin runs in and {{ "is" if protected|length == 1 else "are" }} left as {{ "it is" if protected|length == 1 else "they are" }}.
+    {%- if instance_href %} Restart dockmin from <a href="{{ instance_href }}">Administration &gt; Instance</a>.{% endif %}</p>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro batch_nothing(list_href) %}
+<p>None of the selected containers can be acted on.</p>
+<p><a class="btn" href="{{ list_href }}">Back to containers</a></p>
+{% endmacro %}
+
+{% macro batch_volumes(confirmation, volumes) %}
+<div class="data-table__scroll" role="region" aria-label="Volumes mounted in the containers to remove" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Volumes mounted in each container to remove</caption>
+    <thead>
+      <tr>
+        <th scope="col">Container</th>
+        <th scope="col">Volumes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for target in confirmation.targets %}
+      {% set mounted = volumes.get(target.container_id) %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ target.name }}</th>
+        <td class="cell-wrap">
+          {% if mounted is none %}
+          <span class="cell-note">could not be read</span>
+          {% elif mounted.mounts %}
+          <ul class="confirm__volumes">
+            {% for volume in mounted.mounts %}
+            <li>
+              <span class="mono">{{ volume.name }}</span>
+              {% if volume.anonymous is none %}<span class="cell-note">kind not known</span>
+              {% elif volume.anonymous %}<span class="cell-note">anonymous</span>
+              {% else %}<span class="cell-note">named, always kept</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% if mounted.hidden %}<span class="cell-note">and {{ mounted.hidden }} more not listed</span>{% endif %}
+          {% else %}
+          <span class="cell-note">none</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro batch_fields(confirmation, action, volumes, unread_token) %}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="action" value="{{ action }}">
+{% set protected = protected_ids if protected_ids is defined and protected_ids else [] %}
+{% for target in confirmation.targets if target.container_id not in protected %}
+<input type="hidden" name="container" value="{{ target.container_id }}">
+<input type="hidden" name="display_name" value="{{ target.name }}">
+{% if action == "remove" %}
+<input type="hidden" name="expected_name" value="{{ target.name }}">
+{% set mounted = volumes.get(target.container_id) %}
+<input type="hidden" name="expected_volumes" value="{{ unread_token if mounted is none else mounted.token }}">
+{% endif %}
+{% endfor %}
+{% endmacro %}
+
+{% macro batch_noun(count) -%}
+{{ "container" if count == 1 else "containers" }}
+{%- endmacro %}

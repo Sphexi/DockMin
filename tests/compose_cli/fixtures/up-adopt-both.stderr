@@ -1,0 +1,6 @@
+{"level":"warning","msg":"a network with name dockmin-e2e-adopt_default exists but was not created by compose.\nSet `external: true` to use an existing network","time":"2026-10-20T06:22:02Z"}
+{"level":"warning","msg":"volume \"dockmin-e2e-adopt_data\" already exists but was not created by Docker Compose. Use `external: true` to use an existing volume","time":"2026-10-20T06:22:02Z"}
+{"id":"Container dockmin-e2e-adopt-svc-1","status":"Working","text":"Creating"}
+{"id":"Container dockmin-e2e-adopt-svc-1","status":"Done","text":"Created"}
+{"id":"Container dockmin-e2e-adopt-svc-1","status":"Working","text":"Starting"}
+{"id":"Container dockmin-e2e-adopt-svc-1","status":"Done","text":"Started"}

@@ -1,0 +1,40 @@
+{% from "partials/data_table.html" import data_table %}
+{% from "jobs/_parts.html" import job_name, job_state, outcome_badge %}
+
+{% macro jobs_table(rows, columns, pager, filtered) %}
+{% call data_table("jobs-table", "Scheduled jobs", columns, pager, empty_title="No jobs", empty_body="Jobs appear here once a subsystem registers one. Check that the subsystems are switched on.", empty_action_label="Open subsystems", empty_action_href=route_path('job_subsystems'), filtered=filtered, clear_href=route_path('jobs')) %}
+{% for row in rows %}
+{% set summary = row.summary %}
+<tr>
+  <th scope="row">
+    <div class="cell-stack">
+      <a href="{{ route_path('job_detail', job_id=summary.job.id) }}">{{ job_name(row) }}</a>
+      <span class="cell-note mono">{{ summary.job.subsystem }}</span>
+      {% if summary.job.rule_id is not none %}
+      <a class="cell-note" href="{{ route_path('automation_rule_detail', rule_id=summary.job.rule_id) }}" aria-label="Open the automation {{ summary.rule_name }}">Open automation</a>
+      {% endif %}
+    </div>
+  </th>
+  <td>{{ "System task" if summary.job.rule_id is none else "Automation" }}</td>
+  <td>{% if summary.environment_name %}{{ summary.environment_name }}{% else %}All{% endif %}</td>
+  <td>{{ row.schedule }}</td>
+  <td>{{ job_state(row) }}</td>
+  <td>{% if summary.job.schedule_kind == "webhook" %}{{ "Pending" if summary.job.next_run_at else "When called" }}{% elif summary.job.next_run_at %}<time datetime="{{ summary.job.next_run_at|timestamp_iso }}">{{ summary.job.next_run_at|timestamp }}</time>{% else %}&mdash;{% endif %}</td>
+  <td>
+    {% if row.last_run_at %}
+    <div class="cell-stack">
+      {% if row.last_run_id %}
+      <a href="{{ route_path('job_run_detail', run_id=row.last_run_id) }}">{{ outcome_badge(row.last_run_outcome) }}</a>
+      {% else %}
+      {{ outcome_badge(row.last_run_outcome) }}
+      {% endif %}
+      <span class="cell-note"><time datetime="{{ row.last_run_at|timestamp_iso }}">{{ row.last_run_at|timestamp }}</time></span>
+    </div>
+    {% else %}
+    <span class="cell-note">Never run</span>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

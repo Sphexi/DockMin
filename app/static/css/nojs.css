@@ -1,0 +1,46 @@
+/* Loaded only inside <noscript>: controls that need script are removed, and a dialog is shown in the page when its link is followed. */
+
+html [data-nojs-only] {
+  display: revert;
+}
+
+[data-theme-toggle],
+button[data-dialog-open],
+button[data-dialog-close],
+[data-toast-close] {
+  display: none;
+}
+
+.toasts {
+  position: static;
+  align-items: flex-start;
+  max-inline-size: none;
+  margin-inline: 0;
+  padding-inline: var(--space-6);
+}
+
+.toasts:has([data-toast]) {
+  margin-block-start: var(--space-4);
+}
+
+.dialog:target {
+  display: block;
+  position: static;
+  inline-size: auto;
+  max-inline-size: 32rem;
+  margin-block: var(--space-4);
+}
+
+/* Without nav.js there is no drawer: on narrow screens the sidebar sits above the page. */
+@media (max-width: 48rem) {
+  .sidenav {
+    position: static;
+    inline-size: auto;
+    block-size: auto;
+    transform: none;
+    visibility: visible;
+    box-shadow: none;
+    border-right: 0;
+    border-bottom: var(--border-width) solid var(--color-nav-border);
+  }
+}

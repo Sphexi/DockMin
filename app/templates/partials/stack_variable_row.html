@@ -1,0 +1,23 @@
+{% macro stack_variable_row(variable, environment_id, stack_kind, stack_name, row_id, reveal_href, row_href, back_href, error=none, revealed=none, window_expires_at=none, reveals_left=none) %}
+<tr id="{{ row_id }}">
+  <th scope="row" class="mono cell-wrap">{{ variable.name }}</th>
+  <td class="cell-wrap">
+    <span class="chip">Secret</span>
+    {% if not variable.readable %}
+    <span class="cell-note">Cannot be opened with the current key. <a href="{{ route_path('server_encryption') }}">Open encryption</a>.</span>
+    {% else %}
+    <code class="mono secret-mask">{{ variable.mask }}</code>
+    {% if variable.can_reveal %}
+    <form class="inline-form" method="post" action="{{ reveal_href }}"
+          hx-post="{{ reveal_href }}" hx-target="#{{ row_id }}" hx-swap="outerHTML" hx-push-url="false"
+          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="expected_name" value="{{ variable.name }}">
+      <button type="submit" class="btn btn--compact" data-focus-return>Reveal<span class="visually-hidden"> {{ variable.name }}</span></button>
+    </form>
+    {% endif %}
+    {% endif %}
+    {% if error %}<p class="field__error" role="alert">{{ error }}</p>{% endif %}
+  </td>
+</tr>
+{% endmacro %}

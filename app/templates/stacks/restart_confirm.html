@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_confirm.html" import hidden_containers, restart_form with context %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Restart stack {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Restart" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Restart stack", "Review the stack below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+<section class="panel" aria-labelledby="restart-heading">
+  <h2 id="restart-heading">Restart stack <span class="mono cell-wrap">{{ review.stack }}</span> on {{ review.environment_name }}?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  {% if review.services or review.hidden_containers %}
+  <p>Restart stops these services and then starts them again. They are unavailable between the two steps. Compose stops services before the ones they depend on and starts them in dependency order. Services that are stopped now stay stopped.</p>
+
+  <h3 class="confirm__subheading">Services that are restarted</h3>
+  {% if review.services %}
+  {{ confirm_targets(review.services, "service") }}
+  {% else %}
+  <p>You cannot see the running services of this stack.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Containers that are stopped and started</h3>
+  {% if review.containers %}
+  {{ confirm_targets(review.containers, "container", review.more_containers) }}
+  {% endif %}
+  {{ hidden_containers(review.hidden_containers) }}
+
+  {{ restart_form(review, run_href, detail_href, compose) }}
+  {% else %}
+  <p>No container of this stack is running, so there is nothing to restart.</p>
+  <p class="row-actions">
+    <a class="btn" href="{{ detail_href }}">Back to the stack</a>
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

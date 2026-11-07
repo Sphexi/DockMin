@@ -1,0 +1,98 @@
+{
+  "name": "shop",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "shop_default"
+    }
+  },
+  "services": {
+    "a": {
+      "command": null,
+      "entrypoint": null,
+      "healthcheck": {
+        "interval": "1m30s",
+        "retries": 3,
+        "start_interval": "5s",
+        "start_period": "40s",
+        "test": [
+          "CMD",
+          "true"
+        ],
+        "timeout": "10s"
+      },
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "b": {
+      "command": null,
+      "entrypoint": null,
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "echo hi"
+        ]
+      },
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "c": {
+      "command": null,
+      "entrypoint": null,
+      "healthcheck": {
+        "test": [
+          "NONE"
+        ]
+      },
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "d": {
+      "command": null,
+      "entrypoint": null,
+      "healthcheck": {
+        "disable": true
+      },
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "e": {
+      "command": null,
+      "entrypoint": null,
+      "healthcheck": {
+        "interval": "0s",
+        "test": [
+          "CMD-SHELL",
+          "x"
+        ]
+      },
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "f": {
+      "command": null,
+      "entrypoint": null,
+      "healthcheck": {
+        "disable": true,
+        "test": [
+          "CMD",
+          "true"
+        ]
+      },
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    }
+  }
+}

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "environments/_tables.html" import environments_results with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Environments - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Environments", "Docker hosts managed from here. This page shows the last recorded status and never contacts a host.") %}
+{% endcall %}
+
+{% if first_run %}
+<section class="panel" aria-labelledby="first-run-heading" id="first-run">
+  <h2 id="first-run-heading">Add your first environment</h2>
+  {% if first_run.state == "present" %}
+  <p>The Docker socket of the host dockmin runs on is available. Add it as the first environment.</p>
+  <form class="form form--wide" method="post" action="{{ route_path('environment_create') }}" enctype="multipart/form-data" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="kind" value="unix_socket">
+    <input type="hidden" name="socket_path" value="{{ first_run.socket_path }}">
+    <input type="hidden" name="reviewed_endpoint" value="{{ first_run.endpoint }}">
+    {{ form_field("name", "Name", value="local", help="1 to 64 characters. Names are unique.", required=true, autocomplete="off") }}
+    <dl class="facts">
+      <dt>Endpoint</dt>
+      <dd class="mono">{{ first_run.endpoint }}</dd>
+    </dl>
+    <p class="field__help">dockmin tests the connection before it saves the environment. If the test fails, the report is shown and nothing is saved unless you choose to.</p>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Test and add</button>
+    </div>
+  </form>
+  {% elif first_run.state == "no_access" %}
+  <div class="panel panel--notice" role="note">
+    <p><strong>The Docker socket is mounted, but dockmin cannot open it.</strong></p>
+    <p>The account dockmin runs as must be in the socket's group. Recreate the container with the group added:</p>
+    <pre class="code-block" tabindex="0">--group-add "$(stat -c %g {{ first_run.socket_path }})"</pre>
+    <p>With Compose, set <span class="mono">DOCKER_GID</span> to the socket's group id. The documentation page <span class="mono">Environments</span>, section "Add a local socket environment", has the details.</p>
+  </div>
+  {% else %}
+  <div class="panel panel--notice" role="note">
+    <p><strong>{{ "The Docker socket is not available to dockmin." if first_run.state == "absent" else "The path " ~ first_run.socket_path ~ " is not a socket." }}</strong></p>
+    <p>To manage the host dockmin runs on, mount its Docker socket into the container and recreate it:</p>
+    <pre class="code-block" tabindex="0">-v {{ first_run.socket_path }}:{{ first_run.socket_path }}</pre>
+    <p>The documentation page <span class="mono">Environments</span>, section "Add a local socket environment", has the details.</p>
+  </div>
+  {% endif %}
+  <div class="row-actions">
+    <a class="btn" href="{{ route_path('environment_new') }}">Add another kind of environment</a>
+  </div>
+</section>
+{% else %}
+
+<form class="filters" id="environment-filters" method="get" action="{{ route_path('index') }}" role="search" aria-label="Filter environments"
+      hx-get="{{ route_path('index') }}" hx-target="#environments-results" hx-swap="innerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#environment-filters select, #environment-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-group">Group</label>
+    </div>
+    <select class="field__input" id="field-group" name="group">
+      <option value="">Any group</option>
+      <option value="{{ ungrouped }}"{% if group == ungrouped %} selected{% endif %}>Ungrouped</option>
+      {% for option in options.groups %}
+      <option value="{{ option.id }}"{% if group == option.id|string %} selected{% endif %}>{{ option.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-status">Status</label>
+    </div>
+    <select class="field__input" id="field-status" name="status">
+      <option value="">Any status</option>
+      {% for value, label in [("reachable", "Reachable"), ("unreachable", "Unreachable"), ("version_unsupported", "Version unsupported"), ("unknown", "Unknown")] %}
+      <option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if options.tags %}
+  <details class="filters__wide"{% if selected_tags %} open{% endif %}>
+    <summary>Tags{% if selected_tags %} ({{ selected_tags|length }} selected){% endif %}</summary>
+    <p class="field__help">Only environments carrying every selected tag are shown.</p>
+    <div class="choice-list">
+      {% for tag in options.tags %}
+      {{ checkbox_field("tag", tag.name, tag.id, checked=tag.id in selected_tags) }}
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply filters</button>
+    <a class="btn" href="{{ route_path('index') }}">Reset</a>
+  </div>
+</form>
+
+{% if is_admin %}
+<form id="batch-delete" method="get" action="{{ route_path('environment_delete_confirm') }}"></form>
+{% endif %}
+
+{% call list_bar(list_count(total|default(none), "environment", filtered=filtered)) %}
+{% if is_admin %}
+<a class="btn btn--primary" href="{{ route_path('environment_new') }}">Add environment</a>
+{% endif %}
+{% endcall %}
+<div id="environments-results">
+  {{ environments_results(rows, columns, pager, is_admin, filtered, errors) }}
+</div>
+
+{% if is_admin %}
+<div class="toolbar">
+  <button type="submit" class="btn" form="batch-delete">Delete selected environments</button>
+  <p class="field__help">Select environments in the table, then review what deleting them removes. Nothing is deleted until you confirm.</p>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

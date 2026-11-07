@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% from "automation/_parts.html" import what_is with context %}
+{% block title %}New automation - dockmin{% endblock %}
+{% set crumb_page = "New automation" %}
+{% block content %}
+{% call page_header("New automation", "Step 1 of 2. Choose what runs and where. The next step sets the target and the schedule.") %}
+<a class="btn" href="{{ route_path('automation') }}">Cancel</a>
+{% endcall %}
+
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+
+{% set environment_less = subsystems|rejectattr("requires_environment")|list %}
+{% set descriptions = {"activity-log-exporter": "Copies the activity log to an object storage target as gzip-compressed CSV or NDJSON files.", "backup-syncer": "Makes a backup archive on a schedule, uploads it to an object storage target and deletes older archives beyond the target's retention."} %}
+{% if not subsystems %}
+{{ empty_state("No automation to choose", "No automation is available to you.") }}
+{% elif not environments and not environment_less %}
+{{ empty_state("No environment to choose", "You can create automations in an environment you have been granted access to. The local socket is read only for standard users.") }}
+{% else %}
+<form class="form automation-choice" method="get" action="{{ route_path('automation_rule_new') }}">
+  <fieldset class="choice-group"{% if errors.get("subsystem") %} data-invalid{% endif %}>
+    <legend>Automation</legend>
+    {% for info in subsystems %}
+    {% set field_id = "field-subsystem-" ~ info.name %}
+    {% set help = what_is(info.name) or descriptions.get(info.name, "") %}
+    <div class="choice">
+      <input class="choice__input" type="radio" id="{{ field_id }}" name="subsystem" value="{{ info.name }}"
+             {%- if subsystem == info.name or (not subsystem and loop.first) %} checked{% endif %}
+             {%- if not info.requires_environment %} data-environment="none"{% endif %}
+             {%- if help %} aria-describedby="{{ field_id }}-help"{% endif %}>
+      <label class="choice__label" for="{{ field_id }}">{{ info.name }}</label>
+      {% if help %}
+      <p class="choice__help" id="{{ field_id }}-help">{{ help }}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% if errors.get("subsystem") %}
+    <p class="field__error">{{ errors["subsystem"] }}</p>
+    {% endif %}
+  </fieldset>
+
+  <div class="field" data-environment-field{% if errors.get("environment_id") %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-environment_id">Environment</label>
+      {% if environment_less %}
+      <p class="field__help" id="field-environment_id-help">{{ environment_less|map(attribute="name")|join(", ") }} {{ "is" if environment_less|length == 1 else "are" }} not tied to an environment and need none.</p>
+      {% endif %}
+    </div>
+    <select class="field__input" id="field-environment_id" name="environment_id"{% if environment_less %} aria-describedby="field-environment_id-help"{% endif %}>
+      {% if not environment_id %}<option value="">Choose an environment</option>{% endif %}
+      {% for option in environments %}
+      <option value="{{ option.id }}"{% if environment_id == option.id|string %} selected{% endif %}>{{ option.name }}</option>
+      {% endfor %}
+    </select>
+    {% if errors.get("environment_id") %}
+    <p class="field__error">{{ errors["environment_id"] }}</p>
+    {% endif %}
+  </div>
+
+  {% if prefill.target_kind %}
+  <input type="hidden" name="target_kind" value="{{ prefill.target_kind }}">
+  <input type="hidden" name="target" value="{{ prefill.target }}">
+  {% endif %}
+  {% if prefill.stack %}
+  <input type="hidden" name="stack" value="{{ prefill.stack }}">
+  {% endif %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Continue</button>
+    <a class="btn" href="{{ route_path('automation') }}">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

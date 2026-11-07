@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import kind_badge with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Remove images on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Remove images" %}
+{% block content %}
+{% call page_header("Remove images", "Review the images below. Nothing is removed until you confirm.") %}
+<a class="btn" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("Check the selection", message) }}
+{% endfor %}
+
+{% if confirmation is not none %}
+{% set removable = confirmation.targets|rejectattr("in_use")|list %}
+{% set kept = confirmation.targets|selectattr("in_use")|list %}
+<p>
+  Environment <strong>{{ confirmation.environment_name }}</strong> {{ kind_badge(true) if confirmation.is_local else "" }}
+</p>
+{% if confirmation.unavailable %}
+<div class="panel panel--notice" role="note">
+  <p>{{ confirmation.unavailable }} of the selected {{ "image is" if confirmation.unavailable == 1 else "images are" }} left out: {{ "it is" if confirmation.unavailable == 1 else "they are" }} no longer on this host.</p>
+</div>
+{% endif %}
+
+{% if confirmation.targets %}
+{% set items = [] %}
+{% for target in confirmation.targets %}
+{% set others = target.references[1:] %}
+{% set _ = items.append({"name": target.label, "detail": target.short_id ~ ", " ~ (target.size|filesize) ~ (", also " ~ others|join(", ") if others else "") ~ (", and " ~ (target.references_total - target.references|length) ~ " more references" if target.references_total > target.references|length else "") ~ (", kept: " ~ target.in_use ~ (" container uses" if target.in_use == 1 else " containers use") ~ " it, not removed" if target.in_use else ", removed")}) %}
+{% endfor %}
+{{ confirm_targets(items, "image") }}
+
+{% if kept %}
+<div class="panel panel--notice" role="note">
+  <h2 class="confirm__subheading">Images in use are kept</h2>
+  <p>Docker refuses to remove an image that a container uses. Forcing a removal is confirmed on its own page.</p>
+  <ul class="confirm-targets__list">
+    {% for target in kept %}
+    <li>
+      <span class="mono">{{ target.label }}</span>
+      {% if target.containers %}
+      <span class="cell-note">used by</span>
+      <ul class="chip-list">
+        {% for container in target.containers %}
+        <li><a href="{{ route_path('environment_container_detail', environment_id=environment_id, container_id=container.id) }}">{{ container.name }}</a></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if target.containers_hidden %}
+      <span class="cell-note">{{ target.containers_hidden }} {{ "container" if target.containers_hidden == 1 else "containers" }} you cannot see</span>
+      {% endif %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_image_remove', environment_id=environment_id, image_id=target.image_id) }}?force=1" aria-label="Force remove image {{ target.label }}">Force remove...</a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if removable %}
+<form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for target in removable %}
+  <input type="hidden" name="target" value="{{ target.token }}">
+  <input type="hidden" name="display_name" value="{{ target.label }}">
+  {% endfor %}
+  <p>Each image listed as removed loses every reference shown, then the image itself and any layers no other image shares. This cannot be undone. Containers are not affected and credential bindings are kept. Each image is checked again as it is removed, and skipped if it has changed or a container uses it now.</p>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Remove {{ removable|length }} {{ "image" if removable|length == 1 else "images" }}</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% else %}
+<p>Every selected image is in use, so none is removed here.</p>
+<p><a class="btn" href="{{ list_href }}">Back to images</a></p>
+{% endif %}
+{% else %}
+<p>None of the selected images can be removed.</p>
+<p><a class="btn" href="{{ list_href }}">Back to images</a></p>
+{% endif %}
+{% else %}
+<p>Select between 1 and {{ max_batch }} images on the list, then review them again.</p>
+<p><a class="btn" href="{{ list_href }}">Back to images</a></p>
+{% endif %}
+{% endblock %}

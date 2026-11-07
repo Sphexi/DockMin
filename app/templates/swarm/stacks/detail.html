@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "swarm/stacks/_detail.html" import stack_tabs with context %}
+{% from "swarm/stacks/_managed.html" import managed_summary, managed_tabs with context %}
+{% from "stacks/_parts.html" import busy_note, compose_banner with context %}
+{% from "partials/back_actions.html" import back_actions %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ detail.stack.name if managed else detail.name }} - dockmin{% endblock %}
+{% set crumb_object = detail.stack.name if managed else detail.name %}
+{% block content %}
+{% if managed %}
+{% call page_header(detail.stack.name, "Swarm stack on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to Swarm stacks", origin) }}
+{% endcall %}
+{{ compose_banner(compose) }}
+{{ busy_note(busy_text) }}
+{{ managed_summary(detail) }}
+{{ managed_tabs(detail, tab, tab_keys, panel, values, fields, automation, activity_log, logs) }}
+{% else %}
+{% call page_header(detail.name, "Swarm stack on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to Swarm stacks", origin) }}
+{% endcall %}
+{{ stack_tabs(detail, tab, tabs, panel, values, fields, logs) }}
+{% endif %}
+{% endblock %}

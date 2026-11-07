@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access Denied.</Message><Resource>/exports/rule-1/2026/01/01/00000000000000000002.csv.gz</Resource><RequestId>18E17DA5CAE9EA7B2D9A05B5</RequestId><Key>rule-1/2026/01/01/00000000000000000002.csv.gz</Key><BucketName>exports</BucketName></Error>

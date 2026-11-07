@@ -1,0 +1,143 @@
+{# Import with context: links and forms read the request. #}
+{% from "access/_panel.html" import access_panel with context %}
+{% from "environments/_parts.html" import kind_badge as host_badge, when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/object_users.html" import users_overflow %}
+{% from "volumes/_parts.html" import container_base, kind_badge, stack_cell with context %}
+
+{% macro volume_summary(detail) %}
+<section id="volume-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span>{{ kind_badge(detail.kind) }}</span>
+      <span class="cell-note">{{ detail.driver }} volume on {{ detail.environment_name }} {{ host_badge(true) if detail.is_local else "" }}</span>
+    </div>
+    <div class="row-actions">
+      {% if detail.protected %}
+      {{ badge("In use by dockmin", "info") }}
+      {% elif detail.can_remove %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_volume_remove', environment_id=detail.environment_id, volume_name=detail.name) }}">Remove</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro value_table(rows, label, caption, note) %}
+<div class="data-table__scroll" role="region" aria-label="{{ label }}" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead><tr><th scope="col">Key</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for item in rows %}
+      <tr>
+        <th scope="row" class="cell-wrap mono">{{ item.key }}</th>
+        <td class="cell-wrap mono">{% if item.redacted %}<span class="chip">Redacted</span>{% else %}{{ item.value }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if note %}
+<p class="field__help">{{ note }}</p>
+{% endif %}
+{% endmacro %}
+
+{% macro overview_tab(detail) %}
+<h2 id="tab-heading">Overview</h2>
+<dl class="facts">
+  <dt>Name</dt>
+  <dd class="mono cell-wrap">{{ detail.name }}</dd>
+  <dt>Driver</dt>
+  <dd class="mono">{{ detail.driver }}</dd>
+  <dt>Scope</dt>
+  <dd>{{ detail.scope }}</dd>
+  <dt>Kind</dt>
+  <dd>{{ "Anonymous: created by a container without a name" if detail.kind == "anonymous" else "Named" }}</dd>
+  <dt>Created</dt>
+  <dd>{{ when(detail.created_at, "—") }}</dd>
+  <dt>Stack</dt>
+  <dd>{{ stack_cell(detail.stack, detail.environment_id) }}</dd>
+  <dt>Used by</dt>
+  <dd>{{ detail.containers_total }} {{ "container" if detail.containers_total == 1 else "containers" }}</dd>
+  <dt>Mount point</dt>
+  <dd class="mono cell-wrap">{% if detail.mountpoint is none %}<span class="cell-note">Not shown for your role</span>{% else %}{{ detail.mountpoint or "—" }}{% endif %}</dd>
+</dl>
+
+<h3>Driver options</h3>
+{% if detail.options is none %}
+<p class="field__help">Not shown for your role.</p>
+{% elif detail.options %}
+{{ value_table(detail.options, "Driver options", "Driver options of this volume", "Values that look like secrets are redacted.") }}
+{% else %}
+<p>The volume sets no driver options.</p>
+{% endif %}
+
+<h3>Labels</h3>
+{% if detail.labels %}
+{{ value_table(detail.labels, "Labels", "Labels of this volume", ("" if principal.is_administrator else "Values of keys that look like secrets are redacted for your role.")) }}
+{% else %}
+<p>The volume has no labels.</p>
+{% endif %}
+{% if detail.labels_truncated %}
+<p class="field__help">Only the first labels are shown.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro containers_tab(detail) %}
+<h2 id="tab-heading">Containers</h2>
+{% if detail.containers_total == 0 %}
+<p>No container uses this volume.</p>
+{% else %}
+{% if detail.containers %}
+<div class="data-table__scroll" role="region" aria-label="Containers using the volume" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Containers that mount this volume</caption>
+    <thead><tr><th scope="col">Container</th><th scope="col">State</th></tr></thead>
+    <tbody>
+      {% for container in detail.containers %}
+      <tr>
+        <th scope="row" class="cell-wrap"><a href="{{ container_base(detail.environment_id) }}/{{ container.id }}?tab=mounts">{{ container.name }}</a></th>
+        <td>{{ container_state_badge(container.state) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% if detail.containers_more or detail.containers_hidden %}
+<p class="field__help">{{ users_overflow(detail.containers_more, detail.containers_hidden) }}.</p>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro access_tab(detail, panel, values, fields) %}
+{% set base = route_path("environment_volume_access_save", environment_id=detail.environment_id, volume_name=detail.name) %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, base, route_path("environment_volume_access_delete", environment_id=detail.environment_id, volume_name=detail.name), values=values, fields=fields) }}
+{% endmacro %}
+
+{% macro volume_tabs(detail, tab, tabs, panel, values, fields) %}
+{% set detail_href = route_path("environment_volume_detail", environment_id=detail.environment_id, volume_name=detail.name) %}
+{% set labels = {"overview": "Overview", "containers": "Containers", "access": "Access"} %}
+<div id="volume-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Volume sections">
+    <ul class="tabs__list">
+      {% for key in tabs %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#volume-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% elif tab == "containers" %}{{ containers_tab(detail) }}
+    {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

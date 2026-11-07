@@ -1,0 +1,54 @@
+{# Rows come from the call block; every table takes a PageView. #}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/pagination.html" import pagination %}
+
+{% macro data_table(table_id, caption, columns, pager, empty_title="Nothing to show", empty_body=none, empty_action_label=none, empty_action_href=none, filtered=false, clear_href=none) %}
+{% set pager = require_pager(pager) %}
+{% set optional_positions %}{% for column in columns %}{% if column.optional %}{{ loop.index }} {% endif %}{% endfor %}{% endset %}
+{% set wide_positions %}{% for column in columns %}{% if column.wide_only is defined and column.wide_only %}{{ loop.index }} {% endif %}{% endfor %}{% endset %}
+{% set widths = [] %}{% for column in columns %}{% set _ = widths.append((column.width if column.width is defined else none) or ("select" if column.key == "select" else none)) %}{% endfor %}
+{% set fixed = widths|select|list|length > 0 %}
+{# The rem values mirror the --col-* tokens and only size the scroll floor of a fixed table; a flexible column counts as 7.5, enough for its header on one line. Wide-only columns are left out: the floor applies below the wide breakpoint, where they are hidden. #}
+{% set kinds = {"select": ("col--select", 2.75), "badge": ("col--badge", 8), "time": ("col--time", 9.75), "count": ("col--count", 6), "short": ("col--short", 7), "medium": ("col--medium", 12), "names": ("col--names", 16), "actions": ("col--actions", 8.5), "actions-wide": ("col--actions-wide", 15), "actions-row": ("col--actions-row", 26)} %}
+{% set floor = namespace(rem=0) %}{% for width in widths %}{% if not (columns[loop.index0].wide_only is defined and columns[loop.index0].wide_only) %}{% set floor.rem = floor.rem + (kinds[width][1] if width else 7.5) %}{% endif %}{% endfor %}
+<div id="{{ table_id }}" class="data-table">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if pager.is_empty %}
+  {% if filtered %}
+  {{ empty_state("Nothing matches these filters", "Change the filters, or clear them to see every row.", "Clear filters", clear_href if clear_href else pager.base_path) }}
+  {% else %}
+  {{ empty_state(empty_title, empty_body, empty_action_label, empty_action_href) }}
+  {% endif %}
+  {% if not pager.is_first_page %}
+  <p><a class="btn" href="{{ pager.first_href }}" hx-get="{{ pager.first_href }}" hx-target="#{{ table_id }}" hx-swap="outerHTML" hx-push-url="true">Back to the first page</a></p>
+  {% endif %}
+  {% else %}
+  <div class="data-table__scroll" role="region" aria-label="{{ caption }} table" tabindex="0">
+    <table class="table{% if fixed %} table--fixed{% endif %}"{% if fixed %} data-min="{{ ((floor.rem / 4)|round(0, 'ceil') * 4)|int }}"{% endif %}{% if optional_positions|trim %} data-optional="{{ optional_positions|trim }}"{% endif %}{% if wide_positions|trim %} data-wide="{{ wide_positions|trim }}"{% endif %}>
+      <caption class="visually-hidden">{{ caption }}</caption>
+      {% if fixed %}
+      <colgroup>{% for width in widths %}<col{% if width %} class="{{ kinds[width][0] }}"{% endif %}>{% endfor %}</colgroup>
+      {% endif %}
+      <thead>
+        <tr>
+          {% for column in columns %}
+          {% set classes = (["is-numeric"] if column.numeric else []) + (["col-optional"] if column.optional else []) %}
+          <th scope="col"{% if classes %} class="{{ classes|join(' ') }}"{% endif %}{% if column.sortable %} aria-sort="{{ pager.aria_sort(column.key) }}"{% endif %}>
+            {% if column.sortable %}
+            <a class="sort-link" href="{{ pager.sort_href(column.key) }}" hx-get="{{ pager.sort_href(column.key) }}" hx-target="#{{ table_id }}" hx-swap="outerHTML" hx-push-url="true">{{ column.label }}<span class="sort-link__mark" aria-hidden="true"></span></a>
+            {% elif column.key == "select" %}
+            <span class="visually-hidden">{{ column.label }}</span>
+            {% else %}
+            {{ column.label }}
+            {% endif %}
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>{{ caller() }}</tbody>
+    </table>
+  </div>
+  {{ pagination(pager, table_id, caption ~ " pagination") }}
+  {% endif %}
+</div>
+{% endmacro %}

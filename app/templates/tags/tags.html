@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "tags/_tables.html" import tags_table with context %}
+{% block title %}Tags - dockmin{% endblock %}
+{% block content %}
+{{ page_header("Tags", "Labels for environments. Tags filter the dashboard and carry no access.") }}
+
+{{ unplaced_errors(fields, ["name"]) }}
+
+<section class="section" aria-labelledby="tag-create-heading">
+  <h2 id="tag-create-heading">Create a tag</h2>
+  <form class="form" method="post" action="{{ route_path('tag_create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("name", "Tag name", value=name, error=fields.get("name"), help="1 to 64 letters, digits, spaces, dots, underscores or hyphens. Names are unique, ignoring case.", required=true, autocomplete="off") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Create tag</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="tag-list-heading">
+  <h2 id="tag-list-heading">All tags</h2>
+  {{ tags_table(rows, columns, pager) }}
+</section>
+{% endblock %}

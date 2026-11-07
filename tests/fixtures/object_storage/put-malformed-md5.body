@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidDigest</Code><Message>The Content-Md5 you specified is not valid.</Message><Resource>/dockmin-e2e/exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Resource><RequestId>18E17D8AE5E80C5935D42003</RequestId><Key>exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Key><BucketName>dockmin-e2e</BucketName></Error>

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "jobs/_parts.html" import job_name, job_target with context %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Enable {{ job_name(view) }} - dockmin{% endblock %}
+{% set crumb_object = job_name(view) %}
+{% set crumb_object_href = route_path('job_detail', job_id=view.summary.job.id) %}
+{% set crumb_page = "Enable" %}
+{% block content %}
+{% set job = view.summary.job %}
+{% call page_header("Enable job", "Review what runs again. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ route_path('job_detail', job_id=job.id) }}">Back to the job</a>
+{% endcall %}
+
+{{ job_target(view) }}
+
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What changes</h2>
+  <ul>
+    <li>The failure count of {{ job.consecutive_failures }} is reset to 0.</li>
+    <li>The job runs on its schedule again, and acts on {% if view.summary.environment_name %}<strong>{{ view.summary.environment_name }}</strong>{% else %}its subsystem's targets{% endif %} as before.</li>
+    {% if job.failure_threshold %}
+    <li>It is disabled again after {{ job.failure_threshold }} failures in a row.</li>
+    {% endif %}
+    {% if not view.subsystem_enabled %}
+    <li>The subsystem is off, so the job still does not run until the subsystem is switched on.</li>
+    {% endif %}
+    {% if job.is_enabled %}
+    <li>The job is already enabled. Confirming changes nothing.</li>
+    {% endif %}
+  </ul>
+</section>
+
+<form class="form" method="post" action="{{ route_path('job_enable', job_id=job.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {{ confirm_targets([job_name(view)|trim], "job") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Enable job</button>
+    <a class="btn" href="{{ route_path('job_detail', job_id=job.id) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

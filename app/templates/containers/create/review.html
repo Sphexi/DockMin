@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import kind_badge %}
+{% from "images/_parts.html" import credential_fieldset with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Review container on {{ review.environment_name }} - dockmin{% endblock %}
+{% set crumb_page = "Review container" %}
+{% block content %}
+{% call page_header("Review container", "Nothing is created until you confirm.") %}
+{{ kind_badge(review.is_local) if review.is_local else "" }}
+{% endcall %}
+
+{% if error %}
+{{ error_state("The container was not created", error) }}
+{% endif %}
+{% if review.is_local and principal.is_administrator %}
+<div class="panel panel--notice" role="note">
+  <p>This environment is the host dockmin runs on. A container created here runs beside dockmin itself.</p>
+</div>
+{% endif %}
+{% if review.restricted_used %}
+<div class="panel panel--notice" role="note">
+  <h2>Administrator options in use</h2>
+  <p>This configuration uses options only administrators may set:</p>
+  <ul>
+    {% for label in review.restricted_used %}
+    <li>{{ label }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ create_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if source_id %}
+  <input type="hidden" name="from" value="{{ source_id }}">
+  {% endif %}
+  {% if template_ref %}
+  <input type="hidden" name="template_ref" value="{{ template_ref }}">
+  {% endif %}
+  {% for name, value in review.state.hidden_fields() %}
+  <input type="hidden" name="{{ name }}" value="{{ value }}">
+  {% endfor %}
+
+  <section class="panel create-section" aria-labelledby="review-summary-title">
+    <h2 class="create-section__title" id="review-summary-title">Container</h2>
+    <dl class="facts">
+      <dt>Environment</dt>
+      <dd>{{ review.environment_name }}</dd>
+      <dt>Image</dt>
+      <dd class="mono">{{ review.image }}</dd>
+      <dt>Name</dt>
+      <dd>{% if review.name %}<span class="mono">{{ review.name }}</span>{% else %}Assigned by Docker{% endif %}</dd>
+      <dt>Image pull</dt>
+      <dd>{% if not review.will_pull %}The image on this host is used.{% elif review.state.get("pull") == "always" %}The image is pulled from its registry first.{% else %}The image is not on this host and will be pulled first.{% endif %}</dd>
+      <dt>After creating</dt>
+      <dd>{{ "The container is started." if review.start else "The container is left stopped." }}</dd>
+    </dl>
+  </section>
+
+  {% if offer %}
+  <section class="panel create-section" aria-labelledby="review-credentials-title">
+    <h2 class="create-section__title" id="review-credentials-title">Credential set for the pull</h2>
+    <p class="field__help">The image is pulled while the container is created. The set that pulls it is bound to the image <span class="mono cell-wrap">{{ offer.reference.familiar }}</span>, so later updates use the same set.
+      To watch the progress first, <a href="{{ pull_href }}?{{ {'reference': review.image}|urlencode }}">pull the image on its own page</a>; creating then finds it present.</p>
+    {{ credential_fieldset(offer, selected, choice_error, catalogue) }}
+  </section>
+  {% endif %}
+
+  {% for section in review.sections %}
+  <section class="panel create-section" aria-labelledby="review-{{ section.key }}-title">
+    <h2 class="create-section__title" id="review-{{ section.key }}-title">{{ section.title }}</h2>
+    <dl class="facts">
+      {% for item in section.items %}
+      <dt class="mono">{{ item.label }}</dt>
+      <dd>
+        {% if item.hidden %}
+        <span class="chip">Value hidden</span>
+        {% elif item.values|length > 1 %}
+        <ul class="review__values mono">
+          {% for value in item.values %}
+          <li>{{ value }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <span class="mono">{{ item.values[0] if item.values else "" }}</span>
+        {% endif %}
+      </dd>
+      {% endfor %}
+    </dl>
+  </section>
+  {% endfor %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Create container</button>
+    <button type="submit" class="btn" name="intent" value="edit" formaction="{{ edit_href }}" formnovalidate>Back to edit</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

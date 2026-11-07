@@ -1,0 +1,47 @@
+{# issued is an IssuedToken on the one response that creates a token, and none on every other; its value is read in exactly one place below and is never placed in an attribute or a URL. #}
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "tokens/_table.html" import tokens_table with context %}
+{% block title %}API tokens - dockmin{% endblock %}
+{% block content %}
+{% call page_header("API tokens", "Credentials for scripts that call the dockmin API as you.") %}
+<a class="btn" href="{{ route_path('account') }}">Back to your account</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("That change was refused", error) }}
+{% endif %}
+
+{% if issued %}
+<section class="panel panel--notice token-reveal" aria-labelledby="token-reveal-heading" role="note">
+  <h2 id="token-reveal-heading">Copy your new token now</h2>
+  <p><strong>This is the only time it will be shown.</strong> dockmin keeps a one-way hash, not the token, so it cannot show it again or recover it. If you lose it, revoke it and create another.</p>
+  <p class="token-reveal__label">Token for <strong>{{ issued.record.label }}</strong></p>
+  <code class="token-reveal__value">{{ issued.value }}</code>
+  <p class="field__help">Send it in an <span class="mono">Authorization: Bearer</span> header. Treat it like a password: it acts with your role.</p>
+</section>
+{% endif %}
+
+{{ unplaced_errors(fields, ["label", "expires_in_days"]) }}
+
+<section class="section" aria-labelledby="token-create-heading">
+  <h2 id="token-create-heading">Create a token</h2>
+  <form class="form" method="post" action="{{ route_path('token_create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("label", "Label", value=label, error=fields.get("label"), help="What it is for, so you can tell tokens apart. Up to 64 characters.", required=true, autocomplete="off") }}
+    {{ form_field("expires_in_days", "Expires after (days)", type="number", value=expires_in_days, error=fields.get("expires_in_days"), help="Leave blank for a token that does not expire.", autocomplete="off") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Create token</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="token-list-heading">
+  <h2 id="token-list-heading">Your tokens</h2>
+  <p>A token stops working when you or an administrator changes your password or ends your sessions.</p>
+  {{ tokens_table(rows, columns, pager, now) }}
+</section>
+{% endblock %}

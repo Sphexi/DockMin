@@ -1,0 +1,51 @@
+{# Import with context: each row's revoke confirmation carries the request CSRF token. now is a stored-format timestamp; those are fixed-width UTC text, so a plain comparison orders them. owner_id is set where an administrator lists another user's tokens. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/data_table.html" import data_table %}
+
+{% macro tokens_table(rows, columns, pager, now, owner_id=none) %}
+{% if owner_id is none %}
+{% set empty_body = "Create a token to call the API from a script." %}
+{% else %}
+{% set empty_body = "This user has not created a token." %}
+{% endif %}
+{% call data_table("tokens-table", "API tokens", columns, pager, empty_title="No tokens", empty_body=empty_body, empty_action_label=("Create a token" if owner_id is none else none), empty_action_href=("#token-create-heading" if owner_id is none else none)) %}
+{% for row in rows %}
+{% set dialog_id = "revoke-token-" ~ row.id %}
+<tr>
+  <th scope="row">{{ row.label }}</th>
+  <td><span class="mono">{{ row.display_prefix }}</span></td>
+  <td><time datetime="{{ row.created_at|timestamp_iso }}">{{ row.created_at|timestamp }}</time></td>
+  <td>
+    {% if row.last_used_at %}
+    <time datetime="{{ row.last_used_at|timestamp_iso }}">{{ row.last_used_at|timestamp }}</time>
+    {% else %}
+    Never
+    {% endif %}
+  </td>
+  <td>
+    {% if row.expires_at %}
+    <time datetime="{{ row.expires_at|timestamp_iso }}">{{ row.expires_at|timestamp }}</time>
+    {% else %}
+    Never
+    {% endif %}
+  </td>
+  <td>
+    {% if row.revoked_at %}
+    {{ badge("Revoked") }}
+    {% elif row.expires_at and row.expires_at <= now %}
+    {{ badge("Expired", "warn") }}
+    {% else %}
+    {{ badge("Active", "ok") }}
+    {% endif %}
+  </td>
+  <td>
+    {% if not row.revoked_at %}
+    {{ confirm_button(dialog_id, "Revoke " ~ row.label) }}
+    {{ confirmation_dialog(dialog_id, "Revoke this token?", "A revoked token stops working on its next request. It cannot be restored; create another to replace it.", route_path('user_token_revoke', user_id=owner_id, token_id=row.id) if owner_id is not none else route_path('token_revoke', token_id=row.id), "Revoke token", targets=[{"name": row.label, "detail": row.display_prefix}], noun="token") }}
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "registries/_form.html" import provider_fields with context %}
+{% block title %}{{ ("Edit " ~ state.name) if editing else "Add registry" }} - dockmin{% endblock %}
+{% set crumb_object = state.name if editing else none %}
+{% set crumb_object_href = route_path('registry_detail', credential_id=state.credential_id) if editing else none %}
+{% set crumb_page = "Edit" if editing else "Add registry" %}
+{% block content %}
+{% set presentation = catalogue[state.provider] %}
+{% call page_header("Edit registry" if editing else "Add registry", state.name if editing else "Choose the provider first. The fields below follow it.") %}
+<a class="btn" href="{{ route_path('registry_detail', credential_id=state.credential_id) if editing else route_path('registries') }}">Cancel</a>
+{% endcall %}
+
+{{ unplaced_errors(fields, ["name", "provider", "address", "authentication_enabled", "username", "secret", "verify_tls", "ca_bundle", "organisation", "use_organisation", "instance_url", "project_id", "project_path", "region"]) }}
+
+{% if editing and state.bound_images %}
+<div class="panel panel--notice" role="note">
+  <p>{{ state.bound_images }} {{ "image is" if state.bound_images == 1 else "images are" }} bound to this credential set. Changing the registry address moves {{ "it" if state.bound_images == 1 else "them" }} to "Registry address changed", and automatic updates for {{ "it" if state.bound_images == 1 else "them" }} stop until each is pulled again with a credential set for the new address. The default for the address is cleared as well.</p>
+</div>
+{% endif %}
+
+<form class="form form--wide registry-provider-form" method="get"
+      action="{{ route_path('registry_edit', credential_id=state.credential_id) if editing else route_path('registry_new') }}">
+  <div class="field"{% if fields.get("provider") %} data-invalid{% endif %}>
+    <div class="field__head">
+      <label class="field__label" for="field-provider">Provider</label>
+      <p class="field__help" id="field-provider-help">Changing the provider resets the address and the provider's settings to their defaults{% if editing %} and requires the secret again{% endif %}.</p>
+    </div>
+    <select class="field__input" id="field-provider" name="provider" aria-describedby="field-provider-help{% if fields.get('provider') %} field-provider-error{% endif %}"
+            hx-post="{{ route_path('registry_form_fields') }}" hx-trigger="change"
+            hx-include="#registry-form input:not([name='provider']):not([type='file'])"
+            hx-params="not secret,ca_bundle" hx-target="#registry-provider-fields" hx-swap="outerHTML" hx-sync="this:replace">
+      {% for kind in state.providers %}
+      <option value="{{ kind }}"{% if kind == state.provider %} selected{% endif %}>{{ catalogue[kind].label }}</option>
+      {% endfor %}
+    </select>
+    {% if fields.get("provider") %}
+    <p class="field__error" id="field-provider-error">{{ fields.get("provider") }}</p>
+    {% endif %}
+  </div>
+  <div class="form__actions" data-nojs-only>
+    <button type="submit" class="btn">Use this provider</button>
+  </div>
+</form>
+
+<form id="registry-form" class="form form--wide registry-form" method="post" enctype="multipart/form-data" data-submit-once
+      action="{{ route_path('registry_update', credential_id=state.credential_id) if editing else route_path('registry_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if editing %}
+  <input type="hidden" name="credential_id" value="{{ state.credential_id }}">
+  {% endif %}
+
+  {{ form_field("name", "Name", value=state.name, error=fields.get("name"), help="1 to 64 characters. Names are unique, ignoring case.", required=true) }}
+
+  {{ provider_fields(state, presentation, fields) }}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">{{ "Save changes" if editing else "Add registry" }}</button>
+  </div>
+</form>
+{% endblock %}

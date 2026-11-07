@@ -1,0 +1,72 @@
+{# Import with context. #}
+{% from "partials/badge.html" import badge %}
+{% from "stacks/_parts.html" import changed_chip, last_operation %}
+
+{% macro stack_status_badge(item) -%}
+{% if item.status == "active" -%}{{ badge("Deployed", "ok") }}
+{%- elif item.status == "partial" -%}{{ badge("Partly deployed", "warn") }}
+{%- elif item.status == "inactive" -%}{{ badge("Stopped", "neutral") }}
+{%- elif item.status == "error" -%}{{ badge("Error", "danger") }}
+{%- else -%}{{ badge("Not deployed" if item.last_operation is none else "Unknown", "neutral") }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro row_state(row) -%}
+{% if row.managed %}{{ stack_status_badge(row) }}{% else %}{{ badge("Not managed", "neutral") }}{% endif %}
+{%- endmacro %}
+
+{# Items are "kind:name", as the operation reports them. #}
+{% macro object_items(items) %}
+<ul class="chip-list">
+  {% for item in items %}
+  {% set kind, _, name = item.partition(":") %}
+  <li><span class="cell-note">{{ kind|capitalize }}</span> <span class="mono cell-wrap">{{ name }}</span></li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro member_list(title, group) %}
+<h3>{{ title }}</h3>
+{% if group.items %}
+<ul class="ref-list">
+  {% for item in group.items %}
+  <li class="ref-list__item">
+    <span class="mono cell-wrap">{{ item.name }}</span>
+    <span class="cell-note mono">{{ item.short_id }}</span>
+    {% if item.detail %}<span class="cell-note">{{ item.detail }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if group.more %}<p class="field__help">and {{ group.more }} more not listed.</p>{% endif %}
+{% else %}
+<p>None.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro plan_table(title, groups) %}
+{% set shown = groups|selectattr("1")|list %}
+<h3 class="confirm__subheading">{{ title }}</h3>
+{% if shown %}
+<div class="data-table__scroll" role="region" aria-label="{{ title }}" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">{{ title }} this redeploy acts on</caption>
+    <thead>
+      <tr><th scope="col">Action</th><th scope="col">Name</th><th scope="col">Note</th></tr>
+    </thead>
+    <tbody>
+      {% for label, lines, tone in shown %}
+      {% for line in lines %}
+      <tr>
+        <td>{{ badge(label, tone) }}</td>
+        <th scope="row" class="mono cell-wrap">{{ line.name }}</th>
+        <td class="cell-wrap">{{ line.detail or "" }}</td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>No change.</p>
+{% endif %}
+{% endmacro %}

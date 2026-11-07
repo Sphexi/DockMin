@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "restore/_fetch.html" import fetch_progress with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Fetching the archive - dockmin{% endblock %}
+{% set crumb_page = "Fetching the archive" %}
+{% block content %}
+{% call page_header("Fetching the archive", "The archive is being copied from object storage. The review follows when it has arrived.") %}
+<a class="btn" href="{{ route_path('restore') }}">Back to the restore</a>
+{% endcall %}
+{{ fetch_progress(status) }}
+<form class="form" method="post" action="{{ route_path('restore_cancel') }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="form__actions">
+    <button type="submit" class="btn">Cancel the restore</button>
+  </div>
+</form>
+{% endblock %}

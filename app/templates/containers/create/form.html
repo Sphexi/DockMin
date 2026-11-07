@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% from "app_templates/_panel.html" import template_panel as render_template_panel %}
+{% from "containers/create/_rows.html" import repeat_group with context %}
+{% from "containers/create/_sections.html" import choices, details, error_summary, filled, image_field, named_field, may, panel, text, toggle with context %}
+{% from "containers/create/_choices.html" import image_choices with context %}
+{% from "partials/engine_detail.html" import engine_detail_block %}
+{% from "environments/_parts.html" import kind_badge %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ "Duplicate container" if context.duplicate_of else "Create container" }} on {{ context.environment_name }} - dockmin{% endblock %}
+{% set crumb_page = "Duplicate container" if context.duplicate_of else "Create container" %}
+{% block content %}
+{% set duplicating = context.duplicate_of is not none %}
+{% call page_header("Duplicate container" if duplicating else "Create container", ("From " ~ context.source_name ~ " on " ~ context.environment_name) if context.source_name else context.environment_name) %}
+{{ kind_badge(context.is_local) if context.is_local else "" }}
+<a class="btn" href="{{ list_href }}">Cancel</a>
+{% endcall %}
+
+{% if banner %}
+{{ error_state(banner.title, banner.message) }}
+{{ engine_detail_block(engine_detail) }}
+{% endif %}
+{% if state.errors %}
+{{ error_summary() }}
+{% endif %}
+{% if context.is_local and is_administrator %}
+<div class="panel panel--notice" role="note">
+  <p>This environment is the host dockmin runs on. A container created here runs beside dockmin itself.</p>
+</div>
+{% endif %}
+{% if not is_administrator %}
+<p class="field__help">Host bind mounts, host networking, device mappings, privileged mode, added capabilities, a custom runtime and the host PID and IPC namespaces are available to administrators only.</p>
+{% endif %}
+{% if template_panel %}
+{{ render_template_panel(template_panel, "Review every value before you create the container.") }}
+{% endif %}
+{% if context.notices %}
+<div class="panel panel--notice" role="note">
+  <h2>Not carried over from the source</h2>
+  <ul>
+    {% for notice in context.notices %}
+    <li>{{ notice.text }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ submit_href }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if context.duplicate_of %}
+  <input type="hidden" name="from" value="{{ context.duplicate_of }}">
+  {% endif %}
+  {% if template_ref %}
+  <input type="hidden" name="template_ref" value="{{ template_ref }}">
+  {% endif %}
+  <button type="submit" class="visually-hidden" name="intent" value="review" tabindex="-1" aria-hidden="true">Review</button>
+
+  {% call panel("image", "Image") %}
+  {{ image_field(choices_href, "A repository with an optional tag or digest, such as nginx:1.27.") }}
+  {{ choices("pull", "Pull policy", [
+    ("missing", "Pull if missing", "Pulls only when the image is not on this host."),
+    ("always", "Always pull", "Pulls the current image before every create."),
+    ("never", "Never pull", "Creation fails when the image is not on this host."),
+  ], choices_href) }}
+  {{ image_choices(offer, selected, none, state.get("pull"), catalogue, carried=carried_choice) }}
+  {{ named_field(context.suggested_name) }}
+  {% endcall %}
+
+  {% call panel("command", "Command") %}
+  {{ text("command", "Command", help="Replaces the image's default command. Quote arguments that contain spaces.") }}
+  {{ text("entrypoint", "Entrypoint", help="Replaces the image's entrypoint. Quote arguments that contain spaces.") }}
+  {{ text("working_dir", "Working directory", help="An absolute path inside the container.") }}
+  {{ text("user", "User", help="A user name or numeric id, optionally followed by a colon and a group.") }}
+  {% endcall %}
+
+  {% call panel("env", "Environment variables") %}
+  {{ repeat_group("env", "Environment variables", "Added to the image's own variables. A row with the same name replaces the image's value.") }}
+  {% endcall %}
+
+  {% call panel("labels", "Labels") %}
+  {{ repeat_group("labels", "Labels", "Stack membership labels cannot be set here.") }}
+  {% endcall %}
+
+  {% call panel("ports", "Ports") %}
+  {{ repeat_group("ports", "Published ports", "Leave the host port blank to let Docker assign one. A range on both sides must cover the same number of ports.") }}
+  {{ toggle("publish_all", "Publish all exposed ports to random host ports") }}
+  {% endcall %}
+
+  {% call details("mounts", "Volumes and mounts", filled([], ["mounts"])|trim) %}
+  {{ repeat_group("mounts", "Mounts", "A volume source is a volume name; leave it blank for an anonymous volume. A bind source is an absolute host path. A tmpfs mount has no source.") }}
+  {% endcall %}
+
+  {% call details("network", "Network", filled([], ["networks"])|trim or state.get("network_mode", "bridge") != "bridge" or "network_mode" in state.errors) %}
+  {% set modes = [
+    ("bridge", "Default bridge", "The network Docker attaches containers to by default."),
+    ("none", "None", "No network access."),
+  ] %}
+  {% if may("network_modes", "host")|trim %}
+  {% set modes = modes + [("host", "Host", "Shares the host's network stack.")] %}
+  {% endif %}
+  {% set modes = modes + [("networks", "Specific networks", "Attaches to the networks listed below.")] %}
+  {{ choices("network_mode", "Network mode", modes) }}
+  {{ repeat_group("networks", "Networks", "Used with the specific networks mode. The first network is the primary one.") }}
+  {% endcall %}
+
+  {% call details("restart", "Restart policy", filled(["restart_policy", "restart_max_retries"], [])|trim) %}
+  {{ choices("restart_policy", "When the container exits", [
+    ("", "Docker default", "The container is not restarted."),
+    ("no", "Never restart", none),
+    ("always", "Always restart", none),
+    ("unless-stopped", "Restart unless stopped", "Restarts unless it was stopped explicitly."),
+    ("on-failure", "Restart on failure", "Restarts after a non-zero exit."),
+  ]) }}
+  {{ text("restart_max_retries", "Maximum retries", help="Used with restart on failure. Leave blank for no limit.") }}
+  {% endcall %}
+
+  {% call details("resources", "Resources", filled(["cpus", "cpu_shares", "memory", "memory_swap", "pids_limit", "shm_size"], [])|trim) %}
+  {{ text("cpus", "CPUs", help="A number such as 0.5 or 2.") }}
+  {{ text("cpu_shares", "CPU shares", help="A relative weight. Docker's default is 1024.") }}
+  {{ text("memory", "Memory limit", help="A size such as 512m or 2g.") }}
+  {{ text("memory_swap", "Swap limit", help="Memory plus swap, such as 1g. Use -1 for unlimited.") }}
+  {{ text("pids_limit", "PIDs limit", help="The most processes the container may run.") }}
+  {{ text("shm_size", "Shared memory size", help="The size of /dev/shm, such as 64m.") }}
+  {% endcall %}
+
+  {% call details("healthcheck", "Health check", filled(["healthcheck_test", "healthcheck_interval", "healthcheck_timeout", "healthcheck_start_period", "healthcheck_start_interval", "healthcheck_retries"], [])|trim or state.get("healthcheck_mode", "image") != "image" or "healthcheck_mode" in state.errors) %}
+  {{ choices("healthcheck_mode", "Health check", [
+    ("image", "Use the image's health check", none),
+    ("none", "Disable the health check", none),
+    ("command", "Run a command", "Uses the command and timings below."),
+  ]) }}
+  {{ text("healthcheck_test", "Command", help="Run through the container's shell. Exit status 0 is healthy.") }}
+  {{ text("healthcheck_interval", "Interval", help="A duration such as 30s or 1m30s.") }}
+  {{ text("healthcheck_timeout", "Timeout", help="A duration such as 10s.") }}
+  {{ text("healthcheck_start_period", "Start period", help="Failures in this window after start do not count.") }}
+  {{ text("healthcheck_start_interval", "Start interval", help="The interval used during the start period.") }}
+  {{ text("healthcheck_retries", "Retries", help="Consecutive failures before the container is unhealthy.") }}
+  {% endcall %}
+
+  {% call details("logging", "Logging", filled(["log_driver"], ["log_options"])|trim) %}
+  {{ text("log_driver", "Log driver", help="Leave blank for the host's default, such as json-file or local.") }}
+  {{ repeat_group("log_options", "Log options") }}
+  {% endcall %}
+
+  {% call details("dns", "DNS and hosts", filled(["dns_servers", "dns_search", "dns_options"], ["extra_hosts"])|trim) %}
+  {{ text("dns_servers", "DNS servers", help="IP addresses separated by spaces or commas.") }}
+  {{ text("dns_search", "Search domains", help="Separated by spaces or commas.") }}
+  {{ text("dns_options", "DNS options", help="Resolver options such as ndots:2, separated by spaces or commas.") }}
+  {{ repeat_group("extra_hosts", "Extra hosts", "Entries added to the container's hosts file.") }}
+  {% endcall %}
+
+  {% call details("security", "Runtime and security", filled(["init", "cap_drop", "cap_add", "privileged", "runtime", "pid_host", "ipc_host"], ["devices"])|trim) %}
+  {{ toggle("init", "Run an init process as PID 1", "Forwards signals and reaps zombie processes.") }}
+  {{ text("cap_drop", "Dropped capabilities", help="Capability names separated by spaces or commas, such as NET_RAW.") }}
+  {% if may("fields", "cap_add")|trim %}
+  {{ text("cap_add", "Added capabilities", help="Capability names separated by spaces or commas, such as NET_ADMIN.") }}
+  {% endif %}
+  {% if may("fields", "privileged")|trim %}
+  {{ toggle("privileged", "Run in privileged mode", "Gives the container nearly the same access as a process on the host.") }}
+  {% endif %}
+  {% if may("fields", "runtime")|trim %}
+  {{ text("runtime", "Runtime", help="Leave blank for the host's default runtime.") }}
+  {% endif %}
+  {% if may("fields", "pid_host")|trim %}
+  {{ toggle("pid_host", "Share the host's PID namespace") }}
+  {% endif %}
+  {% if may("fields", "ipc_host")|trim %}
+  {{ toggle("ipc_host", "Share the host's IPC namespace") }}
+  {% endif %}
+  {% if may("groups", "devices")|trim %}
+  {{ repeat_group("devices", "Devices", "Host devices exposed to the container. Permissions are a combination of r, w and m.") }}
+  {% endif %}
+  {% endcall %}
+
+  {% call panel("start", "Start") %}
+  {{ toggle("start", "Start the container after creating it") }}
+  {% endcall %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary" name="intent" value="review">Review</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,215 @@
+{# Import with context. #}
+{% from "access/_panel.html" import access_panel with context %}
+{% from "partials/activity_panel.html" import activity_panel with context %}
+{% from "partials/automation_panel.html" import automation_panel with context %}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/stack_logs.html" import stack_logs %}
+{% from "partials/stack_variable_row.html" import stack_variable_row with context %}
+{% from "stacks/_detail.html" import digest with context %}
+{% from "stacks/_files.html" import files_tab with context %}
+{% from "stacks/_parts.html" import changed_chip, last_operation, origin_text with context %}
+{% from "swarm/_parts.html" import health_badge, replicas_text with context %}
+{% from "swarm/stacks/_parts.html" import member_list, stack_status_badge with context %}
+
+{% macro managed_summary(detail) %}
+{% set stack = detail.stack %}
+{% set environment_id = detail.environment_id %}
+<section id="stack-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span>{{ stack_status_badge(stack) }} {{ changed_chip(stack) }}</span>
+      <span class="cell-note">{{ origin_text(stack.origin) }} on {{ detail.environment_name }}</span>
+    </div>
+    <div class="row-actions">
+      {% if detail.can_write %}
+      <a class="btn btn--compact" href="{{ route_path('environment_swarm_stack_edit', environment_id=environment_id, namespace=stack.name) }}">Edit</a>
+      <a class="btn btn--compact btn--primary" href="{{ route_path('environment_swarm_stack_redeploy', environment_id=environment_id, namespace=stack.name) }}">Redeploy</a>
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_stack_remove', environment_id=environment_id, namespace=stack.name) }}">Remove</a>
+      {% endif %}
+      {% if detail.can_manage %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_stack_forget', environment_id=environment_id, namespace=stack.name) }}">Forget</a>
+      {% endif %}
+    </div>
+  </div>
+  {% if stack.origin == "adopted" and stack.last_operation == "adopt" %}
+  <div class="panel panel--notice" role="note">
+    <p>This stack was adopted from objects created outside dockmin, and nothing has been deployed from its file yet. The first redeploy replaces the running tasks of every service, replaces configs and secrets that the Docker command line named, and removes the old ones. The redeploy confirmation names each one.</p>
+  </div>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro service_rows(detail, services) %}
+{% for service in services %}
+<tr>
+  <th scope="row">
+    <div class="cell-stack">
+      {% if service.deployed %}
+      <a class="mono cell-wrap" href="{{ with_origin(route_path('environment_swarm_service_detail', environment_id=detail.environment_id, service_id=service.id), 'stack:' ~ detail.environment_id ~ ':' ~ detail.stack.name) }}">{{ service.name }}</a>
+      <span class="cell-note mono">{{ service.short_id }}</span>
+      {% else %}
+      <span class="mono cell-wrap">{{ service.name }}</span>
+      <span class="cell-note">Not deployed yet</span>
+      {% endif %}
+    </div>
+  </th>
+  <td>{{ service.mode|capitalize if service.mode else "—" }}</td>
+  <td>{% if service.deployed %}{{ replicas_text(service.running, service.desired, none) }}{% else %}—{% endif %}</td>
+  <td>{% if service.deployed %}{{ health_badge(service.running, service.desired) }}{% endif %}</td>
+  <td class="mono cell-wrap">{{ service.image or "—" }}</td>
+</tr>
+{% endfor %}
+{% endmacro %}
+
+{% macro service_table(detail, services, label) %}
+<div class="data-table__scroll" role="region" aria-label="{{ label }}" tabindex="0">
+  <table class="table" data-optional="2 5">
+    <caption class="visually-hidden">{{ label }}</caption>
+    <thead>
+      <tr><th scope="col">Service</th><th scope="col" class="col-optional">Mode</th><th scope="col">Tasks</th><th scope="col">State</th><th scope="col" class="col-optional">Image</th></tr>
+    </thead>
+    <tbody>
+      {{ service_rows(detail, services) }}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro overview_tab(detail) %}
+{% set stack = detail.stack %}
+<h2 id="tab-heading">Overview</h2>
+{% if stack.changed_since_deploy %}
+<div class="panel panel--notice" role="note">
+  <p>The file, the variables or the files changed after the last deploy. Redeploy the stack to apply them.</p>
+</div>
+{% endif %}
+<dl class="facts">
+  <dt>Status</dt>
+  <dd>{{ stack_status_badge(stack) }}</dd>
+  <dt>Last operation</dt>
+  <dd>{{ last_operation(stack) }}</dd>
+  <dt>Last deployed</dt>
+  <dd>{{ when(stack.last_deployed_at, "Never") }}</dd>
+  <dt>Origin</dt>
+  <dd>{{ origin_text(stack.origin) }}</dd>
+  <dt>File digest</dt>
+  <dd>{{ digest(detail.compose_file_digest) }}</dd>
+  <dt>Deployed file digest</dt>
+  <dd>{{ digest(detail.deployed_file_digest) }}</dd>
+  <dt>Resolved configuration digest</dt>
+  <dd>{{ digest(detail.resolved_digest) }}</dd>
+</dl>
+
+<h3>Services</h3>
+{% if not detail.members_available %}
+<p class="field__help">The cluster could not be read, so deployed services are not shown. The services below are the ones the file declares.</p>
+{% else %}
+<p class="field__help">Swarm converges after a deploy, so the task counts are read from the cluster now.</p>
+{% endif %}
+{% if detail.services %}
+{{ service_table(detail, detail.services, "Services in the file") }}
+{% else %}
+<p>The file declares no service.</p>
+{% endif %}
+
+{% if detail.not_in_file %}
+<h3>Services not in the file</h3>
+<p class="field__help">These services carry the stack's name but the file no longer declares them. A redeploy keeps them running unless you choose to remove them on its confirmation.</p>
+{{ service_table(detail, detail.not_in_file, "Services not in the file") }}
+{% endif %}
+
+{{ member_list("Networks", detail.networks) }}
+{{ member_list("Configs", detail.configs) }}
+{{ member_list("Secrets", detail.secrets) }}
+{% if detail.hidden_members %}
+<p class="field__help">{{ detail.hidden_members }} {{ "object" if detail.hidden_members == 1 else "objects" }} of this stack {{ "is" if detail.hidden_members == 1 else "are" }} hidden from you.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro file_tab(detail) %}
+<h2 id="tab-heading">Compose file</h2>
+<p class="field__help">Digest {{ digest(detail.compose_file_digest) }}.
+  {% if detail.can_write %}<a href="{{ route_path('environment_swarm_stack_edit', environment_id=detail.environment_id, namespace=detail.stack.name) }}">Edit the file</a>.{% endif %}</p>
+<pre class="code-block" tabindex="0">{{ detail.compose_file }}</pre>
+{% endmacro %}
+
+{% macro variables_tab(detail) %}
+<h2 id="tab-heading">Variables</h2>
+{% if detail.variables %}
+<div class="data-table__scroll" role="region" aria-label="Variables" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Variables the file is filled in from</caption>
+    <thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for variable in detail.variables %}
+      {% if variable.secret %}
+      {% set link_args = {"environment_id": detail.environment_id, "namespace": detail.stack.name, "variable_id": variable.id} %}
+      {{ stack_variable_row(variable, detail.environment_id, "swarm", detail.stack.name, "variable-row-" ~ variable.id, route_path("environment_swarm_stack_variable_reveal", **link_args), route_path("environment_swarm_stack_variable_row", **link_args), route_path("environment_swarm_stack_detail", environment_id=detail.environment_id, namespace=detail.stack.name) ~ "?tab=variables") }}
+      {% else %}
+      <tr>
+        <th scope="row" class="mono cell-wrap">{{ variable.name }}</th>
+        <td class="mono cell-wrap">{{ variable.value }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p>The stack has no variables.</p>
+{% endif %}
+{% if detail.can_write %}
+<p><a class="btn" href="{{ route_path('environment_swarm_stack_edit', environment_id=detail.environment_id, namespace=detail.stack.name) }}">Edit variables</a></p>
+{% endif %}
+{% endmacro %}
+
+{% macro files_panel(detail) %}
+{{ files_tab(detail.files, detail.can_write, "environment_swarm_stack_file", {"environment_id": detail.environment_id, "namespace": detail.stack.name}) }}
+{% endmacro %}
+
+{% macro access_tab(detail, panel, values, fields) %}
+{% set args = {"environment_id": detail.environment_id, "namespace": detail.stack.name} %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, route_path("environment_swarm_stack_access_save", **args), route_path("environment_swarm_stack_access_delete", **args), values=values, fields=fields) }}
+{% endmacro %}
+
+{% macro automation_tab(detail, automation) %}
+<h2 id="tab-heading">Automation</h2>
+{% if automation is not none %}
+{{ automation_panel(automation, route_path("automation_rule_new") ~ "?" ~ {"environment_id": detail.environment_id, "target_kind": "stack", "target": detail.stack.name}|urlencode, "swarm_stack:" ~ detail.stack.name) }}
+{% else %}
+<p class="field__help">Automation is not available.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro managed_tabs(detail, tab, tab_keys, panel, values, fields, automation=none, activity_log=none, logs=none) %}
+{% set detail_href = route_path("environment_swarm_stack_detail", environment_id=detail.environment_id, namespace=detail.stack.name) %}
+{% set labels = {"overview": "Overview", "file": "Compose file", "variables": "Variables", "files": "Files", "logs": "Logs", "automation": "Automation", "access": "Access"} %}
+<div id="stack-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="Stack sections">
+    <ul class="tabs__list">
+      {% for key in tab_keys %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#stack-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% elif tab == "file" %}{{ file_tab(detail) }}
+    {% elif tab == "variables" %}{{ variables_tab(detail) }}
+    {% elif tab == "files" %}{{ files_panel(detail) }}
+    {% elif tab == "logs" and logs is not none %}{{ stack_logs(logs) }}
+    {% elif tab == "automation" %}{{ automation_tab(detail, automation) }}
+    {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
+    {% endif %}
+    {% if activity_log is not none %}
+    {{ activity_panel(activity_log.title, activity_log) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

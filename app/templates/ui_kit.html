@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/progress_panel.html" import progress_panel %}
+{% from "partials/ui_kit_table.html" import ui_kit_table %}
+{% block title %}UI kit - dockmin{% endblock %}
+{% block content %}
+{% call page_header("UI kit", "The shared components, rendered with sample data.") %}
+{{ confirm_button("kit-confirm", "Remove sample") }}
+{% endcall %}
+
+<section class="section" aria-labelledby="kit-table-heading">
+  <h2 id="kit-table-heading">Data table</h2>
+  <p>Sorting and paging are plain links. With htmx they replace only the table.</p>
+  {{ ui_kit_table(rows, columns, pager) }}
+</section>
+
+<section class="section" aria-labelledby="kit-badges-heading">
+  <h2 id="kit-badges-heading">Badges</h2>
+  <p class="cluster">
+    {{ badge("Neutral") }}
+    {{ badge("Running", "ok") }}
+    {{ badge("Degraded", "warn") }}
+    {{ badge("Unhealthy", "danger") }}
+    {{ badge("Pulling", "info") }}
+  </p>
+</section>
+
+<section class="section" aria-labelledby="kit-form-heading">
+  <h2 id="kit-form-heading">Form field</h2>
+  <form class="form" method="post" action="{{ route_path('ui_kit') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("name", "Environment name", value="", help="Shown in the navigation.", required=true) }}
+    {{ form_field("host", "Host", value="tcp://", error="Enter a host the server can reach.") }}
+  </form>
+</section>
+
+<section class="section" aria-labelledby="kit-states-heading">
+  <h2 id="kit-states-heading">States</h2>
+  <div class="grid">
+    {{ empty_state("No environments", "Add an environment to start managing its containers.") }}
+    {{ error_state("Could not load containers", "The Docker daemon did not respond.", request_id="a1b2c3", retry_href=route_path('ui_kit')) }}
+  </div>
+</section>
+
+<section class="section" aria-labelledby="kit-progress-heading">
+  <h2 id="kit-progress-heading">Long operation</h2>
+  {{ progress_panel("kit-progress", "Pulling sample image", "running", route_path('ui_kit_progress') ~ "?step=2", percent=25, detail="Step 1 of 4.") }}
+</section>
+
+{{ confirmation_dialog("kit-confirm", "Remove sample?", "This removes", route_path('ui_kit'), "Remove", subject="service-01") }}
+{% endblock %}

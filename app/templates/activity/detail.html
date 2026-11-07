@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "activity/_parts.html" import actor_cell, detail_value, environment_cell, result_badge, when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Event {{ view.event.id }} - dockmin{% endblock %}
+{% set crumb_object = "Event " ~ view.event.id %}
+{% block content %}
+{% set event = view.event %}
+{% set origin_targets = ["container", "network", "service", "node", "automation_rule", "image", "volume", "stack"] %}
+{% set recorded = event.detail or {} %}
+{% set recorded_at %}Recorded <time datetime="{{ event.occurred_at|timestamp_iso }}">{{ event.occurred_at|timestamp(seconds=True) }}</time>{% endset %}
+{% call page_header("Event " ~ event.id, recorded_at) %}
+<a class="btn" href="{{ list_href }}">Back to the log</a>
+{% endcall %}
+
+<section class="section" aria-labelledby="what-heading">
+  <h2 id="what-heading">What happened</h2>
+  <dl class="facts">
+    <dt>Time</dt>
+    <dd>{{ when(event) }}</dd>
+    <dt>Request</dt>
+    <dd class="mono">{% if event.request_id is none %}&mdash;{% else %}{{ event.request_id|visible_text }}{% endif %}</dd>
+    <dt>Action</dt>
+    <dd class="mono">{{ event.action|visible_text }}</dd>
+    <dt>Result</dt>
+    <dd>{{ result_badge(event.result) }}</dd>
+    <dt>Category</dt>
+    <dd>{{ {"authentication": "Authentication", "user_action": "User action", "automation": "Automation"}.get(event.category, event.category) }}</dd>
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="who-heading">
+  <h2 id="who-heading">Who did it</h2>
+  <dl class="facts">
+    <dt>Actor</dt>
+    <dd>{{ actor_cell(view) }}</dd>
+    <dt>Actor type</dt>
+    <dd>{{ {"user": "User", "subsystem": "Subsystem", "anonymous": "Anonymous"}.get(event.actor_type, event.actor_type) }}</dd>
+    {% if event.actor_user_id is not none %}
+    <dt>User id</dt>
+    <dd>{{ event.actor_user_id }}</dd>
+    {% endif %}
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="target-heading">
+  <h2 id="target-heading">What it acted on</h2>
+  <dl class="facts">
+    <dt>Target type</dt>
+    <dd class="mono">{{ event.target_type|visible_text }}</dd>
+    <dt>Target id</dt>
+    <dd>{% if event.target_id is none %}&mdash;{% elif target_deleted %}<span class="cell-wrap">{{ event.target_id|visible_text }}</span> {{ badge("Deleted", "neutral") }}{% elif target_href %}<a class="cell-wrap" href="{{ with_origin(target_href, 'activity:-:' ~ event.id if event.target_type in origin_targets else none) }}">{{ event.target_id|visible_text }}</a>{% else %}{{ event.target_id|visible_text }}{% endif %}</dd>
+    <dt>Environment</dt>
+    <dd>{{ environment_cell(view) }}</dd>
+  </dl>
+</section>
+
+{% if event.actor_type == "subsystem" or event.rule_id is not none or event.job_run_id is not none %}
+<section class="section" aria-labelledby="automation-heading">
+  <h2 id="automation-heading">Automation</h2>
+  <dl class="facts">
+    {% if event.actor_subsystem %}
+    <dt>Subsystem</dt>
+    <dd class="mono">{{ event.actor_subsystem|visible_text }}</dd>
+    {% endif %}
+    <dt>Automation</dt>
+    <dd>
+      {% if event.rule_id is not none %}
+      <a class="cell-wrap" href="{{ with_origin(route_path('automation_rule_detail', rule_id=event.rule_id), 'activity:-:' ~ event.id) }}">{% if recorded.get("rule_name") %}{{ recorded.get("rule_name")|visible_text }}{% else %}Automation {{ event.rule_id }}{% endif %}</a>
+      {% elif recorded.get("rule_id") is not none %}
+      <span class="cell-wrap">{% if recorded.get("rule_name") %}{{ recorded.get("rule_name")|visible_text }}{% else %}Automation {{ recorded.get("rule_id")|visible_text }}{% endif %}</span> {{ badge("Deleted", "neutral") }}
+      {% else %}
+      &mdash;
+      {% endif %}
+    </dd>
+    <dt>Run</dt>
+    <dd>{% if event.job_run_id is not none %}<a href="{{ route_path('job_run_detail', run_id=event.job_run_id) }}">Run {{ event.job_run_id }}</a>{% else %}&mdash;{% endif %}</dd>
+  </dl>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="detail-heading">
+  <h2 id="detail-heading">Detail</h2>
+  {% if detail %}
+  <dl class="facts">
+    {% for key, value in detail %}
+    <dt class="mono cell-wrap">{{ key|visible_text }}</dt>
+    <dd>{{ detail_value(value) }}</dd>
+    {% endfor %}
+  </dl>
+  {% else %}
+  <p>This event recorded no detail.</p>
+  {% endif %}
+</section>
+{% endblock %}

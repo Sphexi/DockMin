@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "containers/_confirm.html" import target_facts with context %}
+{% from "images/_parts.html" import credential_fieldset with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Recreate {{ confirmation.name }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Recreate" %}
+{% block content %}
+{% set c = confirmation %}
+{% call page_header("Recreate container", "Review the container below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the container</a>
+{% endcall %}
+
+{% if error %}
+{{ error_state("The container was not recreated", error) }}
+{% endif %}
+<section class="panel create-section" aria-labelledby="recreate-heading">
+  <h2 class="create-section__title" id="recreate-heading">Recreate <span class="mono">{{ c.name }}</span>?</h2>
+  {{ target_facts(c.environment_name, c.is_local, c.name, c.short_id, c.image, c.state) }}
+
+  {% if c.blockers %}
+  <div class="state state--error" role="note">
+    <h3 class="state__title">This container cannot be recreated</h3>
+    <ul>
+      {% for blocker in c.blockers %}
+      <li>{{ blocker.message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if c.restricted %}
+  <div class="panel panel--notice" role="note">
+    <h3>Only an administrator can recreate this container</h3>
+    <p>Its configuration uses options only administrators may set:</p>
+    <ul>
+      {% for option in c.restricted %}
+      <li>{{ option.label }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <h3 class="confirm__subheading">What happens</h3>
+  <ol>
+    {% if c.pull_available %}
+    <li>If you choose to, the image is pulled again.</li>
+    {% endif %}
+    {% if c.was_running %}
+    <li>The container is stopped.</li>
+    {% endif %}
+    <li>The container is renamed while its replacement is built.</li>
+    <li>A new container is created under the name <span class="mono">{{ c.name }}</span> from the same configuration. It has a new ID.</li>
+    {% if c.was_running %}
+    <li>The new container is started.</li>
+    {% endif %}
+    <li>The original container is removed.</li>
+  </ol>
+  <p>If the new container cannot be created or started, the original is restored.</p>
+
+  <h3 class="confirm__subheading">What is kept</h3>
+  <ul>
+    <li>
+      {%- if c.named_volumes %}Named volumes:
+      {% for volume in c.named_volumes %}<span class="mono">{{ volume }}</span>{{ ", " if not loop.last }}{% endfor %}
+      {%- if c.named_volumes_hidden %} and {{ c.named_volumes_hidden }} more
+      {%- endif %}.
+      {%- else %}No named volumes are attached.
+      {%- endif %}</li>
+    <li>
+      {%- if c.anonymous_volume_count %}{{ c.anonymous_volume_count }} anonymous {{ "volume" if c.anonymous_volume_count == 1 else "volumes" }}, carried over by name so the data survives.
+      {%- else %}No anonymous volumes are attached.
+      {%- endif %}</li>
+    <li>
+      {%- if c.networks %}Network attachments:
+      {% for network in c.networks %}<span class="mono">{{ network }}</span>{{ ", " if not loop.last }}{% endfor %}.
+      {%- else %}No network attachments are recreated.
+      {%- endif %}</li>
+    <li>Access settings move to the new container.</li>
+  </ul>
+  {% if c.image_defaults_kept %}
+  <p class="field__help">The image this container was created from is no longer on this host. Values the image supplied, such as environment variables and the command, are copied as explicit settings and will not follow a newer image.</p>
+  {% endif %}
+
+  {% if c.can_submit %}
+  <form class="form" method="post" action="{{ recreate_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_name" value="{{ c.name }}">
+    {% if c.pull_available %}
+    {{ checkbox_field("pull", "Pull the image again first", help="Without this, the image already on this host is used.") }}
+    {% if offer %}
+    <p class="field__help">The credential set below is used only when the image is pulled again. It is bound to <span class="mono cell-wrap">{{ offer.reference.familiar }}</span>.</p>
+    {{ credential_fieldset(offer, selected, choice_error, catalogue) }}
+    {% endif %}
+    {% endif %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Recreate container</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

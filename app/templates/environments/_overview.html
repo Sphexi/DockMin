@@ -1,0 +1,135 @@
+{# Import with context: links are built from route names. #}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/icon.html" import icon with context %}
+
+{% macro card_href(link) -%}
+{{ route_path(link.route, **link.path) }}{% if link.query %}?{{ link.query|urlencode }}{% endif %}
+{%- endmacro %}
+
+{% macro stat_figure(card, figure, headline) %}
+<a class="stat-figure{% if headline %} stat-figure--headline{% endif %}" href="{{ card_href(figure.link) }}">
+  <span class="visually-hidden">{{ card.label }}: </span>
+  <span class="stat-figure__value">
+    {%- if figure.kind == "time" %}{% if figure.at %}{{ when(figure.at, "") }}{% else %}Never{% endif %}
+    {%- elif figure.value is none %}—
+    {%- elif figure.of is not none %}{{ figure.value }} / {{ figure.of }}
+    {%- else %}{{ figure.value }}{% endif -%}
+  </span>
+  <span class="stat-figure__label">{{ figure.label }}</span>
+</a>
+{% endmacro %}
+
+{% macro stat_cards(cards) %}
+<ul class="stat-cards" aria-label="Environment summary">
+  {% for card in cards %}
+  <li class="stat-card{% if card.figures|length == 1 %} stat-card--single{% endif %}" data-card="{{ card.key }}">
+    <p class="stat-card__head">
+      <span class="stat-card__label">{{ card.label }}</span>
+      {{ icon(card.icon, "stat-card__icon") }}
+    </p>
+    {% for figure in card.figures %}
+    {{ stat_figure(card, figure, loop.first) }}
+    {% endfor %}
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro stack_state(state) -%}
+{% if state is none %}{{ badge("Unknown", "warn") }}
+{%- else %}{{ badge(state, {"running": "ok", "partly running": "warn", "stopped": "neutral"}[state]) }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro stack_grid(overview, environment_id) %}
+<section class="section" aria-labelledby="stacks-heading">
+  <div class="section__head">
+    <h2 id="stacks-heading">Stacks</h2>
+    <a class="btn btn--compact" href="{{ route_path('environment_stack_list', environment_id=environment_id) }}">All stacks</a>
+  </div>
+  {% if overview.stacks %}
+  <ul class="stack-grid">
+    {% for tile in overview.stacks %}
+    <li>
+      <a class="stack-tile" href="{{ route_path('environment_stack_detail', environment_id=environment_id, stack_name=tile.name) if tile.kind == 'compose' else route_path('environment_swarm_stack_detail', environment_id=environment_id, namespace=tile.name) }}">
+        <span class="stack-tile__name">{{ tile.name }}</span>
+        {{ stack_state(tile.state) }}
+        <span class="stack-tile__kind">{{ "Compose" if tile.kind == "compose" else "Swarm" }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if overview.stacks_more %}
+  <p class="field__help">and {{ overview.stacks_more }} more. <a href="{{ route_path('environment_stack_list', environment_id=environment_id) }}">All stacks</a></p>
+  {% endif %}
+  {% else %}
+  <p class="field__help">No stack is managed here that you can see.</p>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro container_table(overview, environment_id) %}
+<section class="section" aria-labelledby="containers-heading">
+  <div class="section__head">
+    <h2 id="containers-heading">Containers</h2>
+  </div>
+  {% if overview.containers %}
+  <div class="data-table__scroll" role="region" aria-label="Containers" tabindex="0">
+    <table class="table table--fixed" data-min="40" data-optional="2 3">
+      <caption class="visually-hidden">Containers of this environment</caption>
+      <colgroup><col><col><col><col class="col--badge"><col></colgroup>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Stack</th>
+          <th scope="col">Image</th>
+          <th scope="col">State</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in overview.containers %}
+        <tr>
+          <th scope="row"><a href="{{ route_path('environment_container_detail', environment_id=environment_id, container_id=line.id) }}">{{ line.name }}</a></th>
+          <td>{{ line.stack if line.stack else "—" }}</td>
+          <td class="mono cell-wrap">{{ line.image }}</td>
+          <td>{{ container_state_badge(line.state, line.health) }}</td>
+          <td>{{ line.status }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p><a href="{{ card_href(overview.containers_link) }}">All {{ overview.containers_total }} {{ "container" if overview.containers_total == 1 else "containers" }}</a></p>
+  {% else %}
+  <p class="field__help">No container is running or stopped here that you can see.</p>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro overview_body(overview, environment) %}
+{{ stat_cards(overview.cards) }}
+{% if overview.host == "live" %}
+{{ stack_grid(overview, environment.id) }}
+{{ container_table(overview, environment.id) }}
+{% elif overview.host == "unreachable" %}
+<section class="section panel" aria-labelledby="host-state-heading">
+  <h2 id="host-state-heading">Stacks and containers</h2>
+  <p role="status">The host is not reachable, so its stacks and containers are not read. The figures dockmin keeps itself are shown above.</p>
+</section>
+{% else %}
+<section class="section" aria-labelledby="host-state-heading">
+  <h2 id="host-state-heading" class="visually-hidden">Stacks and containers</h2>
+  {{ error_state("Stacks and containers cannot be read", "The host could not be read just now.", retry_href=route_path("environment_detail", environment_id=environment.id), region_id="environment-overview", swap="innerHTML") }}
+</section>
+{% endif %}
+{% endmacro %}
+
+{% macro environment_overview(overview, environment) %}
+<div id="environment-overview">
+  {{ overview_body(overview, environment) }}
+</div>
+{% endmacro %}

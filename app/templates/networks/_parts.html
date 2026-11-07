@@ -1,0 +1,47 @@
+{# Import with context: links come from route names. #}
+{% from "partials/network_badge.html" import network_badge %}
+
+{% macro kind_badge(kind) %}
+{% if kind != "user" %}{{ network_badge(kind|capitalize, kind) }}{% endif %}
+{% endmacro %}
+
+{% macro flags(internal, attachable, ipv6) %}
+{% if internal or attachable or ipv6 %}
+<ul class="inline-list">
+  {% if internal %}<li class="chip">Internal</li>{% endif %}
+  {% if attachable %}<li class="chip">Attachable</li>{% endif %}
+  {% if ipv6 %}<li class="chip">IPv6</li>{% endif %}
+</ul>
+{% else %}
+<span class="cell-note">None</span>
+{% endif %}
+{% endmacro %}
+
+{% macro stack_cell(stack, environment_id) %}
+{% if stack %}
+<a href="{{ route_path('environment_network_list', environment_id=environment_id) }}?{{ {'stack': stack}|urlencode }}">{{ stack }}</a>
+{% else %}
+<span class="cell-note">None</span>
+{% endif %}
+{% endmacro %}
+
+{% macro container_base(environment_id) -%}
+{{ route_path("environment_container_list", environment_id=environment_id) }}
+{%- endmacro %}
+
+{% macro facts(impact) %}
+<dl class="facts">
+  <dt>Kind</dt>
+  <dd>{{ kind_badge(impact.kind) if impact.kind != "user" else "User-defined" }}</dd>
+  <dt>ID</dt>
+  <dd class="mono cell-wrap">{{ impact.network_id }}</dd>
+  <dt>Driver</dt>
+  <dd class="mono">{{ impact.driver }}</dd>
+  <dt>Scope</dt>
+  <dd>{{ impact.scope }}</dd>
+  <dt>Stack</dt>
+  <dd>{{ impact.stack or "None" }}</dd>
+  <dt>Environment</dt>
+  <dd>{{ impact.environment_name }}</dd>
+</dl>
+{% endmacro %}

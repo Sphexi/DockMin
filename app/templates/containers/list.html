@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "containers/_tables.html" import containers_results, results_summary with context %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/container_state_label.html" import container_state_label %}
+{% from "partials/disclosure.html" import disclosure with context %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/list_bar.html" import list_bar %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Containers on {{ environment.name }} - dockmin{% endblock %}
+{% block content %}
+{% set list_href = route_path("environment_container_list", environment_id=environment.id) %}
+{% call page_header("Containers", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ route_path('environment_detail', environment_id=environment.id) }}">Back to environment</a>
+{% endcall %}
+
+<form id="container-filters" class="filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter containers"
+      hx-get="{{ list_href }}" hx-target="#containers-results" hx-swap="innerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#container-filters select, #container-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-state">State</label>
+    </div>
+    <select class="field__input" id="field-state" name="state">
+      <option value="">Any state</option>
+      {% for value in states %}
+      <option value="{{ value }}"{% if state == value %} selected{% endif %}>{{ container_state_label(value) }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <div class="field__head">
+      <label class="field__label" for="field-health">Health</label>
+    </div>
+    <select class="field__input" id="field-health" name="health">
+      <option value="">Any health</option>
+      {% for value in health_options %}
+      <option value="{{ value }}"{% if health == value %} selected{% endif %}>{{ value|capitalize }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {{ form_field("image", "Image contains", value=image, type="search", autocomplete="off") }}
+  {{ name_field("stack", "Stack", route_path("environment_suggestions", environment_id=environment.id, kind="stacks") ~ "?stack_kind=compose", value=stack, type="search") }}
+  <details class="filters__wide"{% if labels %} open{% endif %}>
+    <summary>Labels{% if labels %} ({{ labels|length }}){% endif %}</summary>
+    <p class="field__help">Enter <span class="mono">key</span> or <span class="mono">key=value</span>. Only containers carrying every label are shown.</p>
+    <div class="filters__labels">
+      {% for value in labels %}
+      <div class="field">
+        <div class="field__head">
+          <label class="field__label" for="field-label-{{ loop.index }}">Label {{ loop.index }}</label>
+        </div>
+        <input class="field__input" id="field-label-{{ loop.index }}" name="label" type="search" value="{{ value }}" autocomplete="off">
+      </div>
+      {% endfor %}
+      {% if labels|length < max_labels %}
+      <div class="field">
+        <div class="field__head">
+          <label class="field__label" for="field-label-{{ labels|length + 1 }}">{{ "Add a label" if labels else "Label" }}</label>
+        </div>
+        <input class="field__input" id="field-label-{{ labels|length + 1 }}" name="label" type="search" autocomplete="off">
+      </div>
+      {% endif %}
+    </div>
+  </details>
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply filters</button>
+    <a class="btn" href="{{ list_href }}">Reset</a>
+  </div>
+</form>
+
+<div id="action-region" class="action-region"></div>
+<p class="loading" role="status">Loading&hellip;</p>
+
+{% call list_bar(results_summary(none if (errors or failure) else total, filtered)) %}
+{% if may_create %}
+<a class="btn btn--primary" href="{{ route_path('environment_container_new', environment_id=environment.id) }}">Create container</a>
+{% endif %}
+{% endcall %}
+<div id="containers-results">
+  {{ containers_results(rows, columns, pager, total, writable, filtered, errors, failure, retry_href, environment_id, actions, health_unavailable, may_create, instance_href=instance_href) }}
+</div>
+
+{% if is_admin %}
+{% call disclosure("effective-access", "Effective access") %}
+<form class="filters" method="get" action="{{ route_path('environment_container_effective_access', environment_id=environment.id) }}">
+  {{ name_field("username", "Username", route_path("suggestions", kind="users"), help="Shows what this account can reach among the containers on this host, and why.", required=true) }}
+  <div class="form__actions">
+    <button type="submit" class="btn">Explain access</button>
+  </div>
+</form>
+{% endcall %}
+{% endif %}
+{% endblock %}

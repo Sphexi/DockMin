@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "notifications/_fields.html" import channel_field %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ ("Edit " ~ channel.name) if editing else "Add " ~ spec.label ~ " channel" }} - dockmin{% endblock %}
+{% set crumb_object = channel.name if editing else none %}
+{% set crumb_object_href = route_path('notification_channel_detail', channel_id=channel.id) if editing else none %}
+{% set crumb_page = "Edit" if editing else "Add channel" %}
+{% block content %}
+{% set back = route_path('notification_channel_detail', channel_id=channel.id) if editing else route_path('notification_channels') %}
+{% set stored = channel.secrets_set if editing else [] %}
+{% call page_header("Edit channel" if editing else "Add " ~ spec.label ~ " channel", (channel.name ~ ". " ~ spec.description) if editing else spec.description) %}
+<a class="btn" href="{{ back }}">Cancel</a>
+{% endcall %}
+
+{{ unplaced_errors(errors, ["name"] + spec.fields|map(attribute="name")|list) }}
+
+<form class="form form--wide" method="post" data-submit-once
+      action="{{ route_path('notification_channel_update', channel_id=channel.id) if editing else route_path('notification_channel_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="kind" value="{{ spec.kind }}">
+  {% if editing %}
+  <input type="hidden" name="expected_updated_at" value="{{ channel.updated_at }}">
+  {% endif %}
+
+  {{ form_field("name", "Name", value=state.name, error=errors.get("name"), help="Up to 100 characters. Names are unique, ignoring case.", required=true) }}
+  {{ checkbox_field("is_enabled", "Send notifications through this channel", checked=state.is_enabled, help="Turn this off to keep the settings and stop sending.") }}
+
+  {% for item in spec.fields %}
+  {{ channel_field(item, state, errors, stored) }}
+  {% endfor %}
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">{{ "Save changes" if editing else "Add channel" }}</button>
+    <a class="btn" href="{{ back }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

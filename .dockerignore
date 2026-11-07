@@ -1,0 +1,14 @@
+*
+!pyproject.toml
+!build_version.py
+!README.md
+!LICENSE
+!requirements.lock
+!build-requirements.lock
+!app/
+!updater/
+!licenses/
+app/**/__pycache__
+app/**/*.py[co]
+updater/**/__pycache__
+updater/**/*.py[co]

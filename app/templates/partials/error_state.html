@@ -1,0 +1,19 @@
+{% from "partials/engine_detail.html" import engine_detail_block %}
+{% macro error_state(title, message, request_id=none, retry_href=none, region_id=none, swap="outerHTML", region_root=true, engine_detail=none) %}
+{% set swap = choice(swap, ["outerHTML", "innerHTML"]) %}
+<div class="state state--error" role="alert"
+     {%- if region_id and swap == "outerHTML" and region_root %} id="{{ region_id }}"{% endif %}>
+  <h2 class="state__title">{{ title }}</h2>
+  <p class="state__body">{{ message }}</p>
+  {{ engine_detail_block(engine_detail) }}
+  {% if request_id %}
+  <p class="state__meta">Reference <span class="mono">{{ request_id }}</span></p>
+  {% endif %}
+  {% if retry_href %}
+  <p>
+    <a class="btn" href="{{ retry_href }}"
+       {%- if region_id %} hx-get="{{ retry_href }}" hx-target="#{{ region_id }}" hx-swap="{{ swap }}"{% endif %}>Try again</a>
+  </p>
+  {% endif %}
+</div>
+{% endmacro %}

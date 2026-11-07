@@ -1,0 +1,15 @@
+{# Import with context: rows link to routes. #}
+{% from "partials/data_table.html" import data_table %}
+
+{% macro tags_table(rows, columns, pager) %}
+{% call data_table("tags-table", "Tags", columns, pager, empty_title="No tags", empty_body="Create a tag to label environments and filter the dashboard.", empty_action_label="Create a tag", empty_action_href="#tag-create-heading") %}
+{% for row in rows %}
+<tr>
+  <th scope="row">{{ row.name }}</th>
+  <td class="is-numeric">{{ row.environment_count }}</td>
+  <td><time datetime="{{ row.created_at|timestamp_iso }}">{{ row.created_at|timestamp }}</time></td>
+  <td><a class="btn" href="{{ route_path('tag_delete_confirm', tag_id=row.id) }}" aria-label="Delete tag {{ row.name }}">Delete</a></td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

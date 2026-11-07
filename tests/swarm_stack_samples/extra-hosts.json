@@ -1,0 +1,39 @@
+{
+  "name": "shop",
+  "networks": {
+    "default": {
+      "ipam": {},
+      "name": "shop_default"
+    }
+  },
+  "services": {
+    "a": {
+      "command": null,
+      "entrypoint": null,
+      "extra_hosts": [
+        "h1=10.0.0.1",
+        "h2=10.0.0.2",
+        "h3=::1",
+        "h4=host-gateway",
+        "h5=fe80::1"
+      ],
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    },
+    "b": {
+      "command": null,
+      "entrypoint": null,
+      "extra_hosts": [
+        "h1=10.0.0.1",
+        "h2=10.0.0.2",
+        "h2=10.0.0.3"
+      ],
+      "image": "registry:2",
+      "networks": {
+        "default": null
+      }
+    }
+  }
+}

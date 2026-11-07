@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% from "server/instance_update_status.html" import update_status %}
+{% set updating = update_id is defined %}
+{% block title %}{{ "Updating dockmin" if updating else "Restarting dockmin" }} - dockmin{% endblock %}
+{% block head_extra %}
+<noscript><meta http-equiv="refresh" content="{{ refresh_seconds }};url={{ route_path('server_instance') if updating else dashboard_href }}"></noscript>
+{% endblock %}
+{% set crumb_page = "Updating" if updating else "Restarting" %}
+{% block content %}
+{% if updating %}
+{{ page_header("Updating dockmin", "The container " ~ container_name ~ " is being replaced by one from the new image.") }}
+{% else %}
+{{ page_header("Restarting dockmin", "The container " ~ container_name ~ " is being restarted.") }}
+{% endif %}
+
+<section class="panel" aria-labelledby="restart-status-heading"
+         data-restart-poll data-boot-id="{{ boot_id }}"{% if not updating %} data-give-up="{{ give_up_seconds }}"{% endif %}
+         hx-get="{{ boot_href }}" hx-trigger="every {{ poll_seconds }}s" hx-target="find [data-restart-boot]" hx-swap="innerHTML">
+  <h2 id="restart-status-heading">{{ "Availability" if updating else "Restart status" }}</h2>
+  {% if updating %}
+  <p data-restart-message role="status">dockmin stays available while the images are pulled. From the moment the update helper stops the container until the new one is healthy, it is unavailable: stopping takes up to {{ stop_timeout }} seconds and the new container has up to {{ health_timeout_seconds }} seconds to become healthy.</p>
+  {% else %}
+  <p data-restart-message role="status">The container is stopping and starting again. Stopping can take up to {{ stop_timeout }} seconds.</p>
+  {% endif %}
+  <span data-restart-boot hidden></span>
+  <p data-restart-done hidden role="status">dockmin is running again.{% if updating %} The result of the update is under Progress.{% endif %}</p>
+  {% if not updating %}
+  <p data-restart-failed hidden role="alert">dockmin did not restart within {{ give_up_seconds }} seconds. Check the log of the container on the Docker host.</p>
+  {% endif %}
+  <p data-nojs-only>This page opens the {{ "Instance page" if updating else "dashboard" }} after {{ refresh_seconds }} seconds. If dockmin is not back yet, reload it until it is.</p>
+  <p><a class="btn" href="{{ route_path('server_instance') if updating else dashboard_href }}">{{ "Open the Instance page" if updating else "Go to the dashboard" }}</a></p>
+</section>
+
+{% if updating %}
+<section class="panel panel--stacked" aria-labelledby="update-progress-heading"
+         data-update-poll data-give-up="{{ give_up_seconds }}" data-give-up-phase="{{ give_up_phase }}">
+  <h2 id="update-progress-heading">Progress</h2>
+  {{ update_status({"phase": "pulling_target"}, status_poll_seconds, status_href) }}
+  <p data-update-failed hidden role="alert">The update has not finished {{ give_up_seconds }} seconds after the update helper took over. If dockmin does not return, the previous container is left stopped on the Docker host as <span class="mono">{{ container_name }}-previous</span>, or as <span class="mono">{{ container_name }}</span> if it was not yet renamed. Start it with <span class="mono">docker start</span> and that name.</p>
+</section>
+{% endif %}
+{% endblock %}

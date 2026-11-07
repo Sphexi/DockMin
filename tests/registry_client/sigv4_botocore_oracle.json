@@ -1,0 +1,48 @@
+{
+ "botocore_version": "1.43.115",
+ "cases": [
+  {
+   "access_key_id": "AKIAIOSFODNN7EXAMPLE",
+   "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260102/eu-west-2/ecr/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=fb6fe5f4a0baee00676b446ea97dc0738ac76936c3ac2362c2f817e3eeaed35a",
+   "canonical_request": "POST\n/\n\ncontent-type:application/x-amz-json-1.1\nhost:api.ecr.eu-west-2.amazonaws.com\nx-amz-date:20260102T030405Z\nx-amz-target:AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken\n\ncontent-type;host;x-amz-date;x-amz-target\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+   "host": "api.ecr.eu-west-2.amazonaws.com",
+   "region": "eu-west-2",
+   "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+   "signature": "fb6fe5f4a0baee00676b446ea97dc0738ac76936c3ac2362c2f817e3eeaed35a",
+   "signing_key_hex": "be568dbc568721aa86d5ca4f6f96ce63a77b564e599dfd7fade12f5192cf96a2",
+   "string_to_sign": "AWS4-HMAC-SHA256\n20260102T030405Z\n20260102/eu-west-2/ecr/aws4_request\n5c7eed8958a9d493c39fb94304905dd328ee7e77acedc196345782f931095233",
+   "timestamp": "20260102T030405Z"
+  },
+  {
+   "access_key_id": "AKIAIOSFODNN7EXAMPLE",
+   "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260102/cn-north-1/ecr/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=b5090bf36a6fb0b7ebaf3b9ba8fdbf595a527afbd34c19eb90e5028d2b3423e9",
+   "canonical_request": "POST\n/\n\ncontent-type:application/x-amz-json-1.1\nhost:api.ecr.cn-north-1.amazonaws.com.cn\nx-amz-date:20260102T030405Z\nx-amz-target:AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken\n\ncontent-type;host;x-amz-date;x-amz-target\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+   "host": "api.ecr.cn-north-1.amazonaws.com.cn",
+   "region": "cn-north-1",
+   "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+   "signature": "b5090bf36a6fb0b7ebaf3b9ba8fdbf595a527afbd34c19eb90e5028d2b3423e9",
+   "signing_key_hex": "d47b15f7a739e567321a5297329694e82d2cb703490f029b8f8fded4570cff7a",
+   "string_to_sign": "AWS4-HMAC-SHA256\n20260102T030405Z\n20260102/cn-north-1/ecr/aws4_request\n7ff454eba60dfab33a692888217ce03c92bdb384d8121374582bd7c82ce2271c",
+   "timestamp": "20260102T030405Z"
+  },
+  {
+   "access_key_id": "AKIAIOSFODNN7EXAMPLE",
+   "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260102/us-gov-west-1/ecr/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=e7d8f7fc89b94ce3703d5233ef34c225fe96c11ac628e1355738c4b1b7ae14f0",
+   "canonical_request": "POST\n/\n\ncontent-type:application/x-amz-json-1.1\nhost:api.ecr.us-gov-west-1.amazonaws.com\nx-amz-date:20260102T030405Z\nx-amz-target:AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken\n\ncontent-type;host;x-amz-date;x-amz-target\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+   "host": "api.ecr.us-gov-west-1.amazonaws.com",
+   "region": "us-gov-west-1",
+   "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+   "signature": "e7d8f7fc89b94ce3703d5233ef34c225fe96c11ac628e1355738c4b1b7ae14f0",
+   "signing_key_hex": "c68711c13bfe40e1ae9a9d35b8024f813e986af50d2d3a6d56e13cbee9316211",
+   "string_to_sign": "AWS4-HMAC-SHA256\n20260102T030405Z\n20260102/us-gov-west-1/ecr/aws4_request\n0526d88f5758ffbb71ba153fec99eec9ac9778a3d655094690e83e34294913e9",
+   "timestamp": "20260102T030405Z"
+  }
+ ],
+ "derivation": {
+  "date": "20120215",
+  "region": "us-east-1",
+  "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "service": "iam",
+  "signing_key_hex": "004aa806e13dae88b9032d9261bcb04c67d023afadd221e6b0d206e1760e0b5e"
+ }
+}

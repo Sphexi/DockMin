@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Prune result - dockmin{% endblock %}
+{% set crumb_page = "Prune result" %}
+{% block content %}
+{% set labels = {
+  "removed": ("Removed", "ok"),
+  "skipped_changed": ("Skipped: changed since you reviewed it", "warn"),
+  "skipped_in_use": ("Skipped: a container uses it now", "warn"),
+  "busy": ("Skipped: another operation is running on it", "warn"),
+  "gone": ("Already gone", "neutral"),
+  "failed": ("Failed", "danger"),
+} %}
+{% call page_header("Prune result", environment.name) %}
+<a class="btn btn--primary" href="{{ list_href }}">Back to networks</a>
+{% endcall %}
+
+<div class="panel" role="status">
+  <p>{{ result.removed }} of {{ result.items|length }} {{ "network" if result.items|length == 1 else "networks" }} removed.</p>
+</div>
+<div class="data-table__scroll" role="region" aria-label="Result for each network" tabindex="0">
+  <table class="table">
+    <caption class="visually-hidden">Result for each listed network</caption>
+    <thead>
+      <tr><th scope="col">Network</th><th scope="col">Result</th></tr>
+    </thead>
+    <tbody>
+      {% for item in result.items %}
+      {% set shown = labels[item.status] %}
+      <tr>
+        <th scope="row">
+          <div class="cell-stack">
+            <span class="mono cell-wrap">{{ item.name }}</span>
+            <span class="cell-note mono">{{ item.short_id }}</span>
+          </div>
+        </th>
+        <td>{{ badge(shown[0], shown[1]) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

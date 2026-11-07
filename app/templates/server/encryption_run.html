@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "server/_encryption_run.html" import encryption_run %}
+{% from "partials/page_header.html" import page_header %}
+{% set run_title = "Check of stored secrets" if run.kind == "check" else "Re-encryption of stored secrets" %}
+{% block title %}{{ run_title }} - dockmin{% endblock %}
+{% set crumb_page = "Check" if run.kind == "check" else "Re-encryption" %}
+{% block content %}
+{% call page_header(run_title) %}
+<a class="btn" href="{{ overview_href }}">Back to Encryption</a>
+{% endcall %}
+{{ encryption_run(run, rows, href, poll_seconds) }}
+{% endblock %}

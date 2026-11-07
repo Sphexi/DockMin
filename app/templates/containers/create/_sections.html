@@ -1,0 +1,124 @@
+{# Import with context: the helpers read the form state, the administrator flag and the administrator-only sets from the page context. #}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/name_field.html" import name_field %}
+{% from "partials/radio_field.html" import radio_field %}
+
+{% set field_labels = {
+  "image": "Image", "pull": "Pull policy", "name": "Name", "command": "Command",
+  "entrypoint": "Entrypoint", "working_dir": "Working directory", "user": "User",
+  "network_mode": "Network mode", "restart_policy": "Restart policy",
+  "restart_max_retries": "Maximum retries", "cpus": "CPUs", "cpu_shares": "CPU shares",
+  "memory": "Memory limit", "memory_swap": "Swap limit", "pids_limit": "PIDs limit",
+  "shm_size": "Shared memory size", "cap_add": "Added capabilities",
+  "cap_drop": "Dropped capabilities", "dns_servers": "DNS servers",
+  "dns_search": "Search domains", "dns_options": "DNS options",
+  "healthcheck_mode": "Health check", "healthcheck_test": "Health check command",
+  "healthcheck_interval": "Health check interval", "healthcheck_timeout": "Health check timeout",
+  "healthcheck_start_period": "Health check start period",
+  "healthcheck_start_interval": "Health check start interval",
+  "healthcheck_retries": "Health check retries", "log_driver": "Log driver",
+  "runtime": "Runtime", "init": "Init process", "privileged": "Privileged mode",
+  "pid_host": "Host PID namespace", "ipc_host": "Host IPC namespace",
+  "publish_all": "Publish all ports", "start": "Start",
+} %}
+{% set group_labels = {
+  "env": "Environment variables", "labels": "Labels", "ports": "Port mappings",
+  "mounts": "Mounts", "networks": "Networks", "devices": "Devices",
+  "extra_hosts": "Extra hosts", "log_options": "Log options",
+} %}
+{% set row_subjects = {
+  "env": "Environment variable", "label": "Label", "port": "Port mapping", "mount": "Mount",
+  "network": "Network", "device": "Device", "host": "Extra host", "logopt": "Log option",
+} %}
+
+{% macro may(kind, value) -%}
+{{ "1" if is_administrator or value not in admin_only[kind] }}
+{%- endmacro %}
+
+{% macro filled(names, groups) -%}
+{% for name in names if state.get(name) or name in state.errors %}1{% endfor %}
+{%- for group in groups if state.rows.get(group) or group in state.errors %}1{% endfor %}
+{%- endmacro %}
+
+{% macro panel(section, title) %}
+<section class="panel create-section" id="section-{{ section }}" aria-labelledby="section-{{ section }}-title">
+  <h2 class="create-section__title" id="section-{{ section }}-title">{{ title }}</h2>
+  <div class="create-section__body">{{ caller() }}</div>
+</section>
+{% endmacro %}
+
+{% macro details(section, title, open) %}
+<details class="panel create-section" id="section-{{ section }}"{% if open %} open{% endif %}>
+  <summary class="create-section__title">{{ title }}</summary>
+  <div class="create-section__body">{{ caller() }}</div>
+</details>
+{% endmacro %}
+
+{% macro text(name, label, help=none, required=false) %}
+{{ form_field(name, label, value=state.get(name), error=state.errors.get(name), help=help, required=required) }}
+{% endmacro %}
+
+{% macro image_field(choices_href, help) %}
+{{ name_field("image", "Image", route_path("environment_suggestions", environment_id=environment_id, kind="images"), value=state.get("image"), error=state.errors.get("image"), help=help, required=true, choices_href=choices_href) }}
+{% endmacro %}
+
+{% macro named_field(placeholder) %}
+{% set error = state.errors.get("name") %}
+<div class="field"{% if error %} data-invalid{% endif %}>
+  <div class="field__head">
+    <label class="field__label" for="field-name">Name</label>
+    <p class="field__help" id="field-name-help">Leave blank to let Docker assign a name.</p>
+  </div>
+  <input class="field__input" id="field-name" name="name" type="text" value="{{ state.get('name') }}"
+         {%- if placeholder %} placeholder="{{ placeholder }}"{% endif %}
+         {%- if error %} aria-invalid="true"{% endif %}
+         aria-describedby="field-name-help{% if error %} field-name-error{% endif %}" autocomplete="off">
+  {% if error %}
+  <p class="field__error" id="field-name-error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# options are (value, label, help) triples; the first listed is used when nothing was submitted. #}
+{% macro choices(name, legend, options, choices_href=none) %}
+{% set error = state.errors.get(name) %}
+{% set current = state.get(name) or options[0][0] %}
+<fieldset class="choice-group" id="field-{{ name }}"{% if error %} data-invalid{% endif %}
+          {%- if choices_href %} hx-post="{{ choices_href }}" hx-trigger="change" hx-target="#image-choices" hx-swap="outerHTML" hx-sync="closest form:replace"{% endif %}>
+  <legend>{{ legend }}</legend>
+  {% for value, label, help in options %}
+  {{ radio_field(name, label, value, checked=current == value, help=help) }}
+  {% endfor %}
+  {% if error %}
+  <p class="field__error">{{ error }}</p>
+  {% endif %}
+</fieldset>
+{% endmacro %}
+
+{% macro toggle(name, label, help=none) %}
+{% set error = state.errors.get(name) %}
+{{ checkbox_field(name, label, checked=state.checked(name), help=help) }}
+{% if error %}
+<p class="field__error">{{ error }}</p>
+{% endif %}
+{% endmacro %}
+
+{% macro error_summary() %}
+<div class="state state--error error-summary" role="alert">
+  <h2 class="state__title">Check the form</h2>
+  <p class="state__body">The container was not created. Fix the items below; every value you entered is kept.</p>
+  <ul>
+    {% for key, message in state.errors.items() %}
+    {% set parts = key.split("-") %}
+    <li>
+      {%- if key in field_labels %}<a href="#field-{{ key }}">{{ field_labels[key] }}</a>: {{ message }}
+      {%- elif key in group_labels %}<a href="#group-{{ key }}">{{ group_labels[key] }}</a>: {{ message }}
+      {%- elif parts|length == 3 and parts[0] in row_subjects and parts[1].isdigit() %}<a href="#field-{{ key }}">{{ row_subjects[parts[0]] }} {{ parts[1]|int + 1 }}, {{ parts[2]|replace("_", " ") }}</a>: {{ message }}
+      {%- else %}{{ message }}
+      {%- endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}

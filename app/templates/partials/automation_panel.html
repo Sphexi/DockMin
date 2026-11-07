@@ -1,0 +1,84 @@
+{# panel holds rules, more and can_add; a rule of another user carries no name, target or link; return_to names the object the page returns to. Import with context. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/job_state_badge.html" import job_state_badge %}
+{% from "jobs/_parts.html" import outcome_badge %}
+
+{% macro automation_panel(panel, add_href, return_to) %}
+{% set rules = panel.rules|default([]) %}
+{% set more = panel.more|default(0) %}
+{% set can_add = panel.can_add|default(true) %}
+{% set pause_options = panel.pause_options|default([]) %}
+<div class="automation-panel">
+  {% if rules %}
+  <ul class="automation-list">
+    {% for rule in rules %}
+    <li class="automation-list__item">
+      <div class="cell-stack">
+        {% if rule.manageable %}
+        <a href="{{ route_path('automation_rule_detail', rule_id=rule.rule_id) }}">{{ rule.name }}</a>
+        <span class="cell-note">{{ rule.subsystem }}: {{ rule.target }}</span>
+        {% else %}
+        <span>An automation of another user</span>
+        <span class="cell-note">{{ rule.subsystem }}</span>
+        {% endif %}
+      </div>
+      <dl class="facts automation-list__facts">
+        <dt>Schedule</dt>
+        <dd>{{ rule.schedule }}</dd>
+        <dt>State</dt>
+        <dd>
+          {% if rule.state == "paused" %}
+          {% set paused_until %}until <time datetime="{{ rule.paused_until|timestamp_iso }}">{{ rule.paused_until|timestamp }}</time>{% endset %}
+          {{ job_state_badge("paused", paused_until) }}
+          {%- elif rule.state == "unscheduled" %}{{ badge("Nothing scheduled", "warn") }}
+          {%- else %}{{ job_state_badge(rule.state) }}
+          {%- endif %}
+        </dd>
+        <dt>Next run</dt>
+        <dd>{% if rule.schedule_kind == "webhook" %}{{ "Pending" if rule.next_run_at else "When called" }}{% elif rule.next_run_at %}<time datetime="{{ rule.next_run_at|timestamp_iso }}">{{ rule.next_run_at|timestamp }}</time>{% else %}&mdash;{% endif %}</dd>
+        <dt>Last run</dt>
+        <dd>
+          {% if rule.last_outcome %}
+          {% if rule.manageable and rule.last_run_id %}<a href="{{ route_path('automation_rule_run', rule_id=rule.rule_id, run_id=rule.last_run_id) }}">{{ outcome_badge(rule.last_outcome) }}</a>{% else %}{{ outcome_badge(rule.last_outcome) }}{% endif %}
+          {% else %}
+          Never run
+          {% endif %}
+        </dd>
+      </dl>
+      {% if rule.manageable and (rule.paused_until or rule.state in ("scheduled", "running", "unscheduled", "on_call")) %}
+      <div class="row-actions">
+        {% if rule.paused_until %}
+        <form class="inline-form" method="post" action="{{ route_path('automation_rule_resume', rule_id=rule.rule_id) }}" data-submit-once>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="return_to" value="{{ return_to }}">
+          <button type="submit" class="btn btn--compact">Resume{% if rule.name %}<span class="visually-hidden"> {{ rule.name }}</span>{% endif %}</button>
+        </form>
+        {% else %}
+        <form class="inline-form" method="post" action="{{ route_path('automation_rule_pause', rule_id=rule.rule_id) }}" data-submit-once>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="return_to" value="{{ return_to }}">
+          <label class="visually-hidden" for="pause-{{ rule.rule_id }}">Pause {{ rule.name }} for</label>
+          <select class="field__input field__input--auto" id="pause-{{ rule.rule_id }}" name="duration">
+            {% for value, label in pause_options %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn--compact">Pause{% if rule.name %}<span class="visually-hidden"> {{ rule.name }}</span>{% endif %}</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if more %}
+  <p class="field__help">and {{ more }} more {{ "automation" if more == 1 else "automations" }} not listed here.</p>
+  {% endif %}
+  {% else %}
+  <p class="field__help">Nothing acts on this yet.</p>
+  {% endif %}
+  {% if can_add %}
+  <p><a class="btn btn--compact" href="{{ add_href }}">Add automation</a></p>
+  {% endif %}
+</div>
+{% endmacro %}

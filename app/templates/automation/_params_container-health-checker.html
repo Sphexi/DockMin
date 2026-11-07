@@ -1,0 +1,8 @@
+{% from "automation/_fields.html" import number_param with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% set release_text = state.parameters.get("auto_release", "false")|lower %}
+<p class="field__help">The checker restarts a container that reports unhealthy. Once a container has used its budget it is left alone, and each run reports it, until someone acts on it or this automation is edited.</p>
+{{ number_param("max_restarts", "Restarts allowed per container", state, "How many times one container may be restarted within the window. 1 to 20. Default 3.", 1, 20, "3") }}
+{{ number_param("window_seconds", "Window in seconds", state, "The period the restart count is kept over. 300 to 86400. Default 3600.", 300, 86400, "3600") }}
+<input type="hidden" name="param_auto_release" value="false">
+{{ checkbox_field("param_auto_release", "Release a held container when it recovers", "true", checked=(release_text in ["true", "1", "on", "yes", "t", "y"]), help="A held container that has stayed healthy for a full window is released, and its restarts start again. A container that fails intermittently goes through the restarts allowed per container again on each bad spell. Off by default.") }}

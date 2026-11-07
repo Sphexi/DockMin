@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Remove build context {{ confirmation.context.name }} from {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Remove build context" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Remove build context", "Review the context below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the files</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Remove build context <span class="mono cell-wrap">{{ review.context.name }}</span> from {{ review.stack }}?</h2>
+  {{ confirm_targets([{"name": review.context.name, "detail": "in " ~ review.stack ~ " on " ~ review.environment_name}], "build context") }}
+  <p>The archive is deleted from the stack's stored build contexts. Nothing runs on the host: images already built are kept.</p>
+
+  <h3 class="confirm__subheading">Where it is used</h3>
+  {% if review.in_use %}
+  <div class="panel panel--alert" role="note">
+    <p>The Compose file still builds from this context, so it cannot be removed. Remove these references from the Compose file first.</p>
+    <ul class="ref-list">
+      {% for path in review.context.uses %}<li class="ref-list__item"><span class="mono cell-wrap">{{ path }}</span></li>{% endfor %}
+    </ul>
+  </div>
+  <p class="row-actions">
+    <a class="btn" href="{{ stack_edit_href }}">Edit the Compose file</a>
+    <a class="btn" href="{{ detail_href }}">Back to the files</a>
+  </p>
+  {% else %}
+  <p>No service builds from this context.</p>
+  <form class="form form--wide" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_inputs_digest" value="{{ review.expected_inputs_digest }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger"{% if compose %} disabled{% endif %}>Remove build context</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

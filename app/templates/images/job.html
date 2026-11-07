@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "images/_parts.html" import job_progress with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ "Pull" if job.kind == "pull" else "Push" }} {{ job.reference }} - dockmin{% endblock %}
+{% set crumb_page = ("Pull" if job.kind == "pull" else "Push") ~ " image" %}
+{% block content %}
+{% set noun = "Pull" if job.kind == "pull" else "Push" %}
+{% call page_header(noun ~ " image", job.reference) %}
+<a class="btn" href="{{ list_href }}">Back to images</a>
+{% endcall %}
+
+<section id="job-panel" class="panel job-panel" aria-label="{{ noun }} progress"{% if job.running %} data-job-stream="{{ stream_href }}"{% endif %}>
+  <div data-job-body>
+    {{ job_progress(job) }}
+  </div>
+  {% if job.running %}
+  <p class="field__help" data-job-status>Choose Refresh status to see the current state.</p>
+  <p class="job__refresh" data-job-refresh><a class="btn" href="{{ job_href }}">Refresh status</a></p>
+  <form class="inline-form" method="post" action="{{ cancel_href }}" data-job-cancel data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn--danger">Cancel {{ noun|lower }}</button>
+  </form>
+  {% else %}
+  <p class="row-actions">
+    {% if job.kind == "pull" %}<a class="btn" href="{{ pull_href }}">Pull another image</a>{% endif %}
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

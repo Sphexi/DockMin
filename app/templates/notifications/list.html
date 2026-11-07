@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/empty_state.html" import empty_state %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Notifications - dockmin{% endblock %}
+{% block content %}
+{% call page_header("Notifications", "Channels that receive a message when a subscribed event is recorded.") %}
+<a class="btn btn--primary" href="{{ route_path('notification_channel_new') }}">Add channel</a>
+{% endcall %}
+
+{% if channels %}
+<div class="data-table__scroll" role="region" aria-label="Notification channels table" tabindex="0">
+  <table class="table table--fixed" data-min="48" data-optional="2 4">
+    <caption class="visually-hidden">Notification channels</caption>
+    <colgroup><col><col class="col--short"><col class="col--badge"><col class="col--count"><col class="col--time"><col></colgroup>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col" class="col-optional">Kind</th>
+        <th scope="col">State</th>
+        <th scope="col" class="is-numeric col-optional">Event types</th>
+        <th scope="col">Last success</th>
+        <th scope="col">Last error</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for channel in channels %}
+      <tr>
+        <th scope="row"><a href="{{ route_path('notification_channel_detail', channel_id=channel.id) }}">{{ channel.name|visible_text }}</a></th>
+        <td>{{ channel.kind_label }}</td>
+        <td>{% if channel.is_enabled %}{{ badge("Enabled", "ok") }}{% else %}{{ badge("Disabled", "neutral") }}{% endif %}</td>
+        <td class="is-numeric">{{ channel.event_type_count }}</td>
+        <td>{{ when(channel.last_success_at, "Never") }}</td>
+        <td>
+          {%- if channel.last_error %}
+          <div class="cell-stack">
+            <span class="cell-wrap">{{ channel.last_error|visible_text }}</span>
+            <span class="cell-note">{{ when(channel.last_error_at, "") }}</span>
+          </div>
+          {%- else %}None{% endif -%}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+{{ empty_state("No channels yet", "Add a channel, then subscribe it to the events it should report.", "Add channel", route_path('notification_channel_new')) }}
+{% endif %}
+
+<section class="section" aria-labelledby="link-base-heading">
+  <h2 id="link-base-heading">Link base URL</h2>
+  {{ unplaced_errors(errors, ["link_base_url"]) }}
+  <form class="form" method="post" action="{{ route_path('notification_settings_update') }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("link_base_url", "Address of this dockmin", value=link_base_url, type="url", error=errors.get("link_base_url"), help="When set, each message links to its event in the activity log under this address, such as https://dockmin.example.com. Leave blank for messages without links.") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Save link base URL</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

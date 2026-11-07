@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% from "environments/_access.html" import access_section with context %}
+{% from "partials/activity_panel.html" import activity_panel with context %}
+{% from "environments/_overview.html" import environment_overview with context %}
+{% from "environments/_parts.html" import connection_test_result, environment_badge, status_panel, tag_chips, when with context %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}{{ environment.name }} - dockmin{% endblock %}
+{% block content %}
+{% call page_header(environment.name, "Environment") %}
+<a class="btn" href="{{ route_path('index') }}">Back to environments</a>
+{% if detail.can_manage %}
+<a class="btn" href="{{ route_path('environment_edit', environment_id=environment.id) }}">Edit</a>
+<a class="btn btn--danger-quiet" href="{{ route_path('environment_delete_confirm') }}?id={{ environment.id }}">Delete</a>
+{% endif %}
+{% endcall %}
+
+{{ unplaced_errors(fields, ["grantee"]) }}
+
+{% if detail.can_manage %}
+<section class="section" aria-labelledby="actions-heading">
+  <h2 id="actions-heading">Connection</h2>
+  <div class="row-actions">
+    <form class="inline-form" method="post" action="{{ route_path('environment_test', environment_id=environment.id) }}"
+          hx-post="{{ route_path('environment_test', environment_id=environment.id) }}" hx-target="#connection-test" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn btn--primary">Test connection</button>
+    </form>
+    <form class="inline-form" method="post" action="{{ route_path('environment_refresh', environment_id=environment.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn">Refresh counts</button>
+    </form>
+  </div>
+  <p class="field__help">A test connects to the host now and records the status it finds. Refreshing collects the stored counts again.</p>
+  {{ connection_test_result(report) }}
+</section>
+{% if environment.status == "reachable" %}
+<section class="section" aria-labelledby="onboarding-heading">
+  <h2 id="onboarding-heading">Existing workloads</h2>
+  <form class="inline-form" method="post" action="{{ route_path('environment_onboarding_start', environment_id=environment.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn">Adopt everything on this host</button>
+  </form>
+  <p class="field__help">Reads the host and lists every unmanaged project and namespace, every image in use with no credential binding and every object with no access settings. Nothing is changed until you confirm, and nothing is pulled, redeployed or restarted.</p>
+</section>
+{% endif %}
+{% endif %}
+
+<div class="facts-row">
+<section class="section panel" aria-labelledby="host-heading">
+  <h2 id="host-heading">Host</h2>
+  <dl class="facts">
+    {% if environment.connection or environment.is_local %}
+    <dt>Connection</dt>
+    <dd>{{ environment_badge(environment) }}</dd>
+    {% endif %}
+    {% if environment.connection %}
+    <dt>Endpoint</dt>
+    <dd class="mono">{{ environment.connection.endpoint }}</dd>
+    {% endif %}
+    <dt>Type</dt>
+    <dd>{{ "Docker Swarm" if environment.type == "swarm" else ("Docker Standalone" if environment.type == "standalone" else "Not detected yet") }}</dd>
+    <dt>Group</dt>
+    <dd>
+      {% if environment.group is none %}
+      Ungrouped
+      {% elif detail.can_manage %}
+      <a href="{{ route_path('group_detail', group_id=environment.group.id) }}">{{ environment.group.name }}</a>
+      {% else %}
+      {{ environment.group.name }}
+      {% endif %}
+    </dd>
+    <dt>Tags</dt>
+    <dd>{{ tag_chips(environment.tags) }}</dd>
+    {% if detail.created_at %}
+    <dt>Added</dt>
+    <dd>{{ when(detail.created_at, "") }}</dd>
+    {% endif %}
+  </dl>
+</section>
+
+{{ status_panel(environment) }}
+
+<section class="section panel" aria-labelledby="engine-heading">
+  <h2 id="engine-heading">Engine</h2>
+  <dl class="facts">
+    <dt>Engine version</dt>
+    <dd>{{ environment.engine_version or "Not known" }}</dd>
+    <dt>API version</dt>
+    <dd>{{ environment.api_version or "Not known" }}</dd>
+    <dt>Swarm</dt>
+    <dd>
+      {% if environment.swarm_state is none %}
+      Not known
+      {% else %}
+      {{ environment.swarm_state|capitalize }}
+      {%- if environment.swarm_state == "active" %}
+      {%- if environment.swarm_control_available %}, manager node{% else %}, worker node{% endif %}
+      {%- endif %}
+      {% endif %}
+    </dd>
+    <dt>Compose CLI</dt>
+    <dd>
+      {{ detail.compose_cli_version or "Not checked" }}
+      {%- if detail.compose_supported is false %} {{ badge("Below the required " ~ detail.compose_required, "warn") }}{% endif %}
+    </dd>
+  </dl>
+  {% if detail.compose_supported is false %}
+  <p class="field__help">Stack operations are refused until Docker Compose is upgraded on the dockmin server.</p>
+  {% endif %}
+  {% if environment.swarm_state == "active" and not environment.swarm_control_available %}
+  <p class="field__help" role="note">Swarm worker: Swarm objects are managed through a manager of this cluster.</p>
+  {% endif %}
+</section>
+</div>
+
+{{ environment_overview(overview, environment) }}
+
+{% if environment.connection and not environment.connection.is_local %}
+<section class="section panel" aria-labelledby="tls-heading">
+  <h2 id="tls-heading">Client certificate</h2>
+  {% set tls = environment.connection.tls %}
+  {% if tls is none %}
+  <p>No readable client certificate is stored. Edit the environment and upload the certificates again.</p>
+  {% else %}
+  <dl class="facts">
+    <dt>Subject</dt>
+    <dd>{{ tls.leaf_subject }}</dd>
+    <dt>Issuer</dt>
+    <dd>{{ tls.leaf_issuer }}</dd>
+    <dt>Expires</dt>
+    <dd>
+      {{ when(tls.not_after, "") }}
+      {% if tls.expired %}{{ badge("Expired", "danger") }}{% elif tls.expires_soon %}{{ badge("Expires soon", "warn") }}{% endif %}
+    </dd>
+    <dt>Key type</dt>
+    <dd>{{ tls.key_type }}</dd>
+    <dt>SHA-256 fingerprint</dt>
+    <dd class="mono">{{ tls.sha256_fingerprint }}</dd>
+  </dl>
+  <p class="field__help">Only these details are kept on view. The certificates and the key are never shown.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if access_view is not none %}
+{{ access_section("environment", access_view.direct, route_path('environment_access_grant', environment_id=environment.id), route_path('environment_access_revoke', environment_id=environment.id), fields.get("grantee"), grantee_kind, grantee_name, inherited=access_view.inherited, group=access_view.group, is_local=environment.is_local) }}
+{% endif %}
+{% if activity_log is defined and activity_log is not none %}
+{{ activity_panel("Recent activity", activity_log) }}
+{% endif %}
+{% endblock %}

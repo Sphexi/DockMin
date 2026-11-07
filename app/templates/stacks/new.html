@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "app_templates/_panel.html" import template_panel as render_template_panel %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_form.html" import stack_form with context %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Create stack on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Create stack" %}
+{% block content %}
+{% call page_header("Create stack", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ cancel_href }}">Cancel</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if form.failure %}
+{{ error_state(form.failure.title, form.failure.message) }}
+{% endif %}
+{% if form.errors %}
+{{ error_summary(form.errors) }}
+{% endif %}
+{% if environment.is_local and is_administrator %}
+<div class="panel panel--notice" role="note">
+  <p>This environment is the host dockmin runs on. A stack deployed here runs on that host.</p>
+</div>
+{% endif %}
+{% if template_panel %}
+{{ render_template_panel(template_panel, "The file below is generated from the template. Review it before you create the stack.") }}
+{% endif %}
+{{ stack_form(form, kind, stack_name, post_href, validate_href, cancel_href, compose, variable_cap, catalogue, file_cap=file_cap, template_ref=template_ref) }}
+{% endblock %}

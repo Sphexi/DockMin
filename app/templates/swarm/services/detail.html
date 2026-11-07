@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "swarm/services/_detail.html" import service_summary, service_tabs with context %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
+{% block title %}{{ detail.name }} - dockmin{% endblock %}
+{% set crumb_object = detail.name %}
+{% block head_extra %}
+{% if tab == "tasks" and tasks and tasks.polling %}
+<noscript><meta http-equiv="refresh" content="10"></noscript>
+{% endif %}
+{% endblock %}
+{% block content %}
+{% call page_header(detail.name, "Service on " ~ detail.environment_name) %}
+{{ back_actions(list_href, "Back to services", origin) }}
+{% endcall %}
+
+{{ service_summary(detail) }}
+{{ service_tabs(detail, tab, tab_keys, tasks, panel, logs, values, fields, automation, activity_log) }}
+{% endblock %}

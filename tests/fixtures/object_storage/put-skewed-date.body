@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>RequestTimeTooSkewed</Code><Message>The difference between the request time and the server&#39;s time is too large.</Message><Resource>/dockmin-e2e/exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Resource><RequestId>18E17D8AF876C30DD5FDF389</RequestId><Key>exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Key><BucketName>dockmin-e2e</BucketName></Error>

@@ -1,0 +1,176 @@
+{# Import with context: route_path and the CSRF token come from the request. #}
+{% from "partials/badge.html" import badge %}
+{% from "partials/check_status.html" import check_status %}
+{% from "shared/_stage_report.html" import stage_table %}
+
+{% set stage_labels = {"dns": "DNS lookup", "tcp": "TCP connection", "socket": "Socket", "tls_handshake": "TLS handshake", "certificate": "Server certificate", "engine": "Docker Engine"} %}
+
+{% macro stage_label(stage) -%}
+{{ stage_labels.get(stage, stage) }}
+{%- endmacro %}
+
+{% macro when(value, fallback) -%}
+{% if value %}<time datetime="{{ value|timestamp_iso }}">{{ value|timestamp }}</time>{% else %}{{ fallback }}{% endif %}
+{%- endmacro %}
+
+{% macro age(value, fallback) -%}
+{% if value %}<time datetime="{{ value|timestamp_iso }}" title="{{ value|timestamp }}">{{ value|relative_age }}</time>{% else %}{{ fallback }}{% endif %}
+{%- endmacro %}
+
+{% macro kind_badge(is_local, host=none, port=none) -%}
+{% if is_local -%}
+<span class="badge badge--local">Local socket &middot; this host</span>
+{%- else -%}
+<span class="badge" data-tone="neutral">TLS</span>{% if host %} <span class="mono">{{ ("[" ~ host ~ "]") if ":" in host else host }}:{{ port }}</span>{% endif %}
+{%- endif %}
+{%- endmacro %}
+
+{% macro environment_badge(environment) -%}
+{% set connection = environment.connection %}
+{% if connection -%}
+{{ kind_badge(environment.is_local, connection.host, connection.port) }}
+{%- elif environment.is_local -%}
+{{ kind_badge(true) }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro status_badge(status) -%}
+{% if status == "reachable" -%}
+{{ badge("Reachable", "ok") }}
+{%- elif status == "unreachable" -%}
+{{ badge("Unreachable", "danger") }}
+{%- elif status == "version_unsupported" -%}
+{{ badge("Version unsupported", "warn") }}
+{%- else -%}
+{{ badge("Unknown", "neutral") }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro tag_chips(tags) %}
+{% if tags %}
+<ul class="inline-list">
+  {% for tag in tags %}
+  <li class="chip">{{ tag.name }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<span class="cell-note">None</span>
+{% endif %}
+{% endmacro %}
+
+{% macro status_cell(environment) %}
+<div class="cell-stack">
+  {{ status_badge(environment.status) }}
+  {% if environment.status == "unreachable" and environment.failed_stage %}
+  <span class="cell-note">Failed at {{ stage_label(environment.failed_stage) }}</span>
+  {% elif environment.status == "version_unsupported" %}
+  <span class="cell-note">{% if environment.engine_version %}Engine {{ environment.engine_version }} is not supported{% else %}The Engine version is not supported{% endif %}</span>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro status_panel(environment, oob=false) %}
+<section id="environment-status" class="section panel" aria-labelledby="status-heading"{% if oob %} hx-swap-oob="outerHTML"{% endif %}>
+  <h2 id="status-heading">Status</h2>
+  <dl class="facts">
+    <dt>State</dt>
+    <dd>{{ status_badge(environment.status) }}</dd>
+    {% if environment.failed_stage %}
+    <dt>Failed at</dt>
+    <dd>{{ stage_label(environment.failed_stage) }}</dd>
+    {% endif %}
+    {% if environment.status_message %}
+    <dt>Message</dt>
+    <dd>{{ environment.status_message }}</dd>
+    {% endif %}
+    <dt>Last contact</dt>
+    <dd>{{ age(environment.last_contacted_at, "Never") }}</dd>
+    <dt>Last check</dt>
+    <dd>{{ age(environment.last_checked_at, "Not checked yet") }}</dd>
+  </dl>
+</section>
+{% endmacro %}
+
+{# Always renders the target element, so a swap and the first load share one id; level is the heading rank under the page's own headings. #}
+{% macro connection_test_result(report, level="h3") %}
+{% set heading = choice(level, ["h2", "h3"]) %}
+{{ check_status("connection-test-status", ("Connection test finished. " ~ report.message) if report is not none else "") }}
+<div id="connection-test">
+  <p class="loading" role="status">Loading&hellip;</p>
+  {% if report is not none %}
+  <section class="panel test-report" aria-labelledby="connection-test-heading">
+    <{{ heading }} id="connection-test-heading">Connection test</{{ heading }}>
+    <p class="test-report__summary">{{ status_badge(report.status) }} <span>{{ report.message }}</span></p>
+    <p class="field__help">
+      Finished in {{ report.duration_ms }} ms.
+      {%- if report.engine_version %} Engine {{ report.engine_version }}{% if report.api_version %}, API {{ report.api_version }}{% endif %}.{% endif %}
+    </p>
+    {% if report.stages %}
+    {{ stage_table(report.stages, stage_labels) }}
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro test_connection_response(report, environment) %}
+{{ connection_test_result(report) }}
+{{ status_panel(environment, true) }}
+{% endmacro %}
+
+{# The hidden input is what the save checks against: it exists only while the endpoint parses. #}
+{% macro endpoint_preview(preview, errors, level="h2") %}
+{% set heading = choice(level, ["h2", "h3"]) %}
+{{ check_status("endpoint-preview-status", ("Will connect to " ~ preview.endpoint ~ ".") if preview is not none else (errors|join(" ") if errors else "")) }}
+<div id="endpoint-preview" class="panel endpoint-preview">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <{{ heading }}>Will connect to</{{ heading }}>
+  {% if preview is none %}
+  {% for message in errors %}
+  <p class="field__error">{{ message }}</p>
+  {% endfor %}
+  <p class="field__help">Complete the connection fields to see the endpoint they resolve to.</p>
+  {% else %}
+  <p>{{ kind_badge(preview.is_local, preview.host, preview.port) }}</p>
+  <dl class="facts">
+    {% if preview.is_local %}
+    <dt>Socket path</dt>
+    <dd class="mono">{{ preview.socket_path }}</dd>
+    {% else %}
+    <dt>Host</dt>
+    <dd class="mono">{{ preview.host }}</dd>
+    <dt>Port</dt>
+    <dd class="mono">{{ preview.port }}</dd>
+    {% endif %}
+    <dt>Endpoint</dt>
+    <dd class="mono">{{ preview.endpoint }}</dd>
+  </dl>
+  <p>{{ preview.note }}</p>
+  {% if preview.changes_endpoint %}
+  <p>This changes where the environment connects. The connection is tested again when you save.</p>
+  {% endif %}
+  {% if preview.discards_tls_material %}
+  <p class="field__error">Saving deletes the stored TLS certificates and key. A local socket needs none.</p>
+  {% endif %}
+  <input type="hidden" name="reviewed_endpoint" value="{{ preview.endpoint }}">
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro grantee_names(grants) %}
+{% if grants.users or grants.teams %}
+<ul class="chip-list">
+  {% for grantee in grants.users %}
+  <li>{{ grantee.name }} <span class="cell-note">user</span></li>
+  {% endfor %}
+  {% for grantee in grants.teams %}
+  <li>{{ grantee.name }} <span class="cell-note">team</span></li>
+  {% endfor %}
+</ul>
+{% if grants.users_total > grants.users|length or grants.teams_total > grants.teams|length %}
+<p class="field__help">Showing {{ grants.users|length }} of {{ grants.users_total }} users and {{ grants.teams|length }} of {{ grants.teams_total }} teams.</p>
+{% endif %}
+{% else %}
+None
+{% endif %}
+{% endmacro %}

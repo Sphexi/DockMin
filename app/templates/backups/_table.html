@@ -1,0 +1,39 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/data_table.html" import data_table %}
+{% from "environments/_parts.html" import when with context %}
+
+{% macro backups_table(rows, columns, pager, targets) %}
+{% call data_table("backups-table", "Backup archives produced", columns, pager, empty_title="No backups yet", empty_body="Download a backup or add a scheduled backup. Each archive produced is recorded here.", empty_action_label="Download a backup", empty_action_href="#download-heading") %}
+{% for row in rows %}
+<tr>
+  <th scope="row">{{ when(row.created_at, "") }}</th>
+  <td>
+    <div class="cell-stack">
+      {% if row.origin == "download" %}
+      <span>Download</span>
+      {% else %}
+      {% set name = targets.get(row.object_storage_target_id) %}
+      <span>{% if name %}{{ name }}{% else %}Target deleted{% endif %}</span>
+      {% if row.destination_key %}<span class="cell-note mono cell-wrap">{{ row.destination_key|visible_text }}</span>{% endif %}
+      {% endif %}
+    </div>
+  </td>
+  <td>
+    <div class="cell-stack">
+      {% if row.outcome == "success" %}{{ badge("Succeeded", "ok") }}{% else %}{{ badge("Failed", "danger") }}{% endif %}
+      {% if row.error %}<span class="cell-note">{{ row.error|visible_text }}</span>{% endif %}
+    </div>
+  </td>
+  <td class="is-numeric">{{ row.size_bytes|filesize }}</td>
+  <td class="mono cell-wrap">{{ row.archive_sha256 or "—" }}</td>
+  <td>
+    <div class="cell-stack">
+      <span>Version {{ row.key_version }}</span>
+      <span class="cell-note mono">{{ row.key_fingerprint }}</span>
+    </div>
+  </td>
+  <td class="is-numeric">{{ row.schema_version if row.schema_version is not none else "—" }}</td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

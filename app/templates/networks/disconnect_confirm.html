@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "networks/_attach.html" import detach_form with context %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Detach {{ impact.container_name }} from {{ impact.network_name }} - dockmin{% endblock %}
+{% set crumb_object = impact.container_name %}
+{% set crumb_object_href = back_href %}
+{% set crumb_page = "Detach from a network" %}
+{% block content %}
+{% call page_header("Detach from a network", "Review the attachment below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ back_href }}">Back to the container</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="detach-heading">
+  <h2 id="detach-heading">Detach <span class="mono">{{ impact.container_name }}</span> from <span class="mono">{{ impact.network_name }}</span>?</h2>
+  {{ detach_form(impact, back_href) }}
+</section>
+{% endblock %}

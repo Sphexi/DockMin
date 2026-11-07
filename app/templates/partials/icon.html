@@ -1,0 +1,4 @@
+{# Decorative: pair it with visible text or an aria-label on the control. #}
+{% macro icon(name, extra="") -%}
+<svg class="icon{% if extra %} {{ extra }}{% endif %}" aria-hidden="true" focusable="false"><use href="{{ static_path('vendor/lucide/sprite.svg') }}#i-{{ name }}"></use></svg>
+{%- endmacro %}

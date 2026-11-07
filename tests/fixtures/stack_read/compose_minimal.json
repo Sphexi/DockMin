@@ -1,0 +1,153 @@
+{
+  "project": "plain",
+  "containers": [
+    {
+      "Id": "9ebb970c5f050000000000000000000000000000000000000000000000000000",
+      "Created": "2026-10-02T09:14:07.512340111Z",
+      "Path": "/docker-entrypoint.sh",
+      "Args": [],
+      "State": {
+        "Status": "running",
+        "Running": true,
+        "Pid": 4211,
+        "ExitCode": 0
+      },
+      "Image": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "Name": "/plain-app-1",
+      "RestartCount": 0,
+      "Driver": "overlayfs",
+      "Platform": "linux",
+      "Config": {
+        "Hostname": "9ebb970c5f05",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": false,
+        "AttachStdout": true,
+        "AttachStderr": true,
+        "Tty": false,
+        "OpenStdin": false,
+        "StdinOnce": false,
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "NGINX_VERSION=1.27.2"
+        ],
+        "Cmd": [
+          "nginx",
+          "-g",
+          "daemon off;"
+        ],
+        "Image": "nginx:1.27",
+        "Volumes": null,
+        "WorkingDir": "",
+        "Entrypoint": [
+          "/docker-entrypoint.sh"
+        ],
+        "Labels": {
+          "com.docker.compose.config-hash": "9f1c0b6e2d3a4c5b",
+          "com.docker.compose.container-number": "1",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "plain",
+          "com.docker.compose.project.config_files": "/srv/plain/compose.yaml",
+          "com.docker.compose.project.environment_file": "/srv/plain/.env",
+          "com.docker.compose.project.working_dir": "/srv/plain",
+          "com.docker.compose.service": "app",
+          "com.docker.compose.version": "2.30.3",
+          "maintainer": "NGINX Docker Maintainers"
+        },
+        "ExposedPorts": {
+          "80/tcp": {}
+        }
+      },
+      "HostConfig": {
+        "Binds": null,
+        "ContainerIDFile": "",
+        "LogConfig": {
+          "Type": "json-file",
+          "Config": {}
+        },
+        "NetworkMode": "plain_default",
+        "PortBindings": {},
+        "RestartPolicy": {
+          "Name": "no",
+          "MaximumRetryCount": 0
+        },
+        "AutoRemove": false,
+        "VolumeDriver": "",
+        "CapAdd": null,
+        "CapDrop": null,
+        "Dns": null,
+        "ExtraHosts": null,
+        "IpcMode": "private",
+        "Privileged": false,
+        "PublishAllPorts": false,
+        "ReadonlyRootfs": false,
+        "ShmSize": 67108864,
+        "Devices": null,
+        "CpuShares": 0,
+        "Memory": 0,
+        "NanoCpus": 0,
+        "MemorySwap": 0,
+        "MemoryReservation": 0,
+        "CpusetCpus": "",
+        "PidsLimit": null,
+        "Mounts": null,
+        "Tmpfs": null
+      },
+      "Mounts": [],
+      "NetworkSettings": {
+        "Networks": {
+          "plain_default": {
+            "Aliases": [
+              "plain-app-1",
+              "app"
+            ],
+            "NetworkID": "1111111111111111111111111111111111111111111111111111111111111111",
+            "IPAddress": "172.18.0.2"
+          }
+        }
+      }
+    }
+  ],
+  "images": {
+    "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1": {
+      "Id": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "RepoTags": [
+        "nginx:1.27"
+      ],
+      "Config": {
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "NGINX_VERSION=1.27.2"
+        ],
+        "Cmd": [
+          "nginx",
+          "-g",
+          "daemon off;"
+        ],
+        "Entrypoint": [
+          "/docker-entrypoint.sh"
+        ],
+        "ExposedPorts": {
+          "80/tcp": {}
+        },
+        "Labels": {
+          "maintainer": "NGINX Docker Maintainers"
+        },
+        "StopSignal": "SIGQUIT",
+        "User": "",
+        "WorkingDir": "",
+        "Healthcheck": null
+      }
+    }
+  },
+  "expect": {
+    "document": {
+      "services": {
+        "app": {
+          "image": "nginx:1.27"
+        }
+      }
+    },
+    "variables": []
+  }
+}

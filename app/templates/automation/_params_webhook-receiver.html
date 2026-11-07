@@ -1,0 +1,14 @@
+{% from "automation/_fields.html" import number_param with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/radio_field.html" import radio_field %}
+{% set chosen_action = "redeploy" if state.parameters.get("action", "update")|lower == "redeploy" else "update" %}
+{% set healthy_text = state.parameters.get("require_healthy", "true")|lower %}
+<fieldset class="choice-group" aria-describedby="field-param_action-help">
+  <legend>Action</legend>
+  <p class="field__help" id="field-param_action-help">What each call does to the targets. A call carries no settings of its own: it only starts the action chosen here.</p>
+  {{ radio_field("param_action", "Update", "update", checked=(chosen_action == "update"), help="Check each target's image at its registry and pull it with the credential set it is bound to when a newer version exists, then recreate or redeploy the target. A call that finds nothing new pulls nothing and changes nothing.") }}
+  {{ radio_field("param_action", "Redeploy", "redeploy", checked=(chosen_action == "redeploy"), help="Recreate or redeploy each target with the image it already has, without contacting a registry. Use it for images built on the host.") }}
+</fieldset>
+{{ number_param("verify_seconds", "Watch each recreated container, in seconds", state, "How long a recreated container is watched before the change counts as successful. A container that exits, restarts or stops reporting healthy in that time is restored to its previous state. A Swarm service is watched for the same time after an update. 0 to 300. Default 30.", 0, 300, "30") }}
+<input type="hidden" name="param_require_healthy" value="false">
+{{ checkbox_field("param_require_healthy", "Require a healthy container", "true", checked=(healthy_text in ["true", "1", "on", "yes", "t", "y"]), help="A container with a health check must report healthy before the change counts as successful. On by default. It does not apply to Swarm services.") }}

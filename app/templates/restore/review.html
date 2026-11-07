@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import when with context %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "auth/_forms.html" import unplaced_errors %}
+{% block title %}Review the archive - dockmin{% endblock %}
+{% set crumb_page = "Review the archive" %}
+{% block content %}
+{% call page_header("Review the archive", "Nothing has changed yet. Check what the archive holds, then enter its key.") %}
+<a class="btn" href="{{ route_path('restore') }}">Back to the restore</a>
+{% endcall %}
+
+{{ unplaced_errors(errors, ["key", "archive", "replace_confirmed"]) }}
+
+{% if review.refusals %}
+<div class="panel panel--alert" role="note">
+  <h2>This archive cannot be restored here</h2>
+  <ul>
+    {% for refusal in review.refusals %}
+    <li>{{ refusal }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% if errors.get("archive") %}
+<div class="panel panel--alert" role="note">
+  <p>{{ errors["archive"] }}</p>
+</div>
+{% endif %}
+
+<section class="section" aria-labelledby="archive-heading">
+  <h2 id="archive-heading">The archive</h2>
+  <p class="field__help">The values below are read from the archive before its key is checked. Created, versions and administrators are unverified until the key is checked; anyone who can write to the archive can change them.</p>
+  <dl class="facts">
+    <dt>Created</dt>
+    <dd>{{ when(manifest.created_at, "") }} <span class="field__help">Unverified until the key is checked.</span></dd>
+    <dt>Product version</dt>
+    <dd><span class="mono">{{ manifest.product_version }}</span> <span class="field__help">Unverified until the key is checked.</span></dd>
+    <dt>Schema version</dt>
+    <dd>{{ manifest.schema_version }} <span class="field__help">Unverified until the key is checked.</span></dd>
+    <dt>Source instance</dt>
+    <dd class="mono">{{ manifest.instance_id }}</dd>
+    <dt>Key version</dt>
+    <dd>{{ manifest.key_version }} <span class="field__help">Unverified until the key is checked.</span></dd>
+    <dt>Key fingerprint</dt>
+    <dd class="mono">{{ manifest.key_fingerprint }}</dd>
+    <dt>Files</dt>
+    <dd>{{ manifest.members|length }}, {{ manifest.members|sum(attribute="size")|filesize }} uncompressed</dd>
+    <dt>Archive SHA-256</dt>
+    <dd class="mono cell-wrap">{{ review.archive_sha256 }}</dd>
+    {% if review.source == "object_storage" %}
+    <dt>Fetched from</dt>
+    <dd class="mono cell-wrap">{{ review.object_path|visible_text }}</dd>
+    <dt>This instance's record</dt>
+    <dd>
+      {%- if review.record_match == "matches" %}Matches the archive this instance pushed on {{ when(review.recorded_at, "") }}.
+      {%- elif review.record_match == "differs" %}Differs from the archive this instance pushed on {{ when(review.recorded_at, "") }}. The object changed after it was pushed.
+      {%- else %}No record of this archive on this instance.{% endif -%}
+    </dd>
+    {% endif %}
+    <dt>Administrators in the archive</dt>
+    <dd>
+      {% if manifest.administrators %}
+      <ul class="chip-list">
+        {% for name in manifest.administrators %}
+        <li>{{ name|visible_text }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      None
+      {% endif %}
+      <span class="field__help">Unverified until the key is checked.</span>
+      <p class="field__help">You are signed in as {{ principal.username|visible_text }}, which {% if review.operator_matched %}matches{% else %}does not match{% endif %} an enabled administrator in the archive. After the restore you sign in with such an account.</p>
+    </dd>
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="replaces-heading">
+  <h2 id="replaces-heading">What it replaces</h2>
+  <dl class="facts">
+    <dt>Users</dt>
+    <dd>{{ review.counts.users }}</dd>
+    <dt>Environments</dt>
+    <dd>{{ review.counts.environments }}</dd>
+    <dt>Stacks</dt>
+    <dd>{{ review.counts.stacks }}</dd>
+    <dt>Registry credentials</dt>
+    <dd>{{ review.counts.registry_credentials }}</dd>
+    <dt>Object storage targets</dt>
+    <dd>{{ review.counts.object_storage_targets }}</dd>
+    <dt>Automation rules</dt>
+    <dd>{{ review.counts.automation_rules }}</dd>
+  </dl>
+  <p class="field__help">These are this instance's counts now. They are replaced by the archive's.</p>
+  <h3>Where the data goes</h3>
+  <dl class="facts">
+    <dt>Moved aside</dt>
+    <dd>
+      <ul class="chip-list">
+        {% for path in review.swap.live %}
+        <li class="mono cell-wrap">{{ path }}</li>
+        {% endfor %}
+      </ul>
+    </dd>
+    <dt>Kept at</dt>
+    <dd class="mono cell-wrap">{{ review.swap.previous }}</dd>
+    <dt>Staged at</dt>
+    <dd class="mono cell-wrap">{{ review.swap.staged }}</dd>
+    <dt>Put in place under</dt>
+    <dd class="mono cell-wrap">{{ review.swap.data_dir }}</dd>
+  </dl>
+  <p class="field__help">The data moved aside is kept. dockmin never deletes it; remove it by hand when it is no longer needed.</p>
+</section>
+
+{% if not review.refusals %}
+<section class="section" aria-labelledby="key-heading">
+  <h2 id="key-heading">Restore this archive</h2>
+  <form class="form form--wide restore-form" method="post" action="{{ route_path('restore_confirm') }}" data-submit-once autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="archive_sha256" value="{{ review.archive_sha256 }}">
+    {{ confirm_targets([{"name": review.archive_sha256, "detail": "SHA-256 of the archive"}], "archive") }}
+    {{ form_field("key", "Encryption key of the archive", type="password", error=errors.get("key"), help="The key the backed-up instance ran with: the value of DOCKMIN_SECRET_KEY, the contents of the file named by DOCKMIN_SECRET_KEY_FILE (as the shipped compose.yaml sets it), or, when the instance generated its own key, the contents of its key file (/key/secret.key in the image, or the copy taken with docker cp). Base64 of 32 bytes. It is not stored in the archive and is not shown again. If it differs from this instance's key, the restored secrets are re-sealed to this instance's key.", autocomplete="off", required=true) }}
+    {{ checkbox_field("replace_confirmed", "Replace this instance's data with this archive", value="yes", help="Changes made since the backup are lost, and every session ends.", error=errors.get("replace_confirmed")) }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Restore this archive</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="other-heading">
+  <h2 id="other-heading">Other choices</h2>
+  <div class="row-actions">
+    <a class="btn" href="{{ route_path('restore') }}">Upload a different archive</a>
+    <form class="inline-form" method="post" action="{{ route_path('restore_cancel') }}" data-submit-once>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn">Cancel the restore</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Tag image {{ detail.short_id }} - dockmin{% endblock %}
+{% set crumb_object = detail.short_id %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Tag" %}
+{% block content %}
+{% call page_header("Tag image", "Image " ~ detail.short_id ~ " on " ~ detail.environment_name) %}
+<a class="btn" href="{{ detail_href }}">Back to the image</a>
+{% endcall %}
+
+<form class="form form--wide" method="get" action="{{ tag_href }}">
+  {{ form_field("reference", "New reference", value=reference, error=fields.get("reference"), help="A repository name with an optional tag, such as registry.example.com/team/app:2. Without a tag, latest is used.", required=true) }}
+  <div class="form__actions">
+    <button type="submit" class="btn">Review</button>
+  </div>
+</form>
+
+{% if impact %}
+<section class="section" aria-labelledby="tag-review-heading">
+  <h2 id="tag-review-heading">Add <span class="mono">{{ impact.reference }}</span> to image <span class="mono">{{ impact.short_id }}</span></h2>
+  {% if impact.unchanged %}
+  <div class="panel panel--notice" role="note">
+    <p>This image already has the reference <span class="mono">{{ impact.reference }}</span>. Nothing needs to change.</p>
+  </div>
+  {% else %}
+  {% if impact.replaced %}
+  <div class="panel panel--alert" role="note">
+    <h3>The reference moves from another image</h3>
+    <p><span class="mono">{{ impact.reference }}</span> points to image <span class="mono">{{ impact.replaced.short_id }}</span> now. After this it points to image <span class="mono">{{ impact.short_id }}</span>. The other image is not removed.</p>
+    {% if impact.replaced.references %}
+    <p>The other image's references:</p>
+    <ul class="chip-list mono">
+      {% for reference in impact.replaced.references %}
+      <li>{{ reference }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% else %}
+  <p>No image has this reference now.</p>
+  {% endif %}
+  <p class="field__help">Tagging pulls nothing and binds no credential set. Pull or push the reference to bind it.</p>
+  <form class="form" method="post" action="{{ route_path('environment_image_tag_run', environment_id=detail.environment_id, image_id=detail.id) }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="reference" value="{{ impact.reference }}">
+    <input type="hidden" name="expected_replaced_id" value="{{ impact.expected_replaced_id }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">{{ "Move the reference to this image" if impact.replaced else "Add reference" }}</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

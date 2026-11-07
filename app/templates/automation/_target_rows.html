@@ -1,0 +1,36 @@
+{% from "partials/name_field.html" import name_cell %}
+
+{# names holds the typed values, at least one; the suggestions read #field-target_kind and #field-subsystem. #}
+{% macro target_rows(names, target_kind, subsystem, environment_id, error, max_names) %}
+{% set suggest_href = route_path("environment_suggestions", environment_id=environment_id|int, kind="rule-targets") if environment_id else none %}
+<fieldset id="target-names" class="target-names"{% if error %} data-invalid aria-describedby="target-names-error"{% endif %}>
+  <legend>Target names</legend>
+  {% for name in names %}
+  <div class="target-names__row">
+    {% if suggest_href %}
+    {{ name_cell("target_name", "Name", "Target " ~ loop.index ~ ": ", suggest_href, value=name, include="#field-target_kind, #field-subsystem", id_suffix="target_name-" ~ loop.index0) }}
+    {% else %}
+    <div class="field repeat__cell">
+      <div class="field__head">
+        <label class="field__label repeat__label" for="field-target_name-{{ loop.index0 }}"><span class="visually-hidden">Target {{ loop.index }}: </span>Name</label>
+      </div>
+      <input class="field__input" id="field-target_name-{{ loop.index0 }}" name="target_name" type="text" value="{{ name }}" autocomplete="off" spellcheck="false">
+    </div>
+    {% endif %}
+    {% if names|length > 1 %}
+    <button type="submit" class="btn btn--compact" name="target_rows" value="remove-{{ loop.index0 }}" formnovalidate aria-label="Remove target {{ loop.index }}"
+            hx-post="{{ route_path('automation_rule_targets') }}" hx-target="#target-names" hx-swap="outerHTML" hx-include="closest form">Remove</button>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if error %}
+  <p class="field__error" id="target-names-error">{{ error }}</p>
+  {% endif %}
+  {% if names|length < max_names %}
+  <div class="target-names__actions">
+    <button type="submit" class="btn btn--compact" name="target_rows" value="add" formnovalidate
+            hx-post="{{ route_path('automation_rule_targets') }}" hx-target="#target-names" hx-swap="outerHTML" hx-include="closest form">Add another target</button>
+  </div>
+  {% endif %}
+</fieldset>
+{% endmacro %}

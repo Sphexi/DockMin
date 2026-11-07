@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Delete {{ preview.name }} - dockmin{% endblock %}
+{% set crumb_page = "Delete tag" %}
+{% block content %}
+{% call page_header("Delete tag", "Review what is removed. Nothing is deleted until you confirm.") %}
+<a class="btn" href="{{ route_path('tags') }}">Back to tags</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("The tag was not deleted", message) }}
+{% endfor %}
+
+<section class="panel" aria-labelledby="impact-heading">
+  <h2 id="impact-heading">{{ preview.name }}</h2>
+
+  <h3>Environments that lose the tag</h3>
+  {% if preview.environments %}
+  <ul class="chip-list">
+    {% for environment in preview.environments %}
+    <li><a href="{{ route_path('environment_detail', environment_id=environment.id) }}">{{ environment.name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% if preview.environments_total > preview.environments|length %}
+  <p class="field__help">Showing {{ preview.environments|length }} of {{ preview.environments_total }}.</p>
+  {% endif %}
+  {% else %}
+  <p>None. No environment carries this tag.</p>
+  {% endif %}
+  <p>{{ preview.detach_note }}</p>
+</section>
+
+<form class="form" method="post" action="{{ route_path('tag_delete', tag_id=preview.tag_id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_name" value="{{ preview.name }}">
+  {{ confirm_targets([preview.name], "tag") }}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--danger">Delete tag</button>
+    <a class="btn" href="{{ route_path('tags') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

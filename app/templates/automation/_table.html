@@ -1,0 +1,59 @@
+{% from "partials/data_table.html" import data_table %}
+{% from "automation/_parts.html" import rule_state, run_marker, updates_summary with context %}
+{% from "jobs/_parts.html" import outcome_badge %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/list_bar.html" import list_count %}
+
+{% macro rules_table(rows, columns, pager, filtered, total=none, oob=false) %}
+{% if oob %}
+{{ list_count(total, "automation", filtered=filtered, oob=true) }}
+{% endif %}
+{% set show_owner = columns|selectattr("key", "equalto", "owner")|list|length > 0 %}
+{% call data_table("rules-table", "Automations", columns, pager, empty_title="No automations", empty_body="An automation runs on a schedule. Create one to restart unhealthy containers, restart a stack on a timetable, or find containers whose image has a newer version.", empty_action_label="New automation", empty_action_href=route_path('automation_rule_new'), filtered=filtered, clear_href=route_path('automation')) %}
+{% for view in rows %}
+<tr>
+  <th scope="row">
+    <div class="cell-stack">
+      <a href="{{ route_path('automation_rule_detail', rule_id=view.rule.id) }}">{{ view.rule.name }}</a>
+      <span class="cell-note mono">{{ view.rule.subsystem }}</span>
+    </div>
+  </th>
+  {% if show_owner %}
+  <td>{{ view.owner or "Unknown" }}</td>
+  {% endif %}
+  <td>{{ view.environment_name or "All" }}</td>
+  <td class="cell-wrap">{{ view.target }}</td>
+  <td>{{ view.schedule }}</td>
+  <td>
+    <div class="cell-stack">
+      {{ rule_state(view) }}
+      {% if view.held %}{{ badge("Held " ~ view.held, "warn") }}{% endif %}
+    </div>
+  </td>
+  <td>{% if view.job.schedule_kind == "webhook" %}{{ "Pending" if view.next_run_at else "When called" }}{% elif view.next_run_at %}<time datetime="{{ view.next_run_at|timestamp_iso }}">{{ view.next_run_at|timestamp }}</time>{% else %}&mdash;{% endif %}</td>
+  <td>
+    {% if view.last_run %}
+    <div class="cell-stack">
+      <a href="{{ route_path('automation_rule_run', rule_id=view.rule.id, run_id=view.last_run.id) }}">{{ outcome_badge(view.last_run.outcome) }}</a>
+      <span class="cell-note"><time datetime="{{ view.last_run.started_at|timestamp_iso }}">{{ view.last_run.started_at|timestamp }}</time></span>
+    </div>
+    {% else %}
+    <span class="cell-note">Never run</span>
+    {% endif %}
+  </td>
+  <td>{{ updates_summary(view) }}</td>
+  <td>
+    {% if view.recent %}
+    <ul class="inline-list">
+      {% for run in view.recent %}
+      <li>{{ run_marker(run) }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <span class="cell-note">None</span>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endmacro %}

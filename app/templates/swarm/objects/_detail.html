@@ -1,0 +1,100 @@
+{# Import with context: links and forms read the request. #}
+{% from "access/_panel.html" import access_panel with context %}
+{% from "environments/_parts.html" import kind_badge, when with context %}
+{% from "swarm/_parts.html" import stack_link, value_table with context %}
+{% from "partials/object_users.html" import object_users %}
+
+{% macro object_summary(kind, detail) %}
+<section id="{{ kind }}-summary" class="panel summary" aria-label="Summary">
+  <div class="summary__head">
+    <div class="cell-stack">
+      <span class="mono">{{ detail.short_id }}</span>
+      <span class="cell-note">{{ kind|capitalize }} on {{ detail.environment_name }} {{ kind_badge(true) if detail.is_local else "" }}</span>
+    </div>
+    <div class="row-actions">
+      {% if detail.can_remove %}
+      <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_' ~ kind ~ '_remove', environment_id=detail.environment_id, object_id=detail.id) }}">Remove</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endmacro %}
+
+{% macro overview_tab(kind, detail) %}
+<h2 id="tab-heading">Overview</h2>
+<dl class="facts">
+  <dt>Name</dt>
+  <dd class="mono cell-wrap">{{ detail.name }}</dd>
+  <dt>ID</dt>
+  <dd class="mono cell-wrap">{{ detail.id }}</dd>
+  <dt>Created</dt>
+  <dd>{{ when(detail.created_at, "—") }}</dd>
+  <dt>Updated</dt>
+  <dd>{{ when(detail.updated_at, "—") }}</dd>
+  <dt>Stack</dt>
+  <dd>{{ stack_link(detail.stack, detail.environment_id) }}</dd>
+  <dt>Used by</dt>
+  <dd>
+    {% if not detail.usage_known %}
+    <span class="cell-note">Services could not be read, so use is not known.</span>
+    {% else %}
+    {{ object_users(detail.services, detail.services_more, detail.services_hidden, detail.in_use, route_path("environment_swarm_service_list", environment_id=detail.environment_id), "No service") }}
+    {% endif %}
+  </dd>
+</dl>
+
+{% if kind == "config" %}
+<h3>Content</h3>
+{% if detail.templated %}
+<p class="field__help">This config is templated by Docker. Its stored text is shown as it is.</p>
+{% endif %}
+{% if detail.content.text is none %}
+<p>Binary content, {{ detail.content.size|filesize }}. It is not shown.</p>
+{% elif detail.content.size == 0 %}
+<p>The config is empty.</p>
+{% else %}
+<pre class="content-view" role="region" tabindex="0" aria-label="Content of {{ detail.name }}">{{ detail.content.text }}</pre>
+<p class="field__help">{{ detail.content.size|filesize }}.{% if detail.content.truncated %} Only the start is shown.{% endif %}</p>
+{% endif %}
+{% else %}
+<h3>Value</h3>
+<p>A secret's value is write-only. It is not stored by dockmin, and it is not shown here or anywhere else, to anyone. A service that uses the secret reads it as a file.</p>
+{% endif %}
+
+<h3>Labels</h3>
+{% if detail.labels %}
+{{ value_table(detail.labels, "Labels", "Labels of this " ~ kind) }}
+{% if detail.labels_truncated %}<p class="field__help">Only some of the labels are shown.</p>{% endif %}
+{% else %}
+<p>The {{ kind }} has no labels.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro access_tab(kind, detail, panel, values, fields) %}
+{% set args = {"environment_id": detail.environment_id, "object_id": detail.id} %}
+{{ access_panel(panel.control, panel.key, panel.names, panel.digest, route_path("environment_swarm_" ~ kind ~ "_access_save", **args), route_path("environment_swarm_" ~ kind ~ "_access_delete", **args), values=values, fields=fields) }}
+{% endmacro %}
+
+{% macro object_tabs(kind, detail, tab, tabs, panel, values, fields) %}
+{% set detail_href = route_path("environment_swarm_" ~ kind ~ "_detail", environment_id=detail.environment_id, object_id=detail.id) %}
+{% set labels = {"overview": "Overview", "access": "Access"} %}
+<div id="{{ kind }}-tabs" class="tabs">
+  <p class="loading" role="status">Loading&hellip;</p>
+  <nav aria-label="{{ kind|capitalize }} sections">
+    <ul class="tabs__list">
+      {% for key in tabs %}
+      {% set href = with_origin(detail_href ~ "?tab=" ~ key, origin_ref) %}
+      <li>
+        <a class="tabs__link" href="{{ href }}" hx-get="{{ href }}" hx-target="#{{ kind }}-tabs" hx-swap="outerHTML" hx-push-url="true"
+           {%- if key == tab %} aria-current="page"{% endif %}>{{ labels[key] }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
+    {% if tab == "overview" %}{{ overview_tab(kind, detail) }}
+    {% elif tab == "access" %}{{ access_tab(kind, detail, panel, values, fields) }}
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}

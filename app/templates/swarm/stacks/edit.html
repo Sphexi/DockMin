@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "swarm/stacks/_form.html" import swarm_stack_form with context %}
+{% block title %}Edit stack {{ stack_name }} - dockmin{% endblock %}
+{% set crumb_object = stack_name %}
+{% set crumb_object_href = cancel_href %}
+{% set crumb_page = "Edit" %}
+{% block content %}
+{% call page_header("Edit stack", stack_name ~ " on " ~ environment_name) %}
+<a class="btn" href="{{ cancel_href }}">Cancel</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if form.failure %}
+{{ error_state(form.failure.title, form.failure.message) }}
+{% endif %}
+{% if form.errors %}
+{{ error_summary(form.errors) }}
+{% endif %}
+<div class="panel panel--notice" role="note">
+  <p>Saving stores the file and variables and changes nothing on the cluster. The stack keeps running as it is until you redeploy it. The stack's files are kept as stored: add, change and remove them on the Files tab.</p>
+</div>
+{{ swarm_stack_form(form, kind, stack_name, post_href, validate_href, cancel_href, compose, variable_cap, catalogue, expected_digest) }}
+{% endblock %}

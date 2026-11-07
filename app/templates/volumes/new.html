@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "partials/engine_detail.html" import engine_detail_block %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/key_value_rows.html" import key_value_rows %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Create volume on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Create volume" %}
+{% block content %}
+{% call page_header("Create volume", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ list_href }}">Cancel</a>
+{% endcall %}
+
+{% if banner %}
+{{ error_state(banner.title, banner.message) }}
+{{ engine_detail_block(engine_detail) }}
+{% endif %}
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+{% if environment.is_local and is_admin %}
+<div class="panel panel--notice" role="note">
+  <p>This environment is the host dockmin runs on. Changes here affect that host.</p>
+</div>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ post_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <section class="panel create-section" aria-labelledby="volume-title">
+    <h2 class="create-section__title" id="volume-title">Volume</h2>
+    <div class="create-section__body">
+      {{ form_field("name", "Name", value=values.get("name", ""), error=errors.get("name"), required=true, help="At least two characters: letters, digits, underscore, period and hyphen, starting with a letter or digit.") }}
+      {% if is_admin %}
+      {{ form_field("driver", "Driver", value=values.get("driver", ""), error=errors.get("driver"), help="Leave empty for local. A plugin is named as it is installed, such as vieux/sshfs:latest.") }}
+      {{ key_value_rows("option", "Driver options", "Option", "Passed to the driver as they are. For the local driver, type, device and o bind a host path or mount a remote filesystem.", option_count, row_cap, values, errors, post_href) }}
+      {% else %}
+      <p class="field__help">Volumes you create use the local driver with no driver options. Administrators can choose a driver and options.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="labels-title">
+    <h2 class="create-section__title" id="labels-title">Labels</h2>
+    <div class="create-section__body">
+      {{ key_value_rows("label", "Labels", "Label", "Stack membership labels cannot be set here.", label_count, row_cap, values, errors, post_href) }}
+    </div>
+  </section>
+
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Create volume</button>
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

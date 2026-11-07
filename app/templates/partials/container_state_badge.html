@@ -1,0 +1,12 @@
+{% from "partials/badge.html" import badge %}
+{% from "partials/container_state_label.html" import container_state_label %}
+
+{# The text names the state, so the tone never carries it alone. #}
+{% macro container_state_badge(status, health=none) -%}
+{% set tone = {"running": "ok", "paused": "info", "restarting": "warn", "removing": "warn", "dead": "danger"}.get(status, "neutral") %}
+{{ badge(container_state_label(status), tone) }}
+{%- if health == "unhealthy" %} {{ badge("Unhealthy", "danger") }}
+{%- elif health == "starting" %} {{ badge("Health starting", "info") }}
+{%- elif health == "healthy" %} {{ badge("Healthy", "ok") }}
+{%- endif %}
+{%- endmacro %}

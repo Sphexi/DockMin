@@ -1,0 +1,17 @@
+{% macro fetch_progress(status) %}
+{% set percent = (status.fetched_bytes * 100 // status.fetch_size) if status.fetch_size else none %}
+<section id="restore-fetch" class="progress-panel" data-state="running" aria-labelledby="restore-fetch-title" aria-busy="true"
+         hx-get="{{ route_path('restore_review') }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+  <header class="progress-panel__head">
+    <h2 class="progress-panel__title" id="restore-fetch-title">Fetching the archive</h2>
+  </header>
+  {% if status.fetch_size %}
+  <progress class="progress-panel__bar" aria-label="Fetch progress" max="{{ status.fetch_size }}" value="{{ status.fetched_bytes }}">{{ percent }}%</progress>
+  {% else %}
+  <progress class="progress-panel__bar" aria-label="Fetch progress">Working</progress>
+  {% endif %}
+  <p class="visually-hidden" role="status">Fetching the archive: {{ status.fetched_bytes|filesize }}{% if status.fetch_size %} of {{ status.fetch_size|filesize }}, {{ percent }}%{% endif %} received.</p>
+  <p class="progress-panel__detail">{{ status.fetched_bytes|filesize }}{% if status.fetch_size %} of {{ status.fetch_size|filesize }}{% endif %} received.</p>
+  <p class="progress-panel__refresh"><a href="{{ route_path('restore_review') }}">Refresh status</a></p>
+</section>
+{% endmacro %}

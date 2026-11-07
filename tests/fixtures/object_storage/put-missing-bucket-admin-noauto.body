@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message><Resource>/dockmin-e2e-missing/exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Resource><RequestId>18E17D9A030E37D34E735682</RequestId><Key>exports/rule-1/2026/01/01/00000000000000000001.csv.gz</Key><BucketName>dockmin-e2e-missing</BucketName></Error>

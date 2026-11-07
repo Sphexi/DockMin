@@ -1,0 +1,7 @@
+* text=auto
+
+# Vendored files are served byte-for-byte; line-ending conversion would break their SRI hash.
+app/static/vendor/** -text
+
+# Captured Engine responses are compared byte-for-byte.
+tests/docker_engine/swarm_samples/** -text

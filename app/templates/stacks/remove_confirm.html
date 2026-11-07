@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_confirm.html" import removal_containers, removal_form, removal_networks with context %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% block title %}Remove stack {{ confirmation.stack }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.stack %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Remove" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Remove stack", "Review the stack below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+<section class="panel" aria-labelledby="remove-heading">
+  <h2 id="remove-heading">Remove stack <span class="mono cell-wrap">{{ review.stack }}</span> from {{ review.environment_name }}?</h2>
+  {{ confirm_targets([{"name": review.stack, "detail": "on " ~ review.environment_name}], "stack") }}
+  <p>The stack's containers and networks are stopped and deleted, and dockmin forgets the stack. Volumes are not deleted: their data stays on the host, and each volume without an access control of its own gets a copy of the stack's.</p>
+
+  {{ removal_containers(review, false) }}
+  {{ removal_networks(review) }}
+
+  {{ removal_form(review, run_href, detail_href, plain_href, compose, alternatives=[("Also delete its volumes...", volumes_href), ("Force remove stack...", orphans_href)]) }}
+</section>
+{% endblock %}

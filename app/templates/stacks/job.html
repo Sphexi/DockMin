@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import kind_labels, stack_job_progress with context %}
+{% block title %}{{ kind_labels.get(job.kind, "Operation") }} {{ job.stack }} - dockmin{% endblock %}
+{% set crumb_object = job.stack %}
+{% set crumb_object_href = route_path('environment_stack_detail', environment_id=job.environment_id, stack_name=job.stack) %}
+{% set crumb_page = kind_labels.get(job.kind, "Operation") %}
+{% block head_extra %}
+{% if job.running %}
+<noscript><meta http-equiv="refresh" content="5"></noscript>
+{% endif %}
+{% endblock %}
+{% block content %}
+{% call page_header(kind_labels.get(job.kind, "Operation"), job.stack) %}
+<a class="btn" href="{{ list_href }}">Back to stacks</a>
+{% endcall %}
+
+<section id="job-panel" class="panel job-panel" aria-label="Operation progress"{% if job.running %} data-job-stream="{{ stream_href }}"{% endif %}>
+  <div data-job-body>
+    {{ stack_job_progress(job) }}
+  </div>
+  {% if job.running %}
+  <p class="field__help" data-job-status>Without script this page reloads every few seconds. Choose Refresh status to see the current state sooner. The operation carries on if you leave this page.</p>
+  <p class="job__refresh" data-job-refresh><a class="btn" href="{{ job_href }}">Refresh status</a></p>
+  {% endif %}
+</section>
+{% endblock %}

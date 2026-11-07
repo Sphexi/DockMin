@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "swarm/stacks/_form.html" import swarm_stack_form with context %}
+{% block title %}Adopt {{ namespace.name }} on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Adopt " ~ namespace.name %}
+{% block content %}
+{% call page_header("Adopt stack", namespace.name ~ " on " ~ environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ cancel_href }}">Cancel</a>
+{% endcall %}
+
+{{ compose_banner(compose) }}
+{% if form.failure %}
+{{ error_state(form.failure.title, form.failure.message) }}
+{% endif %}
+{% if form.errors %}
+{{ error_summary(form.errors) }}
+{% endif %}
+<section class="panel" aria-labelledby="namespace-heading">
+  <h2 id="namespace-heading">Stack on the cluster</h2>
+  <dl class="facts">
+    <dt>Stack name</dt>
+    <dd class="mono cell-wrap">{{ namespace.name }}</dd>
+    <dt>Services</dt>
+    <dd>{{ namespace.services }}</dd>
+    <dt>Configs</dt>
+    <dd>{{ namespace.configs }}</dd>
+    <dt>Secrets</dt>
+    <dd>{{ namespace.secrets }}</dd>
+    <dt>Networks</dt>
+    <dd>{{ namespace.networks }}</dd>
+  </dl>
+</section>
+<section class="panel" aria-labelledby="read-heading">
+  <h2 id="read-heading">Reconstruct from the cluster</h2>
+  <p>dockmin writes the stack's file from the specifications of its services, networks, configs and secrets. Secret values cannot be read, so each secret is referenced by name. You review the result before anything is stored, and adopting it as is changes nothing on the cluster.</p>
+  <form class="form" method="post" action="{{ read_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Reconstruct from the cluster</button>
+    </div>
+  </form>
+</section>
+<section class="panel" aria-labelledby="paste-heading">
+  <h2 id="paste-heading">Paste the file</h2>
+  <p>The cluster does not keep the file the stack was deployed from. Paste the file, with the variables it needs. Adopting stores them and puts the stack under your control; it changes nothing on the cluster. The first redeploy then brings the objects in line with the file: every service is updated, which replaces its running tasks, and configs and secrets that the Docker command line named are replaced and removed. The redeploy confirmation names each one.</p>
+</section>
+{{ swarm_stack_form(form, kind, stack_name, post_href, validate_href, cancel_href, compose, variable_cap, catalogue, file_cap=file_cap) }}
+{% endblock %}

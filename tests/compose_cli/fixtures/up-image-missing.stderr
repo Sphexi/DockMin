@@ -1,0 +1,7 @@
+{"id":"Network dockmin-e2e-missing_default","status":"Working","text":"Creating"}
+{"id":"Network dockmin-e2e-missing_default","status":"Working","text":"Creating"}
+{"id":"Network dockmin-e2e-missing_default","status":"Done","text":"Created"}
+{"id":"Network dockmin-e2e-missing_default","status":"Done","text":"Created"}
+{"id":"Container dockmin-e2e-missing-m-1","status":"Working","text":"Creating"}
+{"id":"service:m:1","status":"Error","text":"Error response from daemon: No such image: dockmin-e2e-absent.invalid/none:1"}
+{"error":true,"message":"Error response from daemon: No such image: dockmin-e2e-absent.invalid/none:1"}

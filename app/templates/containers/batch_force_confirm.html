@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "containers/_batch.html" import batch_context, batch_fields, batch_noun, batch_nothing, batch_targets, batch_volumes with context %}
+{% from "containers/_confirm.html" import force_choices with context %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Force remove containers - dockmin{% endblock %}
+{% set crumb_page = "Force remove containers" %}
+{% block content %}
+{% set list_href = route_path("environment_container_list", environment_id=environment_id) %}
+{% call page_header("Force remove containers", "Review the containers below. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ list_href }}">Back to containers</a>
+{% endcall %}
+
+{% for message in fields.values() %}
+{{ error_state("Check the selection", message) }}
+{% endfor %}
+
+{% if confirmation is not none %}
+{% set count = confirmation.targets|length - (protected_ids|length if protected_ids else 0) %}
+{{ batch_context(confirmation) }}
+
+{% if confirmation.targets %}
+<div class="panel panel--alert" role="note">
+  <h2>What forcing does</h2>
+  <ul>
+    {% if confirmation.can_force %}<li>A running container is killed first, with no chance to shut down.</li>{% endif %}
+    <li>Each listed container and its writable layer are deleted.</li>
+    <li>Anonymous volumes are deleted with them when ticked below. Named volumes are always kept.</li>
+    <li>This cannot be undone.</li>
+  </ul>
+</div>
+{{ batch_targets(confirmation, protected_ids, instance_href) }}
+{{ batch_volumes(confirmation, volumes) }}
+
+<form class="form form--wide" method="post" action="{{ route_path('environment_container_batch_run', environment_id=environment_id) }}" data-submit-once>
+  {{ batch_fields(confirmation, "remove", volumes, unread_token) }}
+  <input type="hidden" name="confirm_force" value="yes">
+  {{ force_choices(confirmation.can_force, true) }}
+  <div class="form__actions">
+    {% if count > 0 %}<button type="submit" class="btn btn--danger">Force remove {{ count }} {{ batch_noun(count) }}</button>{% endif %}
+    <a class="btn" href="{{ list_href }}">Cancel</a>
+  </div>
+</form>
+{% else %}
+{{ batch_nothing(list_href) }}
+{% endif %}
+{% endif %}
+{% endblock %}

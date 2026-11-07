@@ -1,0 +1,7 @@
+{"id":"Container dockmin-e2e-failing-z-1","status":"Working","text":"Starting"}
+{"id":"Container dockmin-e2e-failing-z-1","status":"Done","text":"Started"}
+{"id":"Container dockmin-e2e-failing-m-1","status":"Working","text":"Starting"}
+{"id":"Container dockmin-e2e-failing-m-1","status":"Done","text":"Started"}
+{"id":"Container dockmin-e2e-failing-m-1","status":"Working","text":"Waiting"}
+{"id":"Container dockmin-e2e-failing-m-1","status":"Error","text":"Error","details":"dependency m failed to start"}
+{"error":true,"message":"dependency failed to start: container dockmin-e2e-failing-m-1 is unhealthy"}

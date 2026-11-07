@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Prune networks on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Prune networks" %}
+{% block content %}
+{% call page_header("Prune networks", environment.name) %}
+<a class="btn" href="{{ list_href }}">Back to networks</a>
+{% endcall %}
+
+<section class="section" aria-labelledby="prune-heading">
+  <h2 id="prune-heading">{{ plan.candidates|length }} {{ "network" if plan.candidates|length == 1 else "networks" }} would be removed</h2>
+  <p class="field__help">Every network below has no container, running or stopped, attached to it. Networks Docker provides, and Swarm networks, are never listed.</p>
+  {% if plan.candidates %}
+  {% set items = [] %}
+  {% for candidate in plan.candidates %}
+  {% set _ = items.append({"name": candidate.name, "detail": candidate.short_id ~ ", " ~ candidate.driver ~ (", stack " ~ candidate.stack if candidate.stack else "")}) %}
+  {% endfor %}
+  {{ confirm_targets(items, "network") }}
+  {% if plan.truncated %}
+  <div class="panel panel--notice" role="note">
+    {% set left = plan.total - plan.candidates|length %}
+    <p>{{ left }} more {{ "network is" if left == 1 else "networks are" }} not in this prune. Run it again afterwards for the rest.</p>
+  </div>
+  {% endif %}
+  <p>Each network is checked again as it is removed, and skipped if its name or use has changed since this list.</p>
+  <form class="form" method="post" action="{{ run_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for candidate in plan.candidates %}
+    <input type="hidden" name="target" value="{{ candidate.id }}:{{ candidate.name }}">
+    {% endfor %}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--danger">Remove {{ plan.candidates|length }} {{ "network" if plan.candidates|length == 1 else "networks" }}</button>
+      <a class="btn" href="{{ list_href }}">Cancel</a>
+    </div>
+  </form>
+  {% else %}
+  <p>Nothing to prune.</p>
+  {% endif %}
+</section>
+{% endblock %}

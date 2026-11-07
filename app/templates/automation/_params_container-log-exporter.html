@@ -1,0 +1,3 @@
+{% from "automation/_fields.html" import storage_target_param with context %}
+<p class="field__help">Each run sends the lines a container has written since the last run, as one gzip-compressed NDJSON file per container, or per task for a Swarm service. A container or service is read only if the automation's owner may read its logs.</p>
+{{ storage_target_param(state, errors, storage_targets, "The bucket this automation sends to. Files go to the target's activity log folder, under container-logs/ or, for a Swarm service, service-logs/.") }}
