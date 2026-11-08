@@ -308,8 +308,6 @@ The edit form is filled from the stored configuration and offers the same fields
 | Number, duration, list and name fields | A field left exactly as the form showed it keeps the stored value, even when the value is outside the rules of the create form: a `fs.*` kernel parameter, a duration with sub-millisecond precision, a limit name not in the list |
 | Comparison | A review compares the stored and the new value as Docker holds them. Durations are compared exactly in nanoseconds. An empty list equals an absent one. A health check with no test and no timings equals `Inherit from the image`. Capability names are compared without `CAP_`, order and repeats. A value that means the same as the stored one is sent in the stored spelling |
 
-<!-- screenshot: Usage-Swarm-1: the Review changes page of a service edit that changes the image, showing Changes, Image now, Image after, Running tasks and the Credential set for the pull; a replicated service with a bound credential set -->
-
 | Review shows | Content |
 |---|---|
 | Changes | The settings that differ, as names only and never values: Image, Mode and replicas, Command, Environment variables, Labels, Placement, Resources, Restart policy, Update configuration, Rollback configuration, Networks, Published ports, Mounts, Configs, Secrets, Health check, Process, Host and DNS, Security, Resource limits, Logging, Other settings the form does not show |
@@ -651,8 +649,6 @@ Nodes are cluster infrastructure. The node list and the node page are for admini
 | To `active` | None. A `POST` with the CSRF token. Running tasks are not moved back |
 | To `pause` | The node, its role, the other active nodes, and the number of running tasks that keep running. Tasks that stop are replaced elsewhere |
 | To `drain` | The same, with the running tasks by service (at most 50 services, then `and N more services`; `service` for one), and the number of tasks that are stopped and replaced elsewhere. When no other node is active: `No other node is active, so the replacements stay pending until one is.` |
-
-<!-- screenshot: Usage-Swarm-2: the Drain node confirmation, showing Role, Availability, Other active nodes and the running tasks by service; a worker node with tasks of at least two services -->
 
 | Rule | Value |
 |---|---|

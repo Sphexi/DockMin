@@ -2,7 +2,7 @@
 
 `Administration > Encryption` shows the key in use and how many stored secrets each key version holds, checks that the stored secrets open, and re-encrypts them under the current key.
 
-<!-- screenshot: Administration-Encryption-1: the Encryption overview with the Key block, the Stored secrets by key version table and the Status line; an instance that completed the rotation stage of a re-key, so a previous key is configured and some secrets sit at version 1 while the current version is 2 -->
+![Encryption overview with every stored secret at key version 1](images/Administration-Encryption-1.webp)
 
 ## Access
 
@@ -74,8 +74,6 @@ Columns counted:
 ## Re-encrypt stored secrets
 
 `Review and re-encrypt` opens a review page that names every column and count a re-encryption would rewrite. Nothing changes until the box `Re-encrypt the stored secrets listed above` is ticked and `Re-encrypt stored secrets` is chosen.
-
-<!-- screenshot: Administration-Encryption-2: the review page "Re-encrypt N stored secrets?" with the column list, the ticked box and the Re-encrypt stored secrets button; an instance with secrets at key version 1 and current version 2 -->
 
 | Item | Fact |
 |---|---|

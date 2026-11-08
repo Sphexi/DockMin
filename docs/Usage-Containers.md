@@ -2,7 +2,7 @@
 
 Containers are listed and managed per environment. The list, the detail page and stats are read from the host when the page loads. Nothing is cached.
 
-<!-- screenshot: Usage-Containers-1: the container list with the filter bar, the state badges, a ticked row selection and the batch action controls; an environment with at least five containers in mixed states (running, exited, one unhealthy), one of them in a Compose stack -->
+![Container list filtered by name](images/Usage-Containers-1.webp)
 
 | Page | Path | Administrators | Standard users |
 |---|---|---|---|
@@ -165,6 +165,8 @@ The list reads health from two extra requests filtered by `unhealthy` and `start
 ## Container page
 
 The summary above the tabs shows the state, image, short id, environment, and the action buttons the user may use. Each tab has its own URL.
+
+![Overview tab of a running container](images/Usage-Containers-2.webp)
 
 | Summary button | Shown when |
 |---|---|
@@ -809,7 +811,7 @@ The result page gives the count done out of the count submitted.
 5. Select `Create container`. A create that does not pull opens the new container with a notice. A create that pulls opens a [job page](#job-page) that shows the pull, then the create and start steps.
 6. If the form or review shows `Check the form`, fix the listed fields and submit again; see [Validation](#validation) and [Create results](#create-results). For host errors see [Troubleshooting](Troubleshooting).
 
-<!-- screenshot: Usage-Containers-2: the create review page with the Container, Ports and Credential set for the pull sections visible; a remote environment, an image not yet on the host, one published port, and a registry with two credential sets -->
+![Create review for an image not yet on the host](images/Usage-Containers-3.webp)
 
 | Role | May create in |
 |---|---|
@@ -1364,6 +1366,8 @@ A create, duplicate or recreate that pulls an image runs as a job. One that does
 - One activity row is written when the job ends, with the keys of [Create and duplicate](#create-and-duplicate) or [Recreate](#recreate-1).
 
 ### Job page
+
+![Job page of a create that pulled the image](images/Usage-Containers-4.webp)
 
 | Item | Content |
 |---|---|

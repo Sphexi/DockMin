@@ -185,8 +185,6 @@ Removal deletes a volume and all of the data in it. It needs write access to the
 | Limit | 25 containers |
 | Page with nothing to force | A volume with no users redirects to the plain confirmation |
 
-<!-- screenshot: Usage-Volumes-1: the Force remove volume confirmation listing the containers that would be removed first and the What forcing does section; a volume mounted by two stopped containers -->
-
 The force path does not:
 
 - stop, kill or pause a container. A container in state `running`, `paused` or `restarting` refuses the run until it is stopped
@@ -317,8 +315,6 @@ Assign owners puts volumes that have no control under a control owned by the use
 | Run | `POST /environments/{id}/volumes/-/backfill`, with `expected_plan` |
 | Standard users | `404` on both routes |
 | Reads | The volume list and the container list of the host, now. A host that cannot be read answers `503` with the host message ([Host failures](#host-failures)) |
-
-<!-- screenshot: Usage-Volumes-2: the Assign owners review page with volumes to assign and the left alone sections; administrator on a host with several volumes created before access control -->
 
 ### Candidate volumes
 

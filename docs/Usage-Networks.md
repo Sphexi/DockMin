@@ -108,6 +108,8 @@ The list is replaced by an error, and the answer is `503`. The messages are thos
 
 ## Network page
 
+![Overview tab of the predefined bridge network](images/Usage-Networks-1.webp)
+
 | Tab | Content | Shown to |
 |---|---|---|
 | Overview | Name, id, driver, scope, created, flags, stack, `Used by`, address pools (`Subnet`, `Gateway`, `IP range`; first 16), driver options, labels | Everyone. Driver options: administrators |
@@ -179,8 +181,6 @@ On a Swarm manager, services use networks. A standalone host has no services.
 - A duplicate option key (ignoring case) or label key is refused.
 - The configuration sent to Docker is built from the validated fields only. Nothing a user types reaches Docker as a raw mapping.
 - The new network is put under a resource control owned by its creator ([Ownership](#ownership)).
-
-<!-- screenshot: Usage-Networks-1: the create form with the overlay driver selected, showing Overlay settings, Attachable, Addressing and Driver options; administrator on a Swarm manager -->
 
 | Result | Status | Message | Shown |
 |---|---|---|---|
@@ -370,8 +370,6 @@ Pruning removes unused networks in bulk. Administrators only.
 | Posted | Each listed network with its id and name. A posted list of fewer than 1 or more than 100 networks answers `400`: `Select between 1 and 100 networks.` |
 | Run | The candidates are read again. A network that is no longer a candidate, or whose name changed, is skipped. Each network is removed on its own, and a failure does not stop the others |
 | Docker prune | Docker's prune endpoint is never called |
-
-<!-- screenshot: Usage-Networks-2: the prune confirmation listing several networks with id, driver and stack, and the notice of networks left out; administrator on a host with more than 100 unused networks -->
 
 | Result per network | Meaning |
 |---|---|

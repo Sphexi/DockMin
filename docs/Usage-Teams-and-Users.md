@@ -54,7 +54,7 @@ The page opens from `Users`. It shows `Status` (`Enabled` or `Disabled`, with `Y
 | `API tokens` | The user's tokens ([Token list of another user](#token-list-of-another-user)) |
 | `Delete` | `Delete user` |
 
-<!-- screenshot: Usage-Teams-and-Users-1: the user page of a standard user as an administrator, showing the facts, the Access, Profile, Reset password and Sessions sections and the API tokens table; an account with one active token -->
+![User page of the signed-in administrator](images/Usage-Teams-and-Users-1.webp)
 
 ### Change a username or role
 
@@ -239,7 +239,7 @@ The command lifts any lock held on that username or that address and records `lo
 | List | Columns `Team` and `Created`. An administrator sees every team; anyone else sees the teams they belong to. Empty for a standard user: `You are not a member of any team yet. Ask an administrator to add you to one.` |
 | Team page | `Created` and the roster `Members of <team>` with `Member`, `Role` (`Leader` or `Member`), `Joined` and, for those who manage members, `Actions` |
 
-<!-- screenshot: Usage-Teams-and-Users-2: the team page as an administrator, showing the roster with a leader and a member, the Add a member form with "Appoint as team leader", and the Rename and Delete sections; a team with two members -->
+![Team page with a leader and the Add a member form](images/Usage-Teams-and-Users-2.webp)
 
 ### Members and leaders
 

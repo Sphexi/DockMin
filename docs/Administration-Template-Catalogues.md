@@ -35,6 +35,8 @@ All paths are under `/template-catalogues`.
 
 ## List
 
+![Template catalogue list with two enabled catalogues](images/Administration-Template-Catalogues-1.webp)
+
 | Item | Value |
 |---|---|
 | Columns | Name, Kind, Host, State, Templates, Last fetched |
@@ -55,8 +57,6 @@ All paths are under `/template-catalogues`.
 | Settings | Kind, Address, State, Templates, Last fetched, Added, Last changed |
 | Fetching, enabled | `Refresh` and `Disable` |
 | Fetching, disabled | `Nothing has been contacted for this catalogue. Enabling it downloads the document once from the address above and offers its templates to every signed-in user.` and `Enable and fetch` |
-
-<!-- screenshot: Administration-Template-Catalogues-1: the page of a disabled catalogue whose last fetch failed, showing the failure panel, the Settings list and the Enable and fetch button; a catalogue added with an address that answers 404 and enabled once -->
 
 ## Catalogue fields
 
@@ -100,7 +100,7 @@ When step 5 fails, the catalogue stays disabled and the page shows the failure i
 
 `/template-catalogues/new?preset=linuxserver` opens the form with the preset filled in. Any other `preset` value opens it blank.
 
-<!-- screenshot: Administration-Template-Catalogues-2: the Add template catalogue form opened from the linuxserver.io preset, showing the preset notice, Name, the Kind choices and Address; an administrator session with no catalogues -->
+![Add template catalogue form filled from the linuxserver.io preset](images/Administration-Template-Catalogues-2.webp)
 
 ## Catalogue actions
 

@@ -75,7 +75,7 @@ Prerequisites: a Docker daemon listening on TCP with mutual TLS, and a CA certif
 - A certificate nearing expiry is replaced by editing the environment and supplying all three items again ([Replacing material](#replacing-material)).
 - A remote environment submitted with none of the three items is refused on the field `tls` with the text `Refusing to connect to a Docker Engine over plain TCP.` followed by the explanation that an unauthenticated Docker socket grants root on the host and that a CA certificate, a client certificate and a client key are required.
 
-<!-- screenshot: Usage-Environments-1: the Add environment form with Remote host over TLS selected, the endpoint preview, and the report "The connection test failed" with the stage table showing TLS handshake failed; administrator session, a daemon that rejects the client certificate -->
+![Add environment form with Remote host over TLS selected](images/Usage-Environments-1.png)
 
 ## Generate TLS material
 
@@ -532,7 +532,7 @@ The page reads the host when it loads, for the cards, the stack grid and the con
 
 The page header holds `Back to environments` and, for administrators, `Edit` and `Delete`. `Delete` opens the confirmation page for this environment ([Deleting](#deleting)).
 
-<!-- screenshot: Usage-Environments-2: the environment page as an administrator, showing the Connection section, the Host, Status and Engine boxes, the five cards and the stack grid; a reachable environment with several stacks and one unhealthy container -->
+![Environment page of a local socket environment](images/Usage-Environments-2.webp)
 
 | Host | When | Page |
 |---|---|---|

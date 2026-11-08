@@ -51,6 +51,8 @@ A channel is a place dockmin sends a message when a subscribed event is recorded
 - `Last success` and `Last error` are independent. A later success does not clear the last error.
 - Confirmation notices: `The channel is saved. Send a test message to check it.`, `Changes saved.`, `The channel is deleted. Messages waiting for it are discarded.`, `Subscriptions saved.`, `Settings saved.`
 
+![Channel list and the link base URL field](images/Administration-Notifications-1.webp)
+
 ## Channels
 
 | Field | Rule |
@@ -103,7 +105,7 @@ A channel is a place dockmin sends a message when a subscribed event is recorded
 
 ### Add a channel
 
-<!-- screenshot: Administration-Notifications-1: the page of a Webhook channel with a signing key set, showing the masked secret, the Delivery section and the Test section; an instance with one Webhook channel that has a secret header value and signing key -->
+![Add Webhook channel form](images/Administration-Notifications-2.webp)
 
 1. Open `Notifications` and select `Add channel`.
 2. Choose a kind. The form for that kind opens.

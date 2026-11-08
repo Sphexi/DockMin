@@ -216,7 +216,7 @@ Action `backup_downloaded`, category `user_action`, target type `backup`, no tar
 | Archives produced | The backup records, newest first, 25 per page |
 | Header buttons | `Object storage`, `Restore from a backup` |
 
-<!-- screenshot: Administration-Backups-1: the Backups page with the Download, Encryption key, Scheduled backups and Archives produced sections; at least one downloaded archive, one uploaded archive and one failed scheduled backup recorded -->
+![Backups page](images/Administration-Backups-1.webp)
 
 | Column | Content |
 |---|---|
@@ -479,8 +479,6 @@ The review page adds two rows for a fetched archive:
 7. **Check the secrets and re-seal them.** Background. The staged database changes.
 8. **Replace the data.** Background. The live data moves aside and the staged data moves in.
 9. **Restart on the restored data.** Background. The application's services start on the new data.
-
-<!-- screenshot: Administration-Backups-2: the Review the archive page with The archive, What it replaces, the key field and the confirmation tick; an instance engaged for a restore with an uploaded archive from another instance -->
 
 - Steps 4 to 9 run after `POST /restore/confirm`, which redirects to the progress page.
 - One restore at a time. A second `begin` answers `409`: `A restore is already in progress.`

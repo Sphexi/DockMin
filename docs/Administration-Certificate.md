@@ -2,7 +2,7 @@
 
 `Administration > Certificate` shows the certificate dockmin serves HTTPS with, or states that TLS is terminated in front of dockmin.
 
-<!-- screenshot: Administration-Certificate-1: the Server certificate page with the Source panel, the Certificate loaded at start list and the Listeners list; an instance running with the generated self-signed certificate -->
+![Server certificate page with the generated self-signed certificate](images/Administration-Certificate-1.webp)
 
 ## Access
 

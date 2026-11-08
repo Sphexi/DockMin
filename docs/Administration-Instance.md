@@ -2,7 +2,7 @@
 
 `Administration > Instance` shows the dockmin process and the container it runs in, restarts that container, and replaces it from a newer image.
 
-<!-- screenshot: Administration-Instance-1: the Instance page with the Process, Container, Environments that report this container, Update dockmin and Restart dockmin sections; dockmin started with docker run and a local socket environment that reports its container -->
+![Instance page](images/Administration-Instance-1.webp)
 
 ## Access
 
@@ -131,11 +131,11 @@ An administrator updates a dockmin started with `docker run` from the Instance p
 
    Result: the page `Check for updates` lists `Running now` (image, digest, version, registry) and `Update to` with up to 10 targets. When it lists none, it reads `No update is available. dockmin runs the current image of its tag, and the registry lists no newer release.`
 
+   ![Check for updates page with no update available](images/Administration-Instance-2.webp)
+
 3. Choose a target and select `Review update`.
 
    Result: the page `Update dockmin` names the container, the current and new image and digest, the update helper and its digest, the outage and the rollback ([Review](#review)).
-
-   <!-- screenshot: Administration-Instance-2: the Update dockmin review page naming the container, current and new image digests, the update helper, the outage, the database copy, the automatic rollback and the Update dockmin button; an instance started with docker run whose registry lists a newer release -->
 
 4. Select `Update dockmin`.
 

@@ -138,7 +138,7 @@ If it did not work: a refused field re-renders the form at `422` with the messag
 - The form notes `The automation is created disabled. Run a dry run to see what it would do, then enable it.`
 - A `webhook-receiver` form has no schedule section and adds `The webhook URL is shown once, when you create the automation.`
 
-<!-- screenshot: Operations-Automation-1: step 2 of the new-automation form for container-health-checker with Name, Schedule, Target and Settings sections visible; an environment with several containers -->
+![Step 2 of the new-automation form for stack-restarter](images/Operations-Automation-1.webp)
 
 ### Fields
 
@@ -180,7 +180,7 @@ Settings are posted as `param_<name>`. An empty field takes the default. The sto
 
 `Enable` opens a confirmation page that changes nothing.
 
-<!-- screenshot: Operations-Automation-2: the Enable confirmation of a container-updater automation in update mode showing the facts, Matches now, What changes and the Dry run first button; an environment with at least two matching containers -->
+![Enable confirmation of a container-updater automation in update mode](images/Operations-Automation-2.png)
 
 | The page shows |
 |---|

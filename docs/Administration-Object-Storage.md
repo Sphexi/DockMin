@@ -62,7 +62,7 @@ Success: the target page opens with `The target is saved. Test the connection to
 
 4. On the target page, choose `Test connection` ([Connection test](#connection-test)).
 
-<!-- screenshot: Administration-Object-Storage-1: the Add object storage target form with all five groups filled in, a plain-http endpoint warning showing; no targets yet -->
+![Add object storage target form with certificate verification off](images/Administration-Object-Storage-1.png)
 
 ## Fields
 
@@ -300,8 +300,6 @@ Success: the summary reads `Passed` with `Every stage passed.` Failure: the summ
 | Bucket | `HEAD` of the bucket | `The access key, the secret and the bucket name are accepted. This does not show that the credential may write or delete.` |
 | Backup prefix | List one key under the backup folder | `The credential can list the backup prefix, which remote retention needs.` |
 | Activity log prefix | List one key under the activity log folder | `The credential can list the activity log prefix.` |
-
-<!-- screenshot: Administration-Object-Storage-2: a target page after Test connection with the Bucket stage passed and the Backup prefix stage failed with a refused credential; a target whose credential can read but not list -->
 
 - Every stage runs whatever an earlier stage reported. The test has 30 s in all; a stage that is cut off reports `unreachable`.
 - A failed stage shows the [reason's](#failure-reasons) message.

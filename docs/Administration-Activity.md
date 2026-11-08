@@ -102,7 +102,7 @@ The activity log holds one row per recorded action. Administrators read it on th
 
 `/activity`. Heading `Activity`, introduction `What users and automations did, newest first.` Events newest first, ordered by time and then id.
 
-<!-- screenshot: Administration-Activity-1: the log page with the retention line, the filter form with More filters open, the download buttons and several rows of mixed actors; an instance with user, subsystem and anonymous events -->
+![Activity log filtered to automation events](images/Administration-Activity-1.webp)
 
 | Column | Content |
 |---|---|
@@ -184,7 +184,7 @@ A filter left empty does not constrain. Filters combine with AND.
 
 `/activity/{id}`. Heading `Event <id>`. An id that is not a plain number from 1 to 9223372036854775807, or names no event, answers `404`.
 
-<!-- screenshot: Administration-Activity-2: the event page of a subsystem event with its Automation section and Detail list; an instance with a container-updater or container-health-checker event -->
+![Event page of a container-health-checker event](images/Administration-Activity-2.png)
 
 | Section | Content |
 |---|---|

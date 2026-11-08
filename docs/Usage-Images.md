@@ -2,7 +2,7 @@
 
 Images are listed and managed per environment. The list and the detail page are read from the host when the page loads. The update status shown beside each reference is the stored result of its last update check ([Stored status](#stored-status)).
 
-<!-- screenshot: Usage-Images-1: the image list with the filter bar, binding-state badges (Bound, Anonymous pull, Credential set deleted, Not bound), update-status badges and the Select column; an environment with at least six images, one with an available update, one unbound, one bound to a deleted credential set; signed in as an administrator -->
+![Image list filtered by reference](images/Usage-Images-1.webp)
 
 ## Pages and routes
 
@@ -649,7 +649,7 @@ Pruning removes unused images in bulk. Administrators only.
 3. Read the heading `{N} images would be removed` and the list of exactly those images.
 4. Select `Remove {N} images`. The result page shows each image's outcome and `Up to {size} freed`.
 
-<!-- screenshot: Usage-Images-2: the prune confirmation after `List the images` with mode Unused images, the target list, the "more images are not in this prune" notice and the Remove button; an environment with more than 100 unused images -->
+![Prune confirmation for unused images](images/Usage-Images-2.webp)
 
 | Mode | Selects |
 |---|---|

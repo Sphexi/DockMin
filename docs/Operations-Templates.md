@@ -66,7 +66,7 @@ The description in the list is plain text: tags are removed, character reference
 - The environment's architecture is not compared with `Published for`; the template is never hidden for it.
 - The setup guide is a link to the address the catalogue gave. It carries `rel="noopener noreferrer nofollow"`.
 
-<!-- screenshot: Operations-Templates-1: a template page showing the header, a description with a link, What it sets, the ports and environment variables tables, and the Create table with two environments; an administrator session and an enabled catalogue holding a Portainer-format template with a note -->
+![Template page of a Portainer-format container template](images/Operations-Templates-1.webp)
 
 ### Description and note markup
 
@@ -116,7 +116,11 @@ When the form is blank and the panel reads `That template is not available to yo
 | Hidden field | `template_ref` carries the reference. On submit it is kept when it still names a template the user may use, and dropped otherwise |
 | Recorded | `template` in the detail of `container_created` and `stack_created` ([Recorded actions](#recorded-actions)) |
 
-<!-- screenshot: Operations-Templates-2: the container create form opened from a template, showing the From the template panel with its notices and the filled Image, Name, Ports and Environment variables; a standard user opening a template that asks for added capabilities -->
+![Container create form opened from a template: notices, Image and Command](images/Operations-Templates-2.webp)
+
+![Container create form opened from a template: Environment variables, Labels and Ports](images/Operations-Templates-3.png)
+
+![Container create form opened from a template: Restart policy and Review](images/Operations-Templates-4.png)
 
 ### Container form
 

@@ -83,8 +83,6 @@ Failure: no line. An administrator already exists in this database, or the conta
 
 Success: the browser shows the page `Set up dockmin`. Failure: the page does not load. Check that port 8443 is open between the browser and the server ([Prerequisites](Getting-Started-Prerequisites#check-the-server)).
 
-<!-- screenshot: Getting-Started-Quick-Start-1: the Set up dockmin page with the four fields visible and empty; instance with no administrator -->
-
 5. Fill in the form and choose `Create administrator`.
 
 | Field | Value |
@@ -166,7 +164,7 @@ sudo chown "$USER" dockmin-secret.key
 
 3. Open `Administration > Backups` and note the fingerprint under `Encryption key`.
 
-<!-- screenshot: Getting-Started-Quick-Start-2: the Backups page, the Encryption key section with Fingerprint and Held in; instance started with the Quick Start command -->
+![Backups page with the Encryption key section](images/Administration-Backups-1.webp)
 
 4. Move `dockmin-secret.key` to storage outside this host, such as a password manager, and keep the fingerprint beside it.
 5. Delete the file on this host.

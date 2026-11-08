@@ -69,7 +69,7 @@ Result: the registry's page opens. A set with no environment grant is offered no
 
 If the form returns with errors, each one is beside its field. The secret and the certificates are never filled back in; enter them again. Refusal texts: [Fields](#fields), [Address rules](#address-rules). For a failure that is not a refusal, see [Troubleshooting](Troubleshooting).
 
-<!-- screenshot: Administration-Registries-1: the Add registry form with GitLab Container Registry chosen, showing Provider, Name, Registry address, GitLab instance URL, Authentication and Server certificate; an administrator session with no registries yet -->
+![Add registry form with GitLab Container Registry chosen](images/Administration-Registries-1.png)
 
 ## Fields
 
@@ -671,7 +671,7 @@ Result: the page `Registry deleted` states that the credential set and its grant
 
 The confirmation carries the set's name and the number of bound images. The delete applies only while both are unchanged. When it is refused, the confirmation page is shown again with the current values.
 
-<!-- screenshot: Administration-Registries-2: the Delete registry confirmation naming the set, its environments, its users and teams and the bound images table; a set granted to two environments with several bound images -->
+![Delete registry confirmation with the bound images](images/Administration-Registries-2.webp)
 
 ## Recorded actions
 

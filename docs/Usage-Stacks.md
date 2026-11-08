@@ -99,7 +99,7 @@ All paths are under `/environments/{id}/stacks`.
 - The status badge, `Changed since the last deploy` and the origin (`Created here` or `Adopted`) sit beside the buttons.
 - Administrators see an activity panel on three tabs ([Activity panel](#activity-panel)).
 
-<!-- screenshot: Usage-Stacks-1: Overview tab of a deployed Compose stack with two services, showing the summary buttons, the facts list and the services table; a running Compose stack whose file changed after the last deploy, viewed as an administrator -->
+![Overview tab of an adopted Compose stack with two services](images/Usage-Stacks-1.webp)
 
 ## Docker Compose requirement
 
@@ -613,7 +613,11 @@ A variable with the secret box ticked is encrypted at rest with the server's enc
 4. Choose `Hide`, or wait 60 seconds, to return the masked row.
 5. When the form answers `The current password is incorrect.`, re-enter the password. When it answers `Too many failed attempts. Try again later.`, wait for the sign-in lock to clear ([Teams and users](Usage-Teams-and-Users)).
 
-<!-- screenshot: Usage-Stacks-2: Variables tab of a Compose stack with one plain variable, one secret variable showing its mask, and one secret variable revealed with the window note and Hide button; an administrator session with an open reveal window and a stored secret of at least 24 characters -->
+![Variables tab with a secret variable masked](images/Usage-Stacks-2.webp)
+
+![Variables tab asking for the password before a reveal](images/Usage-Stacks-3.webp)
+
+![Variables tab with one secret variable masked and one revealed](images/Usage-Stacks-4.webp)
 
 | Item | Value |
 |---|---|
@@ -1227,6 +1231,10 @@ Checks, in this order. A refusal changes nothing on the host and records a failu
 - Automation never builds. `container-updater` skips a stack whose file has `build` (`built_image`). A `webhook-receiver` redeploy reuses the image built from the stored inputs, or is refused (`built_image_missing`) ([Builds and automation](#builds-and-automation)).
 
 ### Result
+
+![Redeploy result](images/Usage-Stacks-5.webp)
+
+![Overview tab after a redeploy](images/Usage-Stacks-6.webp)
 
 | Item | Value |
 |---|---|

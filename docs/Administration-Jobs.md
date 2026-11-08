@@ -39,7 +39,7 @@ The Automation pages are open to every signed-in user: a standard user sees and 
 
 `/jobs`. Heading `Jobs`. Introduction: `The administrator's view of every scheduled job: every user's automations, and the system tasks that have no automation.`
 
-<!-- screenshot: Administration-Jobs-1: the Jobs list with both filters and several rows; an instance with at least one automation, one paused job and one job disabled after failures -->
+![Jobs list](images/Administration-Jobs-1.webp)
 
 | Column | Content |
 |---|---|
@@ -477,7 +477,7 @@ An enable that finds the job already enabled records nothing. The confirmation p
 
 An administrator starts one run outside the schedule from the job page. A confirmation page precedes it. The automation's owner does the same from the automation's page ([Automation](Operations-Automation#run-now)).
 
-<!-- screenshot: Administration-Jobs-2: the Run job now confirmation page for an automation's job, with the target list and the What changes list; an automation with an environment -->
+![Run job now confirmation for a system task](images/Administration-Jobs-2.png)
 
 1. Open the job page and select `Run now`.
 2. Read the confirmation page `Run job now`. It lists the job, subsystem, automation, environment, schedule and state, then `What changes`: the job runs once, now, on its environment, and the schedule is not changed.

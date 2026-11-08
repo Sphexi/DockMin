@@ -63,7 +63,7 @@ The panel is the `Access` tab of a controlled object: container, Compose stack, 
 5. Choose `Create control` for an uncontrolled object or `Save control` for a controlled one.
 6. Success: the tab reloads with `Access control saved.` and the new facts. Failure: the form reloads at `422` with the message beside the field, or at `409` with the current control ([Stale form](#stale-form)).
 
-<!-- screenshot: Usage-Access-Control-1: the Access tab of a container with the "Change ownership and access" disclosure open, showing the three visibility options, access level, owner, users and teams with access; a restricted control with one user and one team -->
+![Access tab of an uncontrolled volume with Change ownership and access open](images/Usage-Access-Control-1.webp)
 
 ### Panel fields
 
