@@ -38,8 +38,8 @@ Partials live in [`app/templates/partials/`](https://github.com/Sphexi/DockMin/t
 | Partial | Renders | Required arguments | Optional arguments |
 |---|---|---|---|
 | `page_header` | `<h1>`, subtitle, and an action area | `title` | `subtitle`; `{% call %}` body becomes the actions |
-| `data_table` | Scrollable table (a focusable region labelled `<caption> table`), sortable headers, loading line, pagination, empty state | `table_id`, `caption`, `columns`, `pager`; `{% call %}` body supplies the `<tr>` rows | `empty_title`, `empty_body`, `empty_action_label`, `empty_action_href`, `filtered`, `clear_href` ([Empty, loading and error states](#empty-loading-and-error-states)) |
-| `pagination` | First-page and next-page links with a count summary | `pager`, `table_id` | `label` (default `Pagination`; `data_table` passes `<caption> pagination`) |
+| `data_table` | Scrollable table (a focusable region labelled `<caption> table`), sortable headers, loading line, pagination, empty state | `table_id`, `caption`, `columns`, `pager`; `{% call %}` body supplies the `<tr>` rows | `empty_title`, `empty_body`, `empty_action_label`, `empty_action_href`, `filtered`, `clear_href` ([Empty, loading and error states](#empty-loading-and-error-states)), `region_id` (sort and page links swap that region's contents instead of the table) |
+| `pagination` | First-page and next-page links with a count summary | `pager`, `table_id` | `label` (default `Pagination`; `data_table` passes `<caption> pagination`), `region_id` |
 | `back_actions` | The page's back button, then `Back to <kind> <name>` when the page was reached from another object ([Origin](#origin)) | `back_href`, `back_label` | `origin` |
 | `empty_state` | "Nothing here" panel with an optional call to action | `title` | `body`, `action_label`, `action_href` |
 | `error_state` | Error panel with `role="alert"`, the `Docker said` block, reference id, retry link ([Retry region](#retry-region)) | `title`, `message` | `request_id`, `retry_href`, `region_id`, `swap` (`outerHTML` or `innerHTML`; default `outerHTML`), `region_root` (default true), `engine_detail` |
@@ -531,6 +531,8 @@ Every element carrying an HTMX attribute also carries the plain equivalent — `
    hx-get="{{ pager.sort_href(column.key) }}" hx-target="#{{ table_id }}"
    hx-swap="outerHTML" hx-push-url="true">{{ column.label }}</a>
 ```
+
+- A list whose HTMX answer is its whole results element (`<kind>s-results`: notices, the table and the controls below it) passes `region_id` to `data_table`. Its sort and page links then carry `hx-target="#<kind>s-results"` and `hx-swap="innerHTML"`, so each answer replaces the region instead of nesting inside it.
 
 URLs come from the `route_path()` global for routes and the `static_path()` global for assets. `static_path()` appends the file's modification time as a `?v=` query, so a changed asset is not served from cache.
 

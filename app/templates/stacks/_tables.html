@@ -26,7 +26,7 @@
 {% macro stacks_table(rows, columns, pager, filtered, environment_id=none, can_create=false) %}
 {% set empty_body = "Change the name, or clear the filter to see every stack." if filtered else ("There are no stacks on this environment." if principal.is_administrator else "You cannot see any stacks on this environment. Ask an administrator for access to more stacks.") %}
 {% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
-{% call data_table("stacks-table", "Stacks", columns, pager, empty_title=("No matching stacks" if filtered else "No stacks"), empty_body=empty_body, empty_action_label=("Create stack" if show_create else none), empty_action_href=(route_path("environment_stack_new", environment_id=environment_id) if show_create else none), filtered=filtered) %}
+{% call data_table("stacks-table", "Stacks", columns, pager, empty_title=("No matching stacks" if filtered else "No stacks"), empty_body=empty_body, empty_action_label=("Create stack" if show_create else none), empty_action_href=(route_path("environment_stack_new", environment_id=environment_id) if show_create else none), filtered=filtered, region_id="stacks-results") %}
 {% for row in rows %}
 {{ stack_row(row) }}
 {% endfor %}

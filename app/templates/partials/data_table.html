@@ -1,8 +1,8 @@
 {# Rows come from the call block; every table takes a PageView. #}
 {% from "partials/empty_state.html" import empty_state %}
-{% from "partials/pagination.html" import pagination %}
+{% from "partials/pagination.html" import pagination, swap_attrs %}
 
-{% macro data_table(table_id, caption, columns, pager, empty_title="Nothing to show", empty_body=none, empty_action_label=none, empty_action_href=none, filtered=false, clear_href=none) %}
+{% macro data_table(table_id, caption, columns, pager, empty_title="Nothing to show", empty_body=none, empty_action_label=none, empty_action_href=none, filtered=false, clear_href=none, region_id=none) %}
 {% set pager = require_pager(pager) %}
 {% set optional_positions %}{% for column in columns %}{% if column.optional %}{{ loop.index }} {% endif %}{% endfor %}{% endset %}
 {% set wide_positions %}{% for column in columns %}{% if column.wide_only is defined and column.wide_only %}{{ loop.index }} {% endif %}{% endfor %}{% endset %}
@@ -20,7 +20,7 @@
   {{ empty_state(empty_title, empty_body, empty_action_label, empty_action_href) }}
   {% endif %}
   {% if not pager.is_first_page %}
-  <p><a class="btn" href="{{ pager.first_href }}" hx-get="{{ pager.first_href }}" hx-target="#{{ table_id }}" hx-swap="outerHTML" hx-push-url="true">Back to the first page</a></p>
+  <p><a class="btn" href="{{ pager.first_href }}" hx-get="{{ pager.first_href }}" {{ swap_attrs(table_id, region_id) }} hx-push-url="true">Back to the first page</a></p>
   {% endif %}
   {% else %}
   <div class="data-table__scroll" role="region" aria-label="{{ caption }} table" tabindex="0">
@@ -35,7 +35,7 @@
           {% set classes = (["is-numeric"] if column.numeric else []) + (["col-optional"] if column.optional else []) %}
           <th scope="col"{% if classes %} class="{{ classes|join(' ') }}"{% endif %}{% if column.sortable %} aria-sort="{{ pager.aria_sort(column.key) }}"{% endif %}>
             {% if column.sortable %}
-            <a class="sort-link" href="{{ pager.sort_href(column.key) }}" hx-get="{{ pager.sort_href(column.key) }}" hx-target="#{{ table_id }}" hx-swap="outerHTML" hx-push-url="true">{{ column.label }}<span class="sort-link__mark" aria-hidden="true"></span></a>
+            <a class="sort-link" href="{{ pager.sort_href(column.key) }}" hx-get="{{ pager.sort_href(column.key) }}" {{ swap_attrs(table_id, region_id) }} hx-push-url="true">{{ column.label }}<span class="sort-link__mark" aria-hidden="true"></span></a>
             {% elif column.key == "select" %}
             <span class="visually-hidden">{{ column.label }}</span>
             {% else %}
@@ -48,7 +48,7 @@
       <tbody>{{ caller() }}</tbody>
     </table>
   </div>
-  {{ pagination(pager, table_id, caption ~ " pagination") }}
+  {{ pagination(pager, table_id, caption ~ " pagination", region_id) }}
   {% endif %}
 </div>
 {% endmacro %}

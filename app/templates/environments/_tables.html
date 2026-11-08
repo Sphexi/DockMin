@@ -18,7 +18,7 @@
 
 {% macro environments_table(rows, columns, pager, is_admin, filtered) %}
 {% set empty_body = "Add an environment to start managing a Docker host." if is_admin else "No environment has been shared with you yet. Ask an administrator for access to an environment." %}
-{% call data_table("environments-table", "Environments", columns, pager, empty_title="No environments", empty_body=empty_body, empty_action_label=("Add environment" if is_admin else none), empty_action_href=(route_path('environment_new') if is_admin else none), filtered=filtered, clear_href=route_path('index')) %}
+{% call data_table("environments-table", "Environments", columns, pager, empty_title="No environments", empty_body=empty_body, empty_action_label=("Add environment" if is_admin else none), empty_action_href=(route_path('environment_new') if is_admin else none), filtered=filtered, clear_href=route_path('index'), region_id="environments-results") %}
 {% for row in rows %}
 {% set snapshot = row.snapshot %}
 {% set counts = snapshot.counts if snapshot is not none else none %}

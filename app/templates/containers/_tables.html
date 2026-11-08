@@ -68,7 +68,7 @@
 {% set empty_body = "Change the filters, or clear them to see every container." if filtered else ("This host has no containers." if principal.is_administrator else "You cannot see any containers on this host. Ask an administrator for access to more containers.") %}
 {% set list_href = route_path("environment_container_list", environment_id=environment_id) if environment_id is not none else none %}
 {% set show_create = principal.is_administrator and may_create and not filtered and environment_id is not none %}
-{% call data_table("containers-table", "Containers", columns, pager, empty_title=("No matching containers" if filtered else "No containers"), empty_body=empty_body, empty_action_label=("Create container" if show_create else none), empty_action_href=(route_path("environment_container_new", environment_id=environment_id) if show_create else none), filtered=filtered, clear_href=list_href) %}
+{% call data_table("containers-table", "Containers", columns, pager, empty_title=("No matching containers" if filtered else "No containers"), empty_body=empty_body, empty_action_label=("Create container" if show_create else none), empty_action_href=(route_path("environment_container_new", environment_id=environment_id) if show_create else none), filtered=filtered, clear_href=list_href, region_id="containers-results") %}
 {% for row in rows %}
 {{ container_row(row, writable, may_create) }}
 {% endfor %}

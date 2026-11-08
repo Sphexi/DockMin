@@ -1,4 +1,9 @@
-{% macro pagination(pager, table_id, label="Pagination") %}
+{# With region_id, the links replace the contents of that region, for lists whose fragment holds more than the table. #}
+{% macro swap_attrs(table_id, region_id=none) -%}
+hx-target="#{{ region_id or table_id }}" hx-swap="{{ 'innerHTML' if region_id else 'outerHTML' }}"
+{%- endmacro %}
+
+{% macro pagination(pager, table_id, label="Pagination", region_id=none) %}
 {% set pager = require_pager(pager) %}
 <nav class="pagination" aria-label="{{ label }}">
   <p class="pagination__summary">{{ pager.item_count }} shown, up to {{ pager.limit }} per page</p>
@@ -7,12 +12,12 @@
       {% if pager.is_first_page %}
       <span class="pagination__link" aria-disabled="true">First page</span>
       {% else %}
-      <a class="pagination__link" href="{{ pager.first_href }}" hx-get="{{ pager.first_href }}" hx-target="#{{ table_id }}" hx-swap="outerHTML" hx-push-url="true">First page</a>
+      <a class="pagination__link" href="{{ pager.first_href }}" hx-get="{{ pager.first_href }}" {{ swap_attrs(table_id, region_id) }} hx-push-url="true">First page</a>
       {% endif %}
     </li>
     <li>
       {% if pager.has_next %}
-      <a class="pagination__link" href="{{ pager.next_href }}" rel="next" hx-get="{{ pager.next_href }}" hx-target="#{{ table_id }}" hx-swap="outerHTML" hx-push-url="true">Next page</a>
+      <a class="pagination__link" href="{{ pager.next_href }}" rel="next" hx-get="{{ pager.next_href }}" {{ swap_attrs(table_id, region_id) }} hx-push-url="true">Next page</a>
       {% else %}
       <span class="pagination__link" aria-disabled="true">Next page</span>
       {% endif %}

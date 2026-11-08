@@ -327,6 +327,38 @@ def test_every_table_announces_that_it_is_loading_for_the_busy_state() -> None:
     assert [n.attrs["role"] for n in loading] == ["status"]
 
 
+@pytest.mark.parametrize(
+    ("region_id", "target", "swap"),
+    [(None, "#t", "outerHTML"), ("results", "#results", "innerHTML")],
+    ids=["table", "region"],
+)
+def test_table_paging_and_sort_links_swap_the_table_or_the_whole_results_region(
+    region_id: str | None, target: str, swap: str
+) -> None:
+    position = encode_cursor(CursorPosition("a", 1))
+    pager = PageView.of(
+        Page(items=["a"], next_cursor=position),
+        base_path=BASE_PATH,
+        limit=DEFAULT_LIMIT,
+        cursor=position,
+    )
+    html = render_macro(
+        "data_table",
+        "data_table",
+        table_id="t",
+        caption="Widgets",
+        columns=[Column("name", "Name", sortable=True)],
+        pager=pager,
+        caller=lambda: "",
+        region_id=region_id,
+    )
+    page = Document(200, html)
+
+    links = [n for n in page.tags("a") if "hx-get" in n.attrs]
+    assert [n.text() for n in links] == ["Name", "First page", "Next page"]
+    assert {(n.attrs["hx-target"], n.attrs["hx-swap"]) for n in links} == {(target, swap)}
+
+
 ENGINE_TEXT = "network x is ambiguous <b>&"
 
 

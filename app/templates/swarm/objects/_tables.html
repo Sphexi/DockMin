@@ -29,7 +29,7 @@
 {% macro objects_table(kind, rows, columns, pager, filtered, environment_id=none, can_create=false) %}
 {% set empty_body = "Change the filters, or clear them to see every " ~ kind ~ "." if filtered else ("This cluster has no " ~ kind ~ "s." if principal.is_administrator else "You cannot see any " ~ kind ~ "s on this cluster. Ask an administrator for access to more " ~ kind ~ "s.") %}
 {% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
-{% call data_table(kind ~ "s-table", kind|capitalize ~ "s", columns, pager, empty_title=("No matching " ~ kind ~ "s" if filtered else "No " ~ kind ~ "s"), empty_body=empty_body, empty_action_label=("Create " ~ kind if show_create else none), empty_action_href=(route_path("environment_swarm_" ~ kind ~ "_new", environment_id=environment_id) if show_create else none), filtered=filtered) %}
+{% call data_table(kind ~ "s-table", kind|capitalize ~ "s", columns, pager, empty_title=("No matching " ~ kind ~ "s" if filtered else "No " ~ kind ~ "s"), empty_body=empty_body, empty_action_label=("Create " ~ kind if show_create else none), empty_action_href=(route_path("environment_swarm_" ~ kind ~ "_new", environment_id=environment_id) if show_create else none), filtered=filtered, region_id=kind ~ "s-results") %}
 {% for row in rows %}
 {{ object_row(kind, row) }}
 {% endfor %}

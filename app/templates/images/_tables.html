@@ -45,7 +45,7 @@
 {% set columns = ([{"key": "select", "label": "Select", "sortable": false, "numeric": false, "optional": false}] + columns|list) if can_remove else columns %}
 {% set empty_body = "Change the filters, or clear them to see every image." if filtered else ("This host has no images." if principal.is_administrator else "You cannot see any images on this host. Ask an administrator for access to more images.") %}
 {% set show_pull = principal.is_administrator and can_create and not filtered %}
-{% call data_table("images-table", "Images", columns, pager, empty_title=("No matching images" if filtered else "No images"), empty_body=empty_body, empty_action_label=("Pull image" if show_pull else none), empty_action_href=(route_path("environment_image_pull", environment_id=environment_id) if show_pull else none), filtered=filtered, clear_href=route_path("environment_image_list", environment_id=environment_id)) %}
+{% call data_table("images-table", "Images", columns, pager, empty_title=("No matching images" if filtered else "No images"), empty_body=empty_body, empty_action_label=("Pull image" if show_pull else none), empty_action_href=(route_path("environment_image_pull", environment_id=environment_id) if show_pull else none), filtered=filtered, clear_href=route_path("environment_image_list", environment_id=environment_id), region_id="images-results") %}
 {% for row in rows %}
 {{ image_row(row, can_create, can_remove) }}
 {% endfor %}
