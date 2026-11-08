@@ -2,6 +2,12 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses [Semantic Versioning](https://semver.org/).
 
+## 0.2.1 - 2026-11-07
+
+### Fixed
+
+- Paging or sorting the image, container, stack, volume, network, environment, Swarm service and Swarm object lists repeated the notices and the controls below the table on every click.
+
 ## 0.2.0 - 2026-11-07
 
 First public release.
