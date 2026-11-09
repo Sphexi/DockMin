@@ -1,13 +1,14 @@
 {# Import with context: links come from route names. #}
 {% from "partials/badge.html" import badge %}
+{% from "partials/object_links.html" import stack_link with context %}
 
 {% macro kind_badge(kind) %}
 {% if kind == "anonymous" %}{{ badge("Anonymous", "neutral") }}{% endif %}
 {% endmacro %}
 
-{% macro stack_cell(stack, environment_id) %}
-{% if stack %}
-<a href="{{ route_path('environment_volume_list', environment_id=environment_id) }}?{{ {'stack': stack}|urlencode }}">{{ stack }}</a>
+{% macro stack_cell(item, links=none, origin=none) %}
+{% if item.stack %}
+{{ stack_link(item.environment_id, item.stack_kind, item.stack, links, route_path('environment_volume_list', environment_id=item.environment_id), origin) }}
 {% else %}
 <span class="cell-note">None</span>
 {% endif %}

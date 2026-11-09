@@ -19,8 +19,8 @@
 <div id="toasts" hx-swap-oob="beforeend">{{ toast(level, message) }}</div>
 {% endmacro %}
 
-{% macro row_updated(row, action, result, may_create=false) %}
-{{ container_row(row, true, may_create) }}
+{% macro row_updated(row, action, result, may_create=false, stack_links=none) %}
+{{ container_row(row, true, may_create, stack_links) }}
 {{ feedback(action, row.name, result) }}
 {% endmacro %}
 

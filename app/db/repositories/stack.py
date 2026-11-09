@@ -37,6 +37,7 @@ StackOutcome = Literal["success", "failure", "interrupted", "outcome_unknown"]
 
 MAX_VARIABLES: Final = 1000
 MAX_NAMES: Final = 5000
+MAX_LOOKUP: Final = 500
 TOKEN_LENGTH: Final = 12
 
 _TOKEN_ALPHABET: Final = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -676,6 +677,43 @@ class StackListRepository(Repository[StackSummary]):
             (environment_id, name.translate(_ASCII_LOWER)),
         )
         return row is not None
+
+    async def kinds_folded(
+        self, environment_id: int, names: Iterable[str], visible: SqlFragment | None = None
+    ) -> dict[str, tuple[str, StackKind]]:
+        """Map each given name that a stack has, ignoring ASCII case, to its name and kind.
+
+        `visible` is built over s.name and s.environment_id. At most MAX_LOOKUP names are looked up.
+        """
+        given = sorted(set(names))[:MAX_LOOKUP]
+        folded = sorted({name.translate(_ASCII_LOWER) for name in given})
+        if not folded:
+            return {}
+        conditions = [
+            "s.environment_id = ?",
+            f"lower(s.name) IN ({', '.join('?' for _ in folded)})",
+        ]
+        params: list[Any] = [environment_id, *folded]
+        if visible is not None:
+            conditions.append(visible.clause)
+            params.extend(visible.params)
+        rows = await self._session.fetch_limited(
+            f"SELECT s.name, s.kind FROM stack s WHERE {' AND '.join(conditions)}",
+            tuple(params),
+            limit=MAX_LOOKUP,
+        )
+        found = {
+            str(row["name"]).translate(_ASCII_LOWER): (
+                str(row["name"]),
+                cast(StackKind, row["kind"]),
+            )
+            for row in rows
+        }
+        return {
+            name: found[name.translate(_ASCII_LOWER)]
+            for name in given
+            if name.translate(_ASCII_LOWER) in found
+        }
 
     async def page(
         self,

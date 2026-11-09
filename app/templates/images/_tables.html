@@ -20,6 +20,7 @@
 {% endmacro %}
 
 {% macro image_row(row, can_create, can_remove) %}
+{% set detail_href = route_path("environment_image_detail", environment_id=row.environment_id, image_id=row.id) %}
 <tr id="image-{{ row.id }}">
   {% if can_remove %}
   <td>
@@ -28,13 +29,13 @@
   {% endif %}
   <th scope="row">
     <div class="cell-stack">
-      {{ reference_list(row.references, row.references_hidden, row.environment_id, "No reference") }}
-      <span class="cell-note"><span class="mono">{{ row.short_id }}</span>{% if row.dangling %} {{ badge("Dangling", "warn") }}{% endif %}</span>
+      {{ reference_list(row.references, row.references_hidden, row.environment_id, "No reference", detail_href) }}
+      <span class="cell-note">{% if row.references %}<span class="mono">{{ row.short_id }}</span>{% else %}<a class="mono" href="{{ detail_href }}">{{ row.short_id }}</a>{% endif %}{% if row.dangling %} {{ badge("Dangling", "warn") }}{% endif %}</span>
     </div>
   </th>
   <td class="is-numeric is-nowrap">{{ row.size|filesize }}</td>
   <td class="is-nowrap">{{ age(row.created_at, "") }}</td>
-  <td>{{ using_containers(row.containers, row.containers_hidden, row.in_use, row.environment_id) }}</td>
+  <td>{{ using_containers(row.containers, row.containers_hidden, row.in_use, row.environment_id, list_origin("images", row.environment_id)) }}</td>
   {% if can_create or can_remove %}
   <td>{{ image_actions(row, can_create, can_remove) }}</td>
   {% endif %}

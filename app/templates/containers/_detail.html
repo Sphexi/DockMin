@@ -3,6 +3,7 @@
 {% from "containers/_actions.html" import action_buttons with context %}
 {% from "containers/_logs.html" import logs_tab with context %}
 {% from "containers/_tables.html" import image_link with context %}
+{% from "partials/object_links.html" import stack_link with context %}
 {% from "containers/_stats.html" import stats_panel %}
 {% from "environments/_parts.html" import age, kind_badge, when with context %}
 {% from "networks/_attach.html" import attach_section with context %}
@@ -51,7 +52,8 @@
 {% endif %}
 {% endmacro %}
 
-{% macro overview_tab(detail, last_output=none, show_last_exit=false) %}
+{% macro overview_tab(detail, last_output=none, show_last_exit=false, stack_links=none) %}
+{% set here = "container:" ~ detail.environment_id ~ ":" ~ detail.id %}
 <h2 id="tab-heading">Overview</h2>
 <dl class="facts">
   <dt>Name</dt>
@@ -59,7 +61,7 @@
   <dt>ID</dt>
   <dd class="mono">{{ detail.id }}</dd>
   <dt>Image</dt>
-  <dd class="mono">{{ image_link(detail.environment_id, detail.image) }}</dd>
+  <dd class="mono">{{ image_link(detail.environment_id, detail.image, detail.image_id, here) }}</dd>
   <dt>State</dt>
   <dd>{{ container_state_badge(detail.state, detail.health_status) }}</dd>
   <dt>Created</dt>
@@ -79,7 +81,7 @@
   <dt>Stack</dt>
   <dd>
     {% if detail.stack %}
-    <a href="{{ route_path('environment_container_list', environment_id=detail.environment_id) }}?stack={{ detail.stack|urlencode }}">{{ detail.stack }}</a>
+    {{ stack_link(detail.environment_id, detail.stack_kind, detail.stack, stack_links, route_path('environment_container_list', environment_id=detail.environment_id), here) }}
     {% elif not detail.labels_truncated %}
     None
     {% endif %}
@@ -219,7 +221,8 @@
       <tr>
         <th scope="row">{{ mount.type }}</th>
         <td class="cell-wrap mono">
-          {%- if mount.type == "volume" and mount.volume_name %}{{ mount.volume_name }}
+          {%- if mount.type == "volume" and mount.volume_name and mount.volume_linked %}<a href="{{ with_origin(route_path('environment_volume_detail', environment_id=detail.environment_id, volume_name=mount.volume_name), 'container:' ~ detail.environment_id ~ ':' ~ detail.id) }}">{{ mount.volume_name }}</a>
+          {%- elif mount.type == "volume" and mount.volume_name %}{{ mount.volume_name }}
           {%- elif mount.source %}{{ mount.source }}
           {%- elif mount.type == "bind" %}<span class="cell-note">Not shown for your role</span>
           {%- else %}—{% endif -%}
@@ -385,7 +388,7 @@
 {% endmacro %}
 
 {# Every tab but access reloads itself after an action, so a half-filled access form is not discarded. #}
-{% macro container_tabs(detail, tab, tab_keys, sample, stats_failure, panel, values, fields, logs=none, automation=none, activity_log=none, last_output=none, show_last_exit=false) %}
+{% macro container_tabs(detail, tab, tab_keys, sample, stats_failure, panel, values, fields, logs=none, automation=none, activity_log=none, last_output=none, show_last_exit=false, stack_links=none) %}
 {% set detail_href = route_path("environment_container_detail", environment_id=detail.environment_id, container_id=detail.id) %}
 {% set labels = {"overview": "Overview", "labels": "Labels", "mounts": "Mounts", "networks": "Networks", "environment": "Environment", "stats": "Stats", "logs": "Logs", "automation": "Automation", "access": "Access"} %}
 <div id="container-tabs" class="tabs"
@@ -403,7 +406,7 @@
     </ul>
   </nav>
   <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
-    {% if tab == "overview" %}{{ overview_tab(detail, last_output, show_last_exit) }}
+    {% if tab == "overview" %}{{ overview_tab(detail, last_output, show_last_exit, stack_links) }}
     {% elif tab == "labels" %}{{ labels_tab(detail) }}
     {% elif tab == "mounts" %}{{ mounts_tab(detail) }}
     {% elif tab == "networks" %}{{ networks_tab(detail, panel) }}

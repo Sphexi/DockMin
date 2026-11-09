@@ -2,6 +2,7 @@
 {% from "partials/badge.html" import badge %}
 {% from "partials/confirmation_dialog.html" import confirm_button, confirmation_dialog with context %}
 {% from "partials/data_table.html" import data_table %}
+{% from "partials/object_links.html" import user_link with context %}
 
 {% macro teams_table(rows, columns, pager, can_create) %}
 {% call data_table("teams-table", "Teams", columns, pager, empty_title="No teams", empty_body=("Create a team to grant a group of users access together." if can_create else "You are not a member of any team yet. Ask an administrator to add you to one."), empty_action_label=("New team" if can_create else none), empty_action_href=(route_path('team_new') if can_create else none)) %}
@@ -20,7 +21,7 @@
 {% for row in rows %}
 <tr>
   <th scope="row">
-    {{ row.username }}
+    {{ user_link(row.user_id, row.username, "team:-:" ~ team.id) }}
     {% if principal and row.user_id == principal.user_id %}{{ badge("You", "info") }}{% endif %}
   </th>
   <td>{% if row.is_leader %}{{ badge("Leader", "info") }}{% else %}{{ badge("Member") }}{% endif %}</td>

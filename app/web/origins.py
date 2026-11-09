@@ -31,7 +31,7 @@ from app.services.assembly import (
 from app.services.authorisation import ObjectInspector
 from app.services.engine_setup import EngineRuntime
 from app.services.object_inspector import EngineObjectInspector
-from app.services.origins import OriginResolver, OriginTarget, Reader
+from app.services.origins import LIST_KIND, OriginResolver, OriginTarget, Reader, list_target
 from app.web.origin_links import ORIGIN_PARAM
 
 ROUTES: dict[str, str] = {
@@ -42,6 +42,10 @@ ROUTES: dict[str, str] = {
     "image": "environment_image_detail",
     "automation": "automation_rule_detail",
     "activity": "activity_event_detail",
+    "config": "environment_swarm_config_detail",
+    "secret": "environment_swarm_secret_detail",
+    "environment": "environment_detail",
+    "team": "team_detail",
 }
 PATH_PARAMETERS: dict[str, str] = {
     "container": "container_id",
@@ -51,20 +55,42 @@ PATH_PARAMETERS: dict[str, str] = {
     "image": "image_id",
     "automation": "rule_id",
     "activity": "event_id",
+    "config": "object_id",
+    "secret": "object_id",
+    "environment": "environment_id",
+    "team": "team_id",
 }
 STACK_ROUTES: dict[str, tuple[str, str]] = {
     "compose": ("environment_stack_detail", "stack_name"),
     "swarm": ("environment_swarm_stack_detail", "namespace"),
 }
+LIST_ROUTES: dict[str, str] = {
+    "containers": "environment_container_list",
+    "images": "environment_image_list",
+    "volumes": "environment_volume_list",
+    "networks": "environment_network_list",
+    "services": "environment_swarm_service_list",
+    "configs": "environment_swarm_config_list",
+    "secrets": "environment_swarm_secret_list",
+    "automation": "automation",
+    "templates": "templates",
+    "jobs": "jobs",
+    "activity": "activity",
+    "backups": "backups",
+}
 
 
 def _href_for(request: Request) -> Callable[[str, int | None, str, str], str]:
     def href_for(kind: str, environment_id: int | None, key: str, variant: str) -> str:
-        if kind == "stack":
+        arguments: dict[str, object] = {}
+        if kind == LIST_KIND:
+            route = LIST_ROUTES[key]
+        elif kind == "stack":
             route, parameter = STACK_ROUTES[variant]
+            arguments[parameter] = key
         else:
-            route, parameter = ROUTES[kind], PATH_PARAMETERS[kind]
-        arguments: dict[str, object] = {parameter: key}
+            route = ROUTES[kind]
+            arguments[PATH_PARAMETERS[kind]] = key
         if environment_id is not None:
             arguments["environment_id"] = environment_id
         return str(request.app.url_path_for(route, **arguments))
@@ -160,6 +186,39 @@ async def get_origin_resolver(
         await log.exists(actor, int(key))
         return OriginTarget("", key)
 
+    async def config(actor: Principal, environment_id: int, key: str) -> str:
+        swarm = await get_swarm_services(request, db, runtime, engine, access, inspector, activity)
+        return await swarm.configs.origin_name(actor, environment_id, key)
+
+    async def secret(actor: Principal, environment_id: int, key: str) -> str:
+        swarm = await get_swarm_services(request, db, runtime, engine, access, inspector, activity)
+        return await swarm.secrets.origin_name(actor, environment_id, key)
+
+    async def environment(
+        actor: Principal, environment_id: int | None, key: str, reachable: bool
+    ) -> OriginTarget:
+        await access.authoriser.require_environment(actor, int(key))
+        return OriginTarget((await inspector.hosts.environment(int(key))).name, key)
+
+    async def team(
+        actor: Principal, environment_id: int | None, key: str, reachable: bool
+    ) -> OriginTarget:
+        return OriginTarget((await access.teams.get(actor, int(key))).team.name, key)
+
+    async def environment_type(environment_id: int) -> str | None:
+        return (await inspector.hosts.environment(environment_id)).type
+
+    async def listing(
+        actor: Principal, environment_id: int | None, key: str, reachable: bool
+    ) -> OriginTarget:
+        return await list_target(
+            actor,
+            environment_id,
+            key,
+            require_environment=access.authoriser.require_environment,
+            environment_type=environment_type,
+        )
+
     readers: dict[str, Reader] = {
         "container": _named(container),
         "network": _named(network),
@@ -169,6 +228,11 @@ async def get_origin_resolver(
         "stack": stack,
         "automation": automation,
         "activity": event,
+        "config": _named(config),
+        "secret": _named(secret),
+        "environment": environment,
+        "team": team,
+        LIST_KIND: listing,
     }
 
     async def status_of(environment_id: int) -> str:

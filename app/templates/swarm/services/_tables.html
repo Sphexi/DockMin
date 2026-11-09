@@ -6,7 +6,7 @@
 {% from "partials/data_table.html" import data_table %}
 {% from "partials/error_state.html" import error_state %}
 
-{% macro service_row(row) %}
+{% macro service_row(row, stack_links=none) %}
 <tr id="service-{{ row.id }}">
   <th scope="row">
     <div class="cell-stack">
@@ -22,7 +22,7 @@
     </div>
   </td>
   <td class="cell-wrap mono">{{ row.image_display }}</td>
-  <td>{{ stack_link(row.stack, row.environment_id) }}</td>
+  <td>{{ stack_link(row, stack_links, list_origin("services", row.environment_id)) }}</td>
   <td>{{ port_list(row.ports) }}</td>
   <td>
     <div class="cell-stack">
@@ -41,12 +41,12 @@
 </tr>
 {% endmacro %}
 
-{% macro services_table(rows, columns, pager, filtered, environment_id=none, can_create=false) %}
+{% macro services_table(rows, columns, pager, filtered, environment_id=none, can_create=false, stack_links=none) %}
 {% set empty_body = "Change the filters, or clear them to see every service." if filtered else ("This cluster has no services." if principal.is_administrator else "You cannot see any services on this cluster. Ask an administrator for access to more services.") %}
 {% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
 {% call data_table("services-table", "Services", columns, pager, empty_title=("No matching services" if filtered else "No services"), empty_body=empty_body, empty_action_label=("Create service" if show_create else none), empty_action_href=(route_path("environment_swarm_service_new", environment_id=environment_id) if show_create else none), filtered=filtered, region_id="services-results") %}
 {% for row in rows %}
-{{ service_row(row) }}
+{{ service_row(row, stack_links) }}
 {% endfor %}
 {% endcall %}
 {% endmacro %}
@@ -58,7 +58,7 @@
 </p>
 {% endmacro %}
 
-{% macro services_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false) %}
+{% macro services_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false, stack_links=none) %}
 {% if oob %}
 {{ results_summary(none if (errors or failure) else total, visible, filtered, true) }}
 {% endif %}
@@ -69,6 +69,6 @@
 {% elif failure %}
 {{ error_state("Services cannot be listed", failure, retry_href=retry_href, region_id="services-results", swap="innerHTML") }}
 {% else %}
-{{ services_table(rows, columns, pager, filtered, environment_id, can_create) }}
+{{ services_table(rows, columns, pager, filtered, environment_id, can_create, stack_links) }}
 {% endif %}
 {% endmacro %}

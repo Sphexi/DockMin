@@ -16,7 +16,7 @@
 {%- endmacro %}
 
 {% macro environment_link(view) -%}
-{% if view.environment_name %}<a href="{{ route_path('environment_detail', environment_id=view.rule.environment_id) }}">{{ view.environment_name }}</a>{% else %}All environments{% endif %}
+{% if view.environment_name and view.environment_visible %}<a href="{{ with_origin(route_path('environment_detail', environment_id=view.rule.environment_id), 'automation:-:' ~ view.rule.id) }}">{{ view.environment_name }}</a>{% elif view.environment_name %}{{ view.environment_name }}{% else %}All environments{% endif %}
 {%- endmacro %}
 
 {% macro updates_summary(view) %}

@@ -70,6 +70,6 @@
 {% endif %}
 {% endcall %}
 <div id="volumes-results">
-  {{ volumes_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, environment_id=environment.id, can_create=can_create, max_batch=max_batch) }}
+  {{ volumes_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, environment_id=environment.id, can_create=can_create, max_batch=max_batch, stack_links=stack_links) }}
 </div>
 {% endblock %}

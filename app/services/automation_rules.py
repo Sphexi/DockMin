@@ -171,6 +171,7 @@ class RuleView:
     subsystem_enabled: bool
     available: bool
     webhook: WebhookView | None = None
+    environment_visible: bool = False
 
     @property
     def next_run_at(self) -> str | None:
@@ -1045,6 +1046,7 @@ class AutomationRuleService:
         now = self._clock()
         switches: dict[str, bool] = {}
         environments: dict[int | None, str | None] = {}
+        visible_environments: dict[int, bool] = {}
         owners: dict[int | None, str | None] = {}
         views: list[RuleView] = []
         for rule, job in zip(rules, jobs, strict=True):
@@ -1052,6 +1054,11 @@ class AutomationRuleService:
             if rule.environment_id not in environments:
                 environments[rule.environment_id] = await self._environment_name(
                     rule.environment_id
+                )
+            if rule.environment_id is not None and rule.environment_id not in visible_environments:
+                visible_environments[rule.environment_id] = (
+                    actor.is_administrator
+                    or await self._authoriser.environment_visible(actor, rule.environment_id)
                 )
             if actor.is_administrator and rule.created_by_user_id not in owners:
                 owners[rule.created_by_user_id] = await self._username(rule.created_by_user_id)
@@ -1073,6 +1080,7 @@ class AutomationRuleService:
                     supports_dry_run=handler is not None and handler.supports_dry_run,
                     subsystem_enabled=switches[rule.subsystem],
                     available=handler is not None,
+                    environment_visible=visible_environments.get(rule.environment_id or 0, False),
                     webhook=await self._webhook_of(rule),
                 )
             )

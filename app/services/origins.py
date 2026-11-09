@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from app.auth.errors import ProductError
+from app.auth.errors import ProductError, ResourceNotFound
 from app.auth.principal import Principal
 from app.db.repositories.pagination import MAX_ROW_ID
 from app.docker_engine.errors import EngineError
@@ -17,13 +17,45 @@ REACHABLE: Final = "reachable"
 NO_ENVIRONMENT: Final = "-"
 IMAGE_PREFIX: Final = "sha256:"
 
-HOST_KINDS: Final = frozenset({"container", "service", "network", "volume", "image"})
-ROW_KINDS: Final = frozenset({"automation", "activity"})
+HOST_KINDS: Final = frozenset(
+    {"container", "service", "network", "volume", "image", "config", "secret"}
+)
+ROW_KINDS: Final = frozenset({"automation", "activity", "environment", "team"})
+LIST_KIND: Final = "list"
 
+
+@dataclass(frozen=True, slots=True)
+class ListOrigin:
+    """A list page that can be an origin; `environment` lists are addressed by environment id."""
+
+    label: str
+    environment: bool
+    swarm: bool = False
+    administrators: bool = False
+
+
+LIST_ORIGINS: Final[Mapping[str, ListOrigin]] = {
+    "containers": ListOrigin("containers", environment=True),
+    "images": ListOrigin("images", environment=True),
+    "volumes": ListOrigin("volumes", environment=True),
+    "networks": ListOrigin("networks", environment=True),
+    "services": ListOrigin("services", environment=True, swarm=True),
+    "configs": ListOrigin("configs", environment=True, swarm=True),
+    "secrets": ListOrigin("secrets", environment=True, swarm=True),
+    "automation": ListOrigin("automation", environment=False),
+    "templates": ListOrigin("templates", environment=False),
+    "jobs": ListOrigin("jobs", environment=False, administrators=True),
+    "activity": ListOrigin("the activity log", environment=False, administrators=True),
+    "backups": ListOrigin("backups", environment=False, administrators=True),
+}
+
+_SWARM_ID: Final = re.compile(r"[0-9a-z]{25}")
 _KEY_SHAPES: Final[Mapping[str, re.Pattern[str]]] = {
     "stack": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}"),
     "container": re.compile(r"[0-9a-f]{64}"),
-    "service": re.compile(r"[0-9a-z]{25}"),
+    "service": _SWARM_ID,
+    "config": _SWARM_ID,
+    "secret": _SWARM_ID,
     "network": re.compile(r"[0-9a-z]{25}|[0-9a-f]{64}"),
     "volume": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}"),
     "image": re.compile(r"sha256:([0-9a-f]{64})"),
@@ -88,6 +120,8 @@ def parse_origin(text: str) -> OriginRef | None:
     if kind in ROW_KINDS:
         row = _row_id(key)
         return OriginRef(kind, None, key) if environment == NO_ENVIRONMENT and row else None
+    if kind == LIST_KIND:
+        return _list_ref(environment, key)
     shape = _KEY_SHAPES.get(kind)
     environment_id = _row_id(environment)
     if shape is None or environment_id is None:
@@ -96,6 +130,43 @@ def parse_origin(text: str) -> OriginRef | None:
     if found is None:
         return None
     return OriginRef(kind, environment_id, found.group(1) if kind == "image" else key)
+
+
+def _list_ref(environment: str, key: str) -> OriginRef | None:
+    listed = LIST_ORIGINS.get(key)
+    if listed is None:
+        return None
+    if not listed.environment:
+        return OriginRef(LIST_KIND, None, key) if environment == NO_ENVIRONMENT else None
+    environment_id = _row_id(environment)
+    return None if environment_id is None else OriginRef(LIST_KIND, environment_id, key)
+
+
+def list_ref(name: str, environment_id: int | None = None) -> str:
+    """Return the reference of a list page; raises KeyError or ValueError for one that is not."""
+    listed = LIST_ORIGINS[name]
+    if listed.environment != (environment_id is not None):
+        raise ValueError(f"list {name!r} takes {'an' if listed.environment else 'no'} environment")
+    return OriginRef(LIST_KIND, environment_id, name).text
+
+
+async def list_target(
+    principal: Principal,
+    environment_id: int | None,
+    name: str,
+    *,
+    require_environment: Callable[[Principal, int], Awaitable[None]],
+    environment_type: Callable[[int], Awaitable[str | None]],
+) -> OriginTarget:
+    """Return a list origin the viewer may open; ResourceNotFound otherwise."""
+    listed = LIST_ORIGINS[name]
+    if listed.administrators and not principal.is_administrator:
+        raise ResourceNotFound("not found")
+    if environment_id is not None:
+        await require_environment(principal, environment_id)
+        if listed.swarm and await environment_type(environment_id) != "swarm":
+            raise ResourceNotFound("not found")
+    return OriginTarget(listed.label, name)
 
 
 class OriginResolver:
@@ -144,4 +215,6 @@ class OriginResolver:
 
 
 def _label(kind: str, name: str) -> str:
+    if kind == LIST_KIND:
+        return name
     return "activity event" if kind == "activity" else f"{kind} {name}"

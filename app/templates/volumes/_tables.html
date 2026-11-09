@@ -15,7 +15,8 @@
 </div>
 {% endmacro %}
 
-{% macro volume_row(row, selectable=false) %}
+{% macro volume_row(row, selectable=false, stack_links=none) %}
+{% set here = list_origin("volumes", row.environment_id) %}
 <tr id="volume-{{ row.name }}">
   {% if selectable %}
   <td>
@@ -34,20 +35,20 @@
   </th>
   <td class="mono">{{ row.driver }}</td>
   <td class="is-nowrap">{{ age(row.created_at, "") }}</td>
-  <td>{{ stack_cell(row.stack, row.environment_id) }}</td>
-  <td>{{ object_users(row.containers, row.containers_more, row.containers_hidden, row.in_use, container_base(row.environment_id)) }}</td>
+  <td>{{ stack_cell(row, stack_links, here) }}</td>
+  <td>{{ object_users(row.containers, row.containers_more, row.containers_hidden, row.in_use, container_base(row.environment_id), origin=here) }}</td>
   <td>{{ volume_actions(row) }}</td>
 </tr>
 {% endmacro %}
 
-{% macro volumes_table(rows, columns, pager, filtered, environment_id=none, can_create=false) %}
+{% macro volumes_table(rows, columns, pager, filtered, environment_id=none, can_create=false, stack_links=none) %}
 {% set selectable = rows|selectattr("can_remove")|rejectattr("protected")|list|length > 0 %}
 {% set columns = ([{"key": "select", "label": "Select", "sortable": false, "numeric": false, "optional": false}] + columns|list) if selectable else columns %}
 {% set empty_body = "Change the filters, or clear them to see every volume." if filtered else ("This host has no volumes." if principal.is_administrator else "You cannot see any volumes on this host. Ask an administrator for access to more volumes.") %}
 {% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
 {% call data_table("volumes-table", "Volumes", columns, pager, empty_title=("No matching volumes" if filtered else "No volumes"), empty_body=empty_body, empty_action_label=("Create volume" if show_create else none), empty_action_href=(route_path("environment_volume_new", environment_id=environment_id) if show_create else none), filtered=filtered, region_id="volumes-results") %}
 {% for row in rows %}
-{{ volume_row(row, selectable) }}
+{{ volume_row(row, selectable, stack_links) }}
 {% endfor %}
 {% endcall %}
 {% endmacro %}
@@ -67,7 +68,7 @@
 </p>
 {% endmacro %}
 
-{% macro volumes_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false, max_batch=none) %}
+{% macro volumes_results(rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false, max_batch=none, stack_links=none) %}
 {% if oob %}
 {{ results_summary(none if (errors or failure) else total, visible, filtered, true) }}
 {% endif %}
@@ -78,7 +79,7 @@
 {% elif failure %}
 {{ error_state("Volumes cannot be listed", failure, retry_href=retry_href, region_id="volumes-results", swap="innerHTML") }}
 {% else %}
-{{ volumes_table(rows, columns, pager, filtered, environment_id, can_create) }}
+{{ volumes_table(rows, columns, pager, filtered, environment_id, can_create, stack_links) }}
 {% if rows|selectattr("can_remove")|rejectattr("protected")|list|length > 0 %}
 {{ batch_form(environment_id if environment_id is not none else rows[0].environment_id, max_batch) }}
 {% endif %}

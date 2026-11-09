@@ -105,6 +105,7 @@ from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import unreachable_copy
 from app.web.registry_providers import CATALOGUE
+from app.web.stack_links import stack_links
 from app.web.swarm_routes import (
     ACTION_ERRORS,
     UNAVAILABLE,
@@ -307,6 +308,9 @@ async def list_services(
         "errors": errors,
         "failure": failure,
         "retry_href": self_href(request),
+        "stack_links": await stack_links(
+            request, actor, environment_id, (("swarm", row.stack) for row in rows)
+        ),
     }
     if is_htmx_request(request):
         return fragment_response(
@@ -736,6 +740,11 @@ async def _service_response(
         "logs": logs,
         "values": values,
         "fields": fields or {},
+        "stack_links": (
+            await stack_links(request, actor, environment_id, [("swarm", detail.stack)])
+            if tab == "overview"
+            else {}
+        ),
     }
     additions: dict[str, Any] = {
         "tab_keys": visible,

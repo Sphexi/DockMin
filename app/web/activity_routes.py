@@ -19,6 +19,7 @@ from app.auth.principal import Principal
 from app.db.repositories.activity_event import ActivityFilter, ActorType, Category, Outcome
 from app.db.repositories.pagination import MAX_PAGE_SIZE, MAX_ROW_ID, InvalidCursorError
 from app.db.repositories.resource_control import canonical_stack_key
+from app.db.repositories.stack import StackKind
 from app.logging import get_logger
 from app.services.activity import SUBSYSTEMS
 from app.services.activity_csv import EXPORT_FORMATS, ExportFormat
@@ -488,6 +489,7 @@ async def _page_context(
         "filters": await _filter_context(request, environments, actor, reading),
         "export_href": _href(request, "activity_export", reading.params),
         "retention": retention,
+        "target_hrefs": {},
     }
 
 
@@ -529,6 +531,7 @@ async def activity_log(
         except ValueError:
             reading.errors["filters"] = "The filters do not fit together."
     status_code = 422 if reading.errors else 200
+    target_hrefs = await _target_links(request, actor, rows)
     if is_htmx_request(request):
         if request.headers.get("HX-Target") == TABLE_TARGET:
             if reading.errors:
@@ -538,7 +541,12 @@ async def activity_log(
                     )
                 )
             return html_fragment(
-                request, "activity_table", rows=rows, columns=LOG_COLUMNS, pager=pager
+                request,
+                "activity_table",
+                rows=rows,
+                columns=LOG_COLUMNS,
+                pager=pager,
+                target_hrefs=target_hrefs,
             )
         if reading.errors:
             return html_fragment(
@@ -556,6 +564,7 @@ async def activity_log(
             pager=pager,
             export_href=_href(request, "activity_export", reading.params),
             errors=reading.errors,
+            target_hrefs=target_hrefs,
         )
     context = await _page_context(
         request,
@@ -566,6 +575,7 @@ async def activity_log(
         pager=pager,
         retention=await activity.retention_status(actor),
     )
+    context["target_hrefs"] = target_hrefs
     return html_page(request, "activity/list.html", context, status_code)
 
 
@@ -718,7 +728,7 @@ SWARM_TARGETS: Final = {
 
 async def _stack_link(request: Request, actor: Principal, environment_id: int, name: str) -> str:
     """Link the Swarm or Compose page of a stack by the kind the managed stack records."""
-    kind = "compose"
+    kind: StackKind = "compose"
     async with app_stack_services(request.app) as stacks:
         try:
             managed = await stacks.queries.managed_names(
@@ -731,6 +741,38 @@ async def _stack_link(request: Request, actor: Principal, environment_id: int, n
         if canonical_stack_key(item.name) == key:
             kind, name = item.kind, item.name
             break
+    return _stack_href(request, environment_id, name, kind)
+
+
+async def _target_links(
+    request: Request, actor: Principal, rows: list[ActivityEventView]
+) -> dict[int, str]:
+    """Link each row's target, a stack only when it is a managed stack, without existence checks."""
+    links: dict[int, str] = {}
+    stacks: dict[int, dict[int, str]] = {}
+    for view in rows:
+        event = view.event
+        if event.target_type == "stack":
+            name = event.target_id
+            if event.environment_id is not None and name and STACK_NAME.fullmatch(name):
+                stacks.setdefault(event.environment_id, {})[event.id] = name
+            continue
+        href = await _target_link(request, actor, view)
+        if href is not None:
+            links[event.id] = href
+    if not stacks:
+        return links
+    async with app_stack_services(request.app) as services:
+        for environment_id, named in stacks.items():
+            managed = await services.queries.managed_stacks(actor, environment_id, named.values())
+            for event_id, name in named.items():
+                if name in managed:
+                    stored, kind = managed[name]
+                    links[event_id] = _stack_href(request, environment_id, stored, kind)
+    return links
+
+
+def _stack_href(request: Request, environment_id: int, name: str, kind: StackKind) -> str:
     if kind == "swarm":
         return route(
             request, "environment_swarm_stack_detail", environment_id=environment_id, namespace=name

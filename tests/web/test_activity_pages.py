@@ -34,7 +34,7 @@ from tests.job_support import ADMIN, job_services
 from tests.stack_support import stopped_stack_jobs  # noqa: F401
 from tests.web.environment_support import World, seed_stack_rows
 from tests.web.helpers import inline_code_in
-from tests.web.html_tree import Page
+from tests.web.html_tree import Page, parse
 from tests.web.test_stack_pages import NAME as COMPOSE_STACK
 from tests.web.test_stack_pages import compose_file, create_blog, stacks_path
 from tests.web.test_swarm_stack_pages import NAME as SWARM_STACK
@@ -672,13 +672,37 @@ async def test_every_target_type_links_while_it_exists_and_shows_deleted_once_re
         "stack with a container": f"{base}/stacks/{UNMANAGED_NAME}",
         "stack with a service": f"{base}/stacks/{NAMESPACE_NAME}",
     }
-    without_origin = {"user", "team", "registry_credential", "object_storage_target"}
+    without_origin = {"registry_credential"}
     assert {label: href for label, (href, _) in existing.items()} == {
         label: path if label in without_origin else f"{path}?from=activity%3A-%3A{ids[label]}"
         for label, path in paths.items()
     }
     assert not any(marked for _, marked in existing.values())
     assert removed == dict.fromkeys(events, (None, True))
+
+
+async def test_the_log_links_targets_with_the_log_as_origin_and_a_stack_only_once_managed(
+    admin_client: AsyncClient, world: World, app: FastAPI, container_host: ContainerEngine
+) -> None:
+    e = world.remote_id
+    async with app.state.database.session() as db:
+        await seed_stack_rows(db, e, (COMPOSE_NAME, "compose"))
+    await record_events(
+        app,
+        {
+            "container": ("container", HEX_ONE, e),
+            "compose stack": ("stack", COMPOSE_NAME, e),
+            "unmanaged stack": ("stack", UNMANAGED_NAME, e),
+        },
+    )
+
+    page = parse((await admin_client.get("/activity")).text)
+    linked = {node.text(): node.attrs["href"] for node in page.walk() if node.tag == "a"}
+
+    origin = "from=list%3A-%3Aactivity"
+    assert linked[HEX_ONE] == f"/environments/{e}/containers/{HEX_ONE}?{origin}"
+    assert linked[COMPOSE_NAME] == f"/environments/{e}/stacks/{COMPOSE_NAME}?{origin}"
+    assert UNMANAGED_NAME not in linked
 
 
 async def test_a_reused_row_id_created_after_the_event_shows_deleted(

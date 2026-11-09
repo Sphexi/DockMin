@@ -5,14 +5,14 @@
 {%- if hidden %}{{ hidden }} {{ noun if hidden == 1 else noun ~ "s" }} you cannot see{% endif -%}
 {%- endmacro %}
 
-{% macro object_users(rows, more, hidden, total, link_base, empty="Not used", suffix="") %}
+{% macro object_users(rows, more, hidden, total, link_base, empty="Not used", suffix="", origin=none) %}
 {% if total == 0 %}
 <span class="cell-note">{{ empty }}</span>
 {% else %}
 {% if rows %}
 <ul class="chip-list">
   {% for user in rows %}
-  <li><a href="{{ link_base }}/{{ user.id }}{{ suffix }}">{{ user.name }}</a></li>
+  <li><a href="{{ with_origin(link_base ~ '/' ~ user.id ~ suffix, origin) }}">{{ user.name }}</a></li>
   {% endfor %}
 </ul>
 {% endif %}

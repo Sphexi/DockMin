@@ -35,7 +35,7 @@
 </section>
 {% endmacro %}
 
-{% macro overview_tab(detail) %}
+{% macro overview_tab(detail, stack_links=none) %}
 <h2 id="tab-heading">Overview</h2>
 <dl class="facts">
   <dt>Name</dt>
@@ -65,7 +65,7 @@
   <dd class="mono cell-wrap">{{ detail.command }}</dd>
   {% endif %}
   <dt>Stack</dt>
-  <dd>{{ stack_link(detail.stack, detail.environment_id) }}</dd>
+  <dd>{{ stack_link(detail, stack_links, "service:" ~ detail.environment_id ~ ":" ~ detail.id) }}</dd>
   <dt>Created</dt>
   <dd>{{ when(detail.created_at, "—") }}</dd>
   <dt>Updated</dt>
@@ -246,7 +246,7 @@
             </td>
             <td>{{ task.desired_state|capitalize }}</td>
             <td>
-              {% if task.node_hostname and task.node_id and principal.is_administrator %}<a href="{{ route_path('environment_swarm_node_detail', environment_id=tasks.environment_id, node_id=task.node_id) }}">{{ task.node_hostname }}</a>
+              {% if task.node_hostname and task.node_id and principal.is_administrator %}<a href="{{ with_origin(route_path('environment_swarm_node_detail', environment_id=tasks.environment_id, node_id=task.node_id), 'service:' ~ tasks.environment_id ~ ':' ~ tasks.service_id) }}">{{ task.node_hostname }}</a>
               {% elif task.node_hostname %}{{ task.node_hostname }}
               {% else %}<span class="cell-note">Not placed</span>{% endif %}
             </td>
@@ -284,7 +284,7 @@
 {% endif %}
 {% endmacro %}
 
-{% macro service_tabs(detail, tab, tab_keys, tasks, panel, logs, values, fields, automation=none, activity_log=none) %}
+{% macro service_tabs(detail, tab, tab_keys, tasks, panel, logs, values, fields, automation=none, activity_log=none, stack_links=none) %}
 {% set detail_href = route_path("environment_swarm_service_detail", environment_id=detail.environment_id, service_id=detail.id) %}
 {% set labels = {"overview": "Overview", "configuration": "Configuration", "tasks": "Tasks", "logs": "Logs", "automation": "Automation", "access": "Access"} %}
 <div id="service-tabs" class="tabs">
@@ -301,7 +301,7 @@
     </ul>
   </nav>
   <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
-    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% if tab == "overview" %}{{ overview_tab(detail, stack_links) }}
     {% elif tab == "configuration" %}{{ configuration_tab(detail) }}
     {% elif tab == "tasks" %}{{ tasks_panel(tasks) }}
     {% elif tab == "logs" %}{{ logs_tab(detail, logs) }}

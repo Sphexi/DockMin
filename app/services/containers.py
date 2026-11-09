@@ -18,6 +18,7 @@ from app.db.repositories.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from app.db.repositories.stack import StackKind
 from app.db.repositories.team import TeamRepository
 from app.db.repositories.user import UserRepository
 from app.docker_engine.client import EngineClient
@@ -97,6 +98,7 @@ _OFFERED_IN: Mapping[ContainerAction, frozenset[str] | None] = {
 _WILDCARD_ADDRESSES = frozenset({"", "0.0.0.0", "::"})
 _PORT_KEY = re.compile(r"(\d{1,5})/([A-Za-z0-9]+)")
 _ENGINE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})")
+_IMAGE_HEX = re.compile(r"[0-9a-f]{64}")
 _EPOCH = datetime.fromtimestamp(0, UTC)
 _ZERO_YEAR = "0001-01-01"
 
@@ -168,6 +170,8 @@ class ContainerRow:
     can_write: bool
     actions: tuple[ContainerAction, ...]
     is_self: bool = False
+    stack_kind: StackKind | None = None
+    image_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +233,7 @@ class MountView:
     volume_name: str | None
     read_write: bool
     source: str | None
+    volume_linked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,6 +335,9 @@ class ContainerDetail:
     oom_killed: bool = False
     ever_started: bool = True
     is_self: bool = False
+
+    stack_kind: StackKind | None = None
+    image_id: str | None = None
 
     @property
     def is_running(self) -> bool:
@@ -471,6 +479,21 @@ def stack_name(labels: Mapping[str, str]) -> str | None:
         value = labels.get(key)
         if value:
             return value
+    return None
+
+
+def image_hex(image_id: str) -> str | None:
+    """Return the 64-digit id an image page is addressed by, or None."""
+    digits = image_id.removeprefix("sha256:")
+    return digits if _IMAGE_HEX.fullmatch(digits) else None
+
+
+def stack_kind(labels: Mapping[str, str]) -> StackKind | None:
+    """Return the kind of the stack `stack_name` reads."""
+    if labels.get(COMPOSE_PROJECT_LABEL):
+        return "compose"
+    if labels.get(SWARM_NAMESPACE_LABEL):
+        return "swarm"
     return None
 
 
@@ -886,6 +909,9 @@ class ContainerService:
         state = inspected.state
         shown_labels = sorted(labels.items())
         shown_mounts = inspected.mounts[:MAX_DETAIL_ROWS]
+        linked_volumes = await self._readable_volumes(
+            actor, environment_id, [m.name for m in shown_mounts if m.type == "volume" and m.name]
+        )
         shown_networks = sorted(inspected.network_settings.networks.items())
         env_pairs = inspected.config.env[:MAX_DETAIL_ROWS]
         ports, ports_hidden = _ports_of(_bindings_of(inspected))
@@ -905,6 +931,7 @@ class ContainerService:
             short_id=short_id(inspected.id),
             name=display_name([inspected.name], inspected.id),
             image=inspected.config.image or inspected.image,
+            image_id=image_hex(inspected.image),
             state=state.status,
             health_status=None if state.health is None else state.health.status,
             failing_streak=0 if state.health is None else state.health.failing_streak,
@@ -918,6 +945,7 @@ class ContainerService:
             command=_joined(inspected.config.cmd, actor),
             entrypoint=_joined(inspected.config.entrypoint, actor),
             stack=stack_name(labels),
+            stack_kind=stack_kind(labels),
             labels=tuple(
                 _label_view(key, value, viewer_is_admin)
                 for key, value in shown_labels[:MAX_DETAIL_ROWS]
@@ -929,6 +957,7 @@ class ContainerService:
                     mount.name,
                     mount.read_write,
                     mount.source if viewer_is_admin and mount.type == "bind" else None,
+                    volume_linked=mount.name in linked_volumes,
                 )
                 for mount in shown_mounts
             ),
@@ -1003,12 +1032,14 @@ class ContainerService:
             name=display_name(names, inspected.id),
             names=_shown_names(names),
             image=inspected.config.image or inspected.image,
+            image_id=image_hex(inspected.image),
             state=state.status,
             health=health if health in HEALTH_FILTERS else None,
             created_at=parse_engine_time(inspected.created) or _EPOCH,
             ports=ports,
             ports_hidden=ports_hidden,
             stack=stack_name(inspected.config.labels),
+            stack_kind=stack_kind(inspected.config.labels),
             labels=visible_labels(inspected.config.labels, actor),
             labels_truncated=inspected.labels_truncated,
             can_write=can_write,
@@ -1051,6 +1082,21 @@ class ContainerService:
             actor, user.id, environment_id, "container", [entry.ref for entry in entries]
         )
         return ContainerEffectiveAccess(access, {e.summary.id: e.name for e in entries})
+
+    async def _readable_volumes(
+        self, actor: Principal, environment_id: int, names: list[str]
+    ) -> frozenset[str]:
+        """Return the named volumes whose page the caller may open by their own control.
+
+        A volume that the caller reaches only through its stack's control is left out: the mount
+        does not carry the volume's labels.
+        """
+        if actor.is_administrator or not names:
+            return frozenset(names)
+        visibility = await self._authoriser.resolve_visibility(
+            actor, environment_id, "volume", names
+        )
+        return frozenset(name for name in names if visibility.permits(name, {}))
 
     async def _inspect_readable(
         self, actor: Principal, environment_id: int, container_id: str
@@ -1107,12 +1153,14 @@ class ContainerService:
             name=entry.name,
             names=_shown_names(summary.names),
             image=summary.image,
+            image_id=image_hex(summary.image_id),
             state=summary.state,
             health=entry.health,
             created_at=_from_epoch(summary.created),
             ports=ports,
             ports_hidden=hidden,
             stack=stack_name(summary.labels),
+            stack_kind=stack_kind(summary.labels),
             labels=visible_labels(summary.labels, actor),
             labels_truncated=summary.labels_truncated,
             can_write=can_write,

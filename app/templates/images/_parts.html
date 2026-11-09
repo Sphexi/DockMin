@@ -81,12 +81,12 @@
 {% endif %}
 {% endmacro %}
 
-{% macro reference_list(references, hidden, environment_id, empty="No reference") %}
+{% macro reference_list(references, hidden, environment_id, empty="No reference", href=none) %}
 {% if references %}
 <ul class="ref-list">
   {% for reference in references %}
   <li class="ref-list__item">
-    <span class="mono cell-wrap">{{ reference.text }}</span>
+    {% if href %}<a class="mono cell-wrap" href="{{ href }}">{{ reference.text }}</a>{% else %}<span class="mono cell-wrap">{{ reference.text }}</span>{% endif %}
     {% if reference.kind == "digest" %}<span class="chip">digest</span>{% endif %}
     {{ binding_state(reference.binding, environment_id, reference.kind == "digest") }}
     {{ stored_update(reference) }}
@@ -101,13 +101,13 @@
 {% endif %}
 {% endmacro %}
 
-{% macro using_containers(containers, hidden, total, environment_id) %}
+{% macro using_containers(containers, hidden, total, environment_id, origin=none) %}
 {% if total == 0 %}
 <span class="cell-note">Not used</span>
 {% else %}
 <ul class="chip-list">
   {% for container in containers %}
-  <li><a href="{{ route_path('environment_container_detail', environment_id=environment_id, container_id=container.id) }}">{{ container.name }}</a></li>
+  <li><a href="{{ with_origin(route_path('environment_container_detail', environment_id=environment_id, container_id=container.id), origin) }}">{{ container.name }}</a></li>
   {% endfor %}
 </ul>
 {% if hidden %}

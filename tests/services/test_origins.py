@@ -17,10 +17,14 @@ from app.services.origins import (
     OriginResolver,
     OriginTarget,
     Reader,
+    list_ref,
+    list_target,
     parse_origin,
 )
 
 VIEWER = cast(Principal, SimpleNamespace())
+ADMINISTRATOR = cast(Principal, SimpleNamespace(is_administrator=True))
+STANDARD = cast(Principal, SimpleNamespace(is_administrator=False))
 ENVIRONMENT = 3
 CONTAINER = "a" * 64
 SERVICE = "b" * 25
@@ -43,6 +47,12 @@ CONTAINER_REF = f"container:{ENVIRONMENT}:{CONTAINER}"
         (f"image:3:sha256:{IMAGE_HEX}", OriginRef("image", ENVIRONMENT, IMAGE_HEX)),
         ("automation:-:17", OriginRef("automation", None, "17")),
         ("activity:-:9", OriginRef("activity", None, "9")),
+        (f"config:3:{SERVICE}", OriginRef("config", ENVIRONMENT, SERVICE)),
+        (f"secret:3:{SERVICE}", OriginRef("secret", ENVIRONMENT, SERVICE)),
+        ("environment:-:4", OriginRef("environment", None, "4")),
+        ("team:-:2", OriginRef("team", None, "2")),
+        ("list:3:containers", OriginRef("list", ENVIRONMENT, "containers")),
+        ("list:-:activity", OriginRef("list", None, "activity")),
     ],
 )
 def test_a_well_formed_reference_parses_to_its_kind_environment_and_key(
@@ -97,6 +107,14 @@ def test_a_well_formed_reference_parses_to_its_kind_environment_and_key(
         "activity:3:9",
         "activity:-:9223372036854775808",
         "stack:3:" + "a" * REF_MAX,
+        "environment:3:4",
+        "team:-:0",
+        f"config:3:{CONTAINER}",
+        "list:-:containers",
+        "list:3:activity",
+        "list:3:stacks",
+        "list:3:Containers",
+        "list:3:",
     ],
     ids=repr,
 )
@@ -244,3 +262,97 @@ async def test_a_kind_with_no_reader_leaves_no_origin() -> None:
     fixture = Fixture(named("web"))
 
     assert await fixture.resolver.resolve(VIEWER, f"service:3:{SERVICE}") is None
+
+
+def test_a_list_reference_is_written_with_its_environment_only_when_the_list_has_one() -> None:
+    assert (list_ref("containers", ENVIRONMENT), list_ref("automation")) == (
+        f"list:{ENVIRONMENT}:containers",
+        "list:-:automation",
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "environment_id", "error"),
+    [
+        ("containers", None, ValueError),
+        ("automation", ENVIRONMENT, ValueError),
+        ("x", None, KeyError),
+    ],
+)
+def test_a_list_reference_that_cannot_resolve_is_refused_when_written(
+    name: str, environment_id: int | None, error: type[Exception]
+) -> None:
+    with pytest.raises(error):
+        list_ref(name, environment_id)
+
+
+async def test_a_list_origin_is_labelled_with_the_list_and_linked_by_its_route() -> None:
+    async def status_of(environment_id: int) -> str:
+        return "reachable"
+
+    def href_for(kind: str, environment_id: int | None, key: str, variant: str) -> str:
+        return f"/{kind}/{environment_id}/{key}"
+
+    resolver = OriginResolver({"list": named("containers")}, status_of, href_for, budget=BUDGET)
+
+    origin = await resolver.resolve(VIEWER, "list:3:containers")
+
+    assert origin == Origin(label="containers", href="/list/3/containers", ref="list:3:containers")
+
+
+class ListGate:
+    """Records the environment checks a list origin makes and answers them as scripted."""
+
+    def __init__(
+        self, *, visible: bool = True, environment_type: str | None = "standalone"
+    ) -> None:
+        self.checked: list[int] = []
+        self.visible = visible
+        self.environment_type = environment_type
+
+    async def require_environment(self, principal: Principal, environment_id: int) -> None:
+        self.checked.append(environment_id)
+        if not self.visible:
+            raise ResourceNotFound("not found")
+
+    async def type_of(self, environment_id: int) -> str | None:
+        return self.environment_type
+
+    async def target(
+        self, principal: Principal, environment_id: int | None, name: str
+    ) -> OriginTarget:
+        return await list_target(
+            principal,
+            environment_id,
+            name,
+            require_environment=self.require_environment,
+            environment_type=self.type_of,
+        )
+
+
+async def test_an_environment_list_origin_is_read_only_through_the_environment_check() -> None:
+    gate = ListGate()
+
+    target = await gate.target(STANDARD, ENVIRONMENT, "containers")
+
+    assert target == OriginTarget("containers", "containers")
+    assert gate.checked == [ENVIRONMENT]
+
+
+@pytest.mark.parametrize(
+    ("principal", "environment_id", "name", "gate"),
+    [
+        pytest.param(STANDARD, None, "activity", ListGate(), id="administrators-only-list"),
+        pytest.param(
+            STANDARD, ENVIRONMENT, "containers", ListGate(visible=False), id="hidden-environment"
+        ),
+        pytest.param(
+            ADMINISTRATOR, ENVIRONMENT, "services", ListGate(), id="swarm-list-on-standalone"
+        ),
+    ],
+)
+async def test_a_list_origin_the_viewer_cannot_open_is_not_found(
+    principal: Principal, environment_id: int | None, name: str, gate: ListGate
+) -> None:
+    with pytest.raises(ResourceNotFound):
+        await gate.target(principal, environment_id, name)

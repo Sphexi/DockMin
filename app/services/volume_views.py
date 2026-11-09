@@ -12,6 +12,7 @@ from app.auth.errors import (
 )
 from app.auth.principal import Principal
 from app.db.repositories.pagination import Page
+from app.db.repositories.stack import StackKind
 from app.services.container_actions import (
     ActionOutcome,
 )
@@ -207,6 +208,7 @@ class VolumeRow:
     containers_hidden: int
     can_remove: bool
     protected: bool = False
+    stack_kind: StackKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +256,7 @@ class VolumeDetail:
     can_remove: bool
     can_manage_access: bool
     protected: bool = False
+    stack_kind: StackKind | None = None
 
 
 @dataclass(frozen=True, slots=True)

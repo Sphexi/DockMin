@@ -44,7 +44,7 @@
 {% endif %}
 {% endmacro %}
 
-{% macro overview_tab(detail) %}
+{% macro overview_tab(detail, stack_links=none) %}
 <h2 id="tab-heading">Overview</h2>
 <dl class="facts">
   <dt>Name</dt>
@@ -58,7 +58,7 @@
   <dt>Created</dt>
   <dd>{{ when(detail.created_at, "—") }}</dd>
   <dt>Stack</dt>
-  <dd>{{ stack_cell(detail.stack, detail.environment_id) }}</dd>
+  <dd>{{ stack_cell(detail, stack_links, "volume:" ~ detail.environment_id ~ ":" ~ detail.name) }}</dd>
   <dt>Used by</dt>
   <dd>{{ detail.containers_total }} {{ "container" if detail.containers_total == 1 else "containers" }}</dd>
   <dt>Mount point</dt>
@@ -98,7 +98,7 @@
     <tbody>
       {% for container in detail.containers %}
       <tr>
-        <th scope="row" class="cell-wrap"><a href="{{ container_base(detail.environment_id) }}/{{ container.id }}?tab=mounts">{{ container.name }}</a></th>
+        <th scope="row" class="cell-wrap"><a href="{{ with_origin(container_base(detail.environment_id) ~ '/' ~ container.id ~ '?tab=mounts', 'volume:' ~ detail.environment_id ~ ':' ~ detail.name) }}">{{ container.name }}</a></th>
         <td>{{ container_state_badge(container.state) }}</td>
       </tr>
       {% endfor %}
@@ -117,7 +117,7 @@
 {{ access_panel(panel.control, panel.key, panel.names, panel.digest, base, route_path("environment_volume_access_delete", environment_id=detail.environment_id, volume_name=detail.name), values=values, fields=fields) }}
 {% endmacro %}
 
-{% macro volume_tabs(detail, tab, tabs, panel, values, fields) %}
+{% macro volume_tabs(detail, tab, tabs, panel, values, fields, stack_links=none) %}
 {% set detail_href = route_path("environment_volume_detail", environment_id=detail.environment_id, volume_name=detail.name) %}
 {% set labels = {"overview": "Overview", "containers": "Containers", "access": "Access"} %}
 <div id="volume-tabs" class="tabs">
@@ -134,7 +134,7 @@
     </ul>
   </nav>
   <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
-    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% if tab == "overview" %}{{ overview_tab(detail, stack_links) }}
     {% elif tab == "containers" %}{{ containers_tab(detail) }}
     {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
     {% endif %}

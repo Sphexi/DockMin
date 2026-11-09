@@ -42,7 +42,7 @@
 {% endif %}
 {% endmacro %}
 
-{% macro overview_tab(detail) %}
+{% macro overview_tab(detail, stack_links=none) %}
 <h2 id="tab-heading">Overview</h2>
 <dl class="facts">
   <dt>Name</dt>
@@ -58,7 +58,7 @@
   <dt>Flags</dt>
   <dd>{{ flags(detail.internal, detail.attachable, detail.ipv6) }}</dd>
   <dt>Stack</dt>
-  <dd>{{ stack_cell(detail.stack, detail.environment_id) }}</dd>
+  <dd>{{ stack_cell(detail, stack_links, "network:" ~ detail.environment_id ~ ":" ~ detail.id) }}</dd>
   <dt>Used by</dt>
   <dd>{{ detail.container_count }} {{ "container" if detail.container_count == 1 else "containers" }}{% if detail.service_count %} and {{ detail.service_count }} {{ "service" if detail.service_count == 1 else "services" }}{% endif %}{% if not detail.services_known %}; service use is unknown{% endif %}</dd>
 </dl>
@@ -122,7 +122,7 @@
     <tbody>
       {% for endpoint in detail.endpoints %}
       <tr>
-        <th scope="row" class="cell-wrap"><a href="{{ base }}/{{ endpoint.container_id }}?tab=networks">{{ endpoint.name }}</a></th>
+        <th scope="row" class="cell-wrap"><a href="{{ with_origin(base ~ '/' ~ endpoint.container_id ~ '?tab=networks', 'network:' ~ detail.environment_id ~ ':' ~ detail.id) }}">{{ endpoint.name }}</a></th>
         <td class="mono">{{ endpoint.ipv4_address or "—" }}</td>
         <td class="mono">{{ endpoint.ipv6_address or "—" }}</td>
         <td class="mono">{{ endpoint.mac_address or "—" }}</td>
@@ -139,12 +139,12 @@
 {% endif %}
 
 <h3>Configured, not running</h3>
-{{ object_users(detail.stopped, detail.stopped_more, detail.stopped_hidden, detail.stopped|length + detail.stopped_more + detail.stopped_hidden, base, "No stopped container is attached to this network.") }}
+{{ object_users(detail.stopped, detail.stopped_more, detail.stopped_hidden, detail.stopped|length + detail.stopped_more + detail.stopped_hidden, base, "No stopped container is attached to this network.", origin="network:" ~ detail.environment_id ~ ":" ~ detail.id) }}
 
 {% if detail.service_count %}
 <h3>Services</h3>
 <p class="field__help">A service that attaches to this network keeps it in use, whether or not its tasks are running.</p>
-{{ object_users(detail.services, detail.services_more, detail.services_hidden, detail.service_count, route_path("environment_swarm_service_list", environment_id=detail.environment_id)) }}
+{{ object_users(detail.services, detail.services_more, detail.services_hidden, detail.service_count, route_path("environment_swarm_service_list", environment_id=detail.environment_id), origin="network:" ~ detail.environment_id ~ ":" ~ detail.id) }}
 {% elif not detail.services_known %}
 <h3>Services</h3>
 <p class="field__help">The host's services could not be read, so service use of this network is unknown.</p>
@@ -156,7 +156,7 @@
 {{ access_panel(panel.control, panel.key, panel.names, panel.digest, base, route_path("environment_network_access_delete", environment_id=detail.environment_id, network_id=detail.id), values=values, fields=fields) }}
 {% endmacro %}
 
-{% macro network_tabs(detail, tab, tabs, panel, values, fields) %}
+{% macro network_tabs(detail, tab, tabs, panel, values, fields, stack_links=none) %}
 {% set detail_href = route_path("environment_network_detail", environment_id=detail.environment_id, network_id=detail.id) %}
 {% set labels = {"overview": "Overview", "containers": "Containers", "access": "Access"} %}
 <div id="network-tabs" class="tabs">
@@ -173,7 +173,7 @@
     </ul>
   </nav>
   <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
-    {% if tab == "overview" %}{{ overview_tab(detail) }}
+    {% if tab == "overview" %}{{ overview_tab(detail, stack_links) }}
     {% elif tab == "containers" %}{{ containers_tab(detail) }}
     {% elif tab == "access" %}{{ access_tab(detail, panel, values, fields) }}
     {% endif %}

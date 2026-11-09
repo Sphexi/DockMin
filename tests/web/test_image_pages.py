@@ -112,7 +112,10 @@ async def test_the_list_shows_each_reference_with_its_binding_and_pages_through_
     ]
     assert {"Pull image", "Prune images"} <= set(re.findall(r">([^<]+)</a>", page.text))
     assert "uses-nginx" in page.text
-    assert f"/environments/{world.remote_id}/containers/{USING_CONTAINER}" in links_in(page)
+    assert (
+        f"/environments/{world.remote_id}/containers/{USING_CONTAINER}"
+        f"?from=list%3A{world.remote_id}%3Aimages"
+    ) in links_in(page)
     assert "Not used" in page.text
     assert "refers to images that are no longer on this host" in text
     assert f"{images_path(world)}/bindings/reap" in links_in(page)

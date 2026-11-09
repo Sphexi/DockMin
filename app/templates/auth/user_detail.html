@@ -7,11 +7,12 @@
 {% from "partials/page_header.html" import page_header %}
 {% from "partials/select_field.html" import select_field %}
 {% from "tokens/_table.html" import tokens_table with context %}
+{% from "partials/back_actions.html" import back_actions %}
 {% block title %}{{ user.username }} - dockmin{% endblock %}
 {% set crumb_object = user.username %}
 {% block content %}
 {% call page_header(user.username, "User account") %}
-<a class="btn" href="{{ route_path('users') }}">Back to users</a>
+{{ back_actions(route_path('users'), "Back to users", origin) }}
 {% endcall %}
 
 {% if error %}

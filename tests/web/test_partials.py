@@ -84,6 +84,15 @@ STRUCTURED_ARGUMENTS: dict[str, Callable[[str], dict[str, Any]]] = {
         "back_label": text,
         "origin": SimpleNamespace(href=f"/{text}", label=text),
     },
+    "object_links.stack_link": lambda text: {
+        "environment_id": 1,
+        "kind": "compose",
+        "name": text,
+        "links": {},
+        "filter_href": f"/{text}",
+    },
+    "object_links.user_link": lambda text: {"user_id": 1, "username": text},
+    "object_links.environment_link": lambda text: {"environment_id": 1, "name": text},
 }
 
 NOT_A_CURSOR_CONTRACT = [
@@ -471,3 +480,13 @@ def test_optional_columns_are_marked_for_the_narrow_layout_and_the_name_column_n
     assert "col-optional" in headers["Size"].classes()
     assert table.attrs["data-optional"] == "2"
     assert all(n.attrs["scope"] == "col" for n in headers.values())
+
+
+def test_back_actions_offers_no_second_button_that_returns_to_the_same_page() -> None:
+    same = SimpleNamespace(href=f"/{BENIGN}", label=BENIGN)
+
+    output = render_macro(
+        "back_actions", "back_actions", back_href=f"/{BENIGN}", back_label=BENIGN, origin=same
+    )
+
+    assert output.count("<a ") == 1

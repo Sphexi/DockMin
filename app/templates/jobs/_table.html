@@ -16,7 +16,7 @@
     </div>
   </th>
   <td>{{ "System task" if summary.job.rule_id is none else "Automation" }}</td>
-  <td>{% if summary.environment_name %}{{ summary.environment_name }}{% else %}All{% endif %}</td>
+  <td>{% if summary.environment_name %}<a href="{{ with_origin(route_path('environment_detail', environment_id=summary.job.environment_id), list_origin('jobs')) }}">{{ summary.environment_name }}</a>{% else %}All{% endif %}</td>
   <td>{{ row.schedule }}</td>
   <td>{{ job_state(row) }}</td>
   <td>{% if summary.job.schedule_kind == "webhook" %}{{ "Pending" if summary.job.next_run_at else "When called" }}{% elif summary.job.next_run_at %}<time datetime="{{ summary.job.next_run_at|timestamp_iso }}">{{ summary.job.next_run_at|timestamp }}</time>{% else %}&mdash;{% endif %}</td>

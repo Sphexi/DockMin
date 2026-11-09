@@ -11,7 +11,7 @@
     <span class="cell-note">{{ summary|truncate(140) }}</span>
     {% endif %}
   </th>
-  <td>{{ row.catalogue_name }}</td>
+  <td>{% if principal and principal.is_administrator %}<a href="{{ with_origin(route_path('template_catalogue_detail', catalogue_id=row.catalogue_id), list_origin('templates')) }}">{{ row.catalogue_name }}</a>{% else %}{{ row.catalogue_name }}{% endif %}</td>
   <td class="col-optional">{{ row.template.categories|join(", ") }}</td>
   <td class="col-optional mono cell-wrap">{{ row.template.image }}</td>
 </tr>

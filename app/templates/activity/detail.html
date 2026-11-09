@@ -6,7 +6,7 @@
 {% set crumb_object = "Event " ~ view.event.id %}
 {% block content %}
 {% set event = view.event %}
-{% set origin_targets = ["container", "network", "service", "node", "automation_rule", "image", "volume", "stack"] %}
+{% set origin_targets = ["container", "network", "service", "node", "automation_rule", "image", "volume", "stack", "user", "team", "object_storage_target"] %}
 {% set recorded = event.detail or {} %}
 {% set recorded_at %}Recorded <time datetime="{{ event.occurred_at|timestamp_iso }}">{{ event.occurred_at|timestamp(seconds=True) }}</time>{% endset %}
 {% call page_header("Event " ~ event.id, recorded_at) %}
@@ -33,7 +33,7 @@
   <h2 id="who-heading">Who did it</h2>
   <dl class="facts">
     <dt>Actor</dt>
-    <dd>{{ actor_cell(view) }}</dd>
+    <dd>{{ actor_cell(view, "activity:-:" ~ event.id) }}</dd>
     <dt>Actor type</dt>
     <dd>{{ {"user": "User", "subsystem": "Subsystem", "anonymous": "Anonymous"}.get(event.actor_type, event.actor_type) }}</dd>
     {% if event.actor_user_id is not none %}
@@ -51,7 +51,7 @@
     <dt>Target id</dt>
     <dd>{% if event.target_id is none %}&mdash;{% elif target_deleted %}<span class="cell-wrap">{{ event.target_id|visible_text }}</span> {{ badge("Deleted", "neutral") }}{% elif target_href %}<a class="cell-wrap" href="{{ with_origin(target_href, 'activity:-:' ~ event.id if event.target_type in origin_targets else none) }}">{{ event.target_id|visible_text }}</a>{% else %}{{ event.target_id|visible_text }}{% endif %}</dd>
     <dt>Environment</dt>
-    <dd>{{ environment_cell(view) }}</dd>
+    <dd>{{ environment_cell(view, "activity:-:" ~ event.id) }}</dd>
   </dl>
 </section>
 

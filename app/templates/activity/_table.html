@@ -3,16 +3,17 @@
 {% from "partials/error_summary.html" import error_summary %}
 {% from "activity/_parts.html" import actor_cell, environment_cell, result_badge, target_cell, when with context %}
 
-{% macro activity_table(rows, columns, pager) %}
+{% macro activity_table(rows, columns, pager, target_hrefs=none) %}
+{% set here = list_origin("activity") %}
 {% call data_table("activity-table", "Activity log", columns, pager, empty_title="No activity", empty_body="Nothing has been recorded yet. Events appear here as users and automations act.", filtered=pager.params|length > 0) %}
 {% for view in rows %}
 {% set event = view.event %}
 <tr>
   <th scope="row"><a href="{{ route_path('activity_event_detail', event_id=event.id) }}">{{ when(event) }}</a></th>
-  <td>{{ actor_cell(view) }}</td>
+  <td>{{ actor_cell(view, here) }}</td>
   <td class="mono cell-wrap">{{ event.action|visible_text }}</td>
-  <td>{{ target_cell(event) }}</td>
-  <td>{{ environment_cell(view) }}</td>
+  <td>{{ target_cell(event, (target_hrefs or {}).get(event.id), here) }}</td>
+  <td>{{ environment_cell(view, here) }}</td>
   <td>{{ result_badge(event.result) }}</td>
 </tr>
 {% endfor %}
@@ -26,7 +27,7 @@
 {{ filter_form(filters, true) }}
 {% endmacro %}
 
-{% macro activity_results(rows, columns, pager, export_href, errors) %}
+{% macro activity_results(rows, columns, pager, export_href, errors, target_hrefs=none) %}
 <div id="activity-results">
   {% if errors %}
   {{ error_summary(errors) }}
@@ -36,7 +37,7 @@
     <a class="btn" href="{{ export_href }}{{ '&' if '?' in export_href else '?' }}format=ndjson">Download NDJSON</a>
     <span class="field__help">The file holds every event these filters match, not only this page.</span>
   </p>
-  {{ activity_table(rows, columns, pager) }}
+  {{ activity_table(rows, columns, pager, target_hrefs) }}
   {% endif %}
 </div>
 {% endmacro %}

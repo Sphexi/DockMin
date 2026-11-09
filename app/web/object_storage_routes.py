@@ -31,6 +31,7 @@ from app.web.flash import Flash
 from app.web.identifiers import PathId
 from app.web.navigation import no_store
 from app.web.object_pages import redirect, route
+from app.web.origins import RequestOrigin
 from app.web.pagination import DEFAULT_LIMIT, Column, PageView
 from app.web.templating import is_htmx_request, render_fragment, render_page
 
@@ -365,7 +366,12 @@ async def create_target(
     )
 
 
-@router.get("/{target_id}", response_class=HTMLResponse, name="object_storage_target_detail")
+@router.get(
+    "/{target_id}",
+    response_class=HTMLResponse,
+    name="object_storage_target_detail",
+    dependencies=[RequestOrigin],
+)
 async def target_detail(
     request: Request,
     services: TargetAdmin,

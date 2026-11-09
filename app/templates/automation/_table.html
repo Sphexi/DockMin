@@ -3,6 +3,7 @@
 {% from "jobs/_parts.html" import outcome_badge %}
 {% from "partials/badge.html" import badge %}
 {% from "partials/list_bar.html" import list_count %}
+{% from "partials/object_links.html" import environment_link, user_link with context %}
 
 {% macro rules_table(rows, columns, pager, filtered, total=none, oob=false) %}
 {% if oob %}
@@ -10,6 +11,7 @@
 {% endif %}
 {% set show_owner = columns|selectattr("key", "equalto", "owner")|list|length > 0 %}
 {% call data_table("rules-table", "Automations", columns, pager, empty_title="No automations", empty_body="An automation runs on a schedule. Create one to restart unhealthy containers, restart a stack on a timetable, or find containers whose image has a newer version.", empty_action_label="New automation", empty_action_href=route_path('automation_rule_new'), filtered=filtered, clear_href=route_path('automation')) %}
+{% set here = list_origin("automation") %}
 {% for view in rows %}
 <tr>
   <th scope="row">
@@ -19,9 +21,9 @@
     </div>
   </th>
   {% if show_owner %}
-  <td>{{ view.owner or "Unknown" }}</td>
+  <td>{% if view.owner %}{{ user_link(view.rule.created_by_user_id, view.owner, here) }}{% else %}Unknown{% endif %}</td>
   {% endif %}
-  <td>{{ view.environment_name or "All" }}</td>
+  <td>{% if view.environment_name and view.environment_visible %}{{ environment_link(view.rule.environment_id, view.environment_name, here) }}{% elif view.environment_name %}{{ view.environment_name }}{% else %}All{% endif %}</td>
   <td class="cell-wrap">{{ view.target }}</td>
   <td>{{ view.schedule }}</td>
   <td>

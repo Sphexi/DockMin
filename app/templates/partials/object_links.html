@@ -1,0 +1,25 @@
+{# Links to an object's own page. Import with context: links come from route names. #}
+
+{# links maps `kind:name` to the name the stack's page is opened by; a stack without an entry links to filter_href. #}
+{% macro stack_link(environment_id, kind, name, links, filter_href, origin=none) -%}
+{%- set opened = (links or {}).get((kind or "") ~ ":" ~ name) -%}
+{%- if opened and kind == "compose" -%}
+<a href="{{ with_origin(route_path('environment_stack_detail', environment_id=environment_id, stack_name=opened), origin) }}">{{ name }}</a>
+{%- elif opened -%}
+<a href="{{ with_origin(route_path('environment_swarm_stack_detail', environment_id=environment_id, namespace=opened), origin) }}">{{ name }}</a>
+{%- else -%}
+<a href="{{ filter_href }}?{{ {'stack': name}|urlencode }}">{{ name }}</a>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro user_link(user_id, username, origin=none) -%}
+{%- if user_id is not none and principal is defined and principal and principal.is_administrator -%}
+<a href="{{ with_origin(route_path('user_detail', user_id=user_id), origin) }}">{{ username }}</a>
+{%- else -%}{{ username }}{%- endif -%}
+{%- endmacro %}
+
+{% macro environment_link(environment_id, name, origin=none) -%}
+{%- if environment_id is not none -%}
+<a href="{{ with_origin(route_path('environment_detail', environment_id=environment_id), origin) }}">{{ name }}</a>
+{%- else -%}{{ name }}{%- endif -%}
+{%- endmacro %}

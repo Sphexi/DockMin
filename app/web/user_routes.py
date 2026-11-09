@@ -22,6 +22,7 @@ from app.db.repositories.pagination import MAX_PAGE_SIZE, InvalidCursorError
 from app.web.flash import Flash
 from app.web.identifiers import PathId
 from app.web.navigation import no_store, redirect
+from app.web.origins import RequestOrigin
 from app.web.pagination import DEFAULT_LIMIT, Column, PageView
 from app.web.results import forget_results
 from app.web.templating import is_htmx_request, render_fragment, render_page, render_partial
@@ -204,7 +205,12 @@ async def create_user(
     return redirect(request, f"{USERS_PATH}/{created.id}")
 
 
-@router.get("/{user_id}", response_class=HTMLResponse, name="user_detail")
+@router.get(
+    "/{user_id}",
+    response_class=HTMLResponse,
+    name="user_detail",
+    dependencies=[RequestOrigin],
+)
 async def user_detail(
     request: Request,
     services: Services,

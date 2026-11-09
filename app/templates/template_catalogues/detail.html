@@ -2,11 +2,12 @@
 {% from "environments/_parts.html" import when with context %}
 {% from "partials/badge.html" import badge %}
 {% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
 {% block title %}{{ catalogue.name }} - dockmin{% endblock %}
 {% set crumb_object = catalogue.name %}
 {% block content %}
 {% call page_header(catalogue.name, "Template catalogue") %}
-<a class="btn" href="{{ route_path('template_catalogues') }}">Back to catalogues</a>
+{{ back_actions(route_path('template_catalogues'), "Back to catalogues", origin) }}
 <a class="btn" href="{{ route_path('template_catalogue_edit', catalogue_id=catalogue.id) }}">Edit</a>
 <a class="btn btn--danger-quiet" href="{{ route_path('template_catalogue_delete_confirm', catalogue_id=catalogue.id) }}">Delete</a>
 {% endcall %}

@@ -5,11 +5,14 @@
 {% from "partials/container_state_badge.html" import container_state_badge %}
 {% from "partials/data_table.html" import data_table %}
 {% from "partials/error_state.html" import error_state %}
+{% from "partials/object_links.html" import stack_link with context %}
 {% from "partials/ports.html" import port_list %}
 
-{# An image id names no reference, so it stays text. #}
-{% macro image_link(environment_id, image) -%}
-{%- if image and not image.startswith("sha256:") and image|length <= 128 -%}
+{# Without an image id, a reference links to the filtered image list and a bare id stays text. #}
+{% macro image_link(environment_id, image, image_id=none, origin=none) -%}
+{%- if image_id -%}
+<a href="{{ with_origin(route_path('environment_image_detail', environment_id=environment_id, image_id=image_id), origin) }}">{{ image }}</a>
+{%- elif image and not image.startswith("sha256:") and image|length <= 128 -%}
 <a href="{{ route_path('environment_image_list', environment_id=environment_id) }}?{{ {'q': image}|urlencode }}">{{ image }}</a>
 {%- else -%}{{ image }}{%- endif -%}
 {%- endmacro %}
@@ -21,8 +24,9 @@
 {% endif %}
 {% endmacro %}
 
-{% macro container_row(row, writable, may_create=false) %}
+{% macro container_row(row, writable, may_create=false, stack_links=none) %}
 {% set detail_href = route_path("environment_container_detail", environment_id=row.environment_id, container_id=row.id) %}
+{% set here = list_origin("containers", row.environment_id) %}
 <tr id="container-{{ row.id }}">
   {% if writable %}
   <td>
@@ -41,10 +45,10 @@
     </div>
   </th>
   <td><div class="cell-stack">{{ container_state_badge(row.state, row.health) }}</div></td>
-  <td class="cell-wrap mono">{{ image_link(row.environment_id, row.image) }}</td>
+  <td class="cell-wrap mono">{{ image_link(row.environment_id, row.image, row.image_id, here) }}</td>
   <td>
     {% if row.stack %}
-    <a href="{{ route_path('environment_container_list', environment_id=row.environment_id) }}?stack={{ row.stack|urlencode }}">{{ row.stack }}</a>
+    {{ stack_link(row.environment_id, row.stack_kind, row.stack, stack_links, route_path('environment_container_list', environment_id=row.environment_id), here) }}
     {% elif not row.labels_truncated %}
     <span class="cell-note">None</span>
     {% endif %}
@@ -64,13 +68,13 @@
 </tr>
 {% endmacro %}
 
-{% macro containers_table(rows, columns, pager, writable, filtered, may_create=false, environment_id=none) %}
+{% macro containers_table(rows, columns, pager, writable, filtered, may_create=false, environment_id=none, stack_links=none) %}
 {% set empty_body = "Change the filters, or clear them to see every container." if filtered else ("This host has no containers." if principal.is_administrator else "You cannot see any containers on this host. Ask an administrator for access to more containers.") %}
 {% set list_href = route_path("environment_container_list", environment_id=environment_id) if environment_id is not none else none %}
 {% set show_create = principal.is_administrator and may_create and not filtered and environment_id is not none %}
 {% call data_table("containers-table", "Containers", columns, pager, empty_title=("No matching containers" if filtered else "No containers"), empty_body=empty_body, empty_action_label=("Create container" if show_create else none), empty_action_href=(route_path("environment_container_new", environment_id=environment_id) if show_create else none), filtered=filtered, clear_href=list_href, region_id="containers-results") %}
 {% for row in rows %}
-{{ container_row(row, writable, may_create) }}
+{{ container_row(row, writable, may_create, stack_links) }}
 {% endfor %}
 {% endcall %}
 {% endmacro %}
@@ -95,7 +99,7 @@
 </form>
 {% endmacro %}
 
-{% macro containers_results(rows, columns, pager, total, writable, filtered, errors, failure, retry_href, environment_id, actions, health_unavailable, may_create=false, oob=false, instance_href=none) %}
+{% macro containers_results(rows, columns, pager, total, writable, filtered, errors, failure, retry_href, environment_id, actions, health_unavailable, may_create=false, oob=false, instance_href=none, stack_links=none) %}
 {% if oob %}
 {{ results_summary(none if (errors or failure) else total, filtered, true) }}
 {% endif %}
@@ -115,7 +119,7 @@
 <p class="field__help" role="note">The container marked "This dockmin instance" is the one dockmin runs in. It cannot be stopped, restarted, killed, paused, removed or recreated from here.
   {%- if instance_href %} Restart it from <a href="{{ instance_href }}">Administration &gt; Instance</a>.{% endif %}</p>
 {% endif %}
-{{ containers_table(rows, columns, pager, writable, filtered, may_create, environment_id) }}
+{{ containers_table(rows, columns, pager, writable, filtered, may_create, environment_id, stack_links) }}
 {% if writable %}
 {{ batch_form(environment_id, actions) }}
 {% endif %}

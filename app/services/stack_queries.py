@@ -1,7 +1,7 @@
 """Stack reads: host projects, listings, details and the confirmations that precede a change."""
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Literal
@@ -157,7 +157,7 @@ from app.services.stack_views import (
     variable_views,
     volumes_digest,
 )
-from app.services.swarm_stacks import namespace_keys
+from app.services.swarm_stacks import NAMESPACE_ROUTE, namespace_keys
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
@@ -725,6 +725,62 @@ class StackQueryService:
             kind=kind,
         )
         return tuple(ManagedStackName(item.name, item.kind) for item in page.items)
+
+    async def managed_stacks(
+        self, actor: Principal, environment_id: int, names: Iterable[str]
+    ) -> dict[str, tuple[str, StackKind]]:
+        """Map each name that is a managed stack the caller may read to its name and kind.
+
+        Names compare ignoring ASCII case. An environment the caller may not see maps nothing.
+        """
+        try:
+            await self._authoriser.require_environment(actor, environment_id)
+        except ResourceNotFound:
+            return {}
+        visible = None
+        if not actor.is_administrator:
+            visibility = await self._authoriser.resolve_visibility(actor, environment_id, "stack")
+            visible = visibility.sql_filter("s.name", "s.environment_id")
+        return await self._listing.kinds_folded(environment_id, names, visible)
+
+    async def stack_links(
+        self, actor: Principal, environment_id: int, refs: Iterable[tuple[StackKind, str]]
+    ) -> dict[str, str]:
+        """Map `kind:name` of each stack whose page the caller may open to the name it is opened by.
+
+        A Compose project has a page once it is a managed stack; a Swarm namespace has one on a
+        Swarm environment. Nothing is read from the host, and an environment the caller may not see
+        links nothing.
+        """
+        wanted = {f"{kind}:{name}": (kind, name) for kind, name in refs}
+        if not wanted:
+            return {}
+        try:
+            await self._authoriser.require_environment(actor, environment_id)
+            environment = await self._hosts.environment(environment_id)
+        except ResourceNotFound:
+            return {}
+        visibility = None
+        if not actor.is_administrator:
+            visibility = await self._authoriser.resolve_visibility(actor, environment_id, "stack")
+        links: dict[str, str] = {}
+        compose = [name for kind, name in wanted.values() if kind == "compose"]
+        if compose:
+            visible = (
+                None if visibility is None else visibility.sql_filter("s.name", "s.environment_id")
+            )
+            found = await self._listing.kinds_folded(environment_id, compose, visible)
+            for key, (kind, name) in wanted.items():
+                match = found.get(name) if kind == "compose" else None
+                if match is not None and match[1] == "compose":
+                    links[key] = match[0]
+        if environment.type == "swarm":
+            for key, (kind, name) in wanted.items():
+                if kind != "swarm" or NAMESPACE_ROUTE.fullmatch(name) is None:
+                    continue
+                if visibility is None or visibility.permits(name, {}):
+                    links[key] = name
+        return links
 
     async def unmanaged(
         self, actor: Principal, environment_id: int

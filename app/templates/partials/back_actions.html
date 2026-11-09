@@ -1,6 +1,6 @@
 {% macro back_actions(back_href, back_label, origin=none) %}
 <a class="btn" href="{{ back_href }}">{{ back_label }}</a>
-{% if origin %}
+{% if origin and origin.href != back_href %}
 <a class="btn" href="{{ origin.href }}">Back to {{ origin.label|visible_text }}</a>
 {% endif %}
 {% endmacro %}

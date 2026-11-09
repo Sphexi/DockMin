@@ -6,10 +6,11 @@
 {% from "environments/_parts.html" import connection_test_result, environment_badge, status_panel, tag_chips, when with context %}
 {% from "partials/badge.html" import badge %}
 {% from "partials/page_header.html" import page_header %}
+{% from "partials/back_actions.html" import back_actions %}
 {% block title %}{{ environment.name }} - dockmin{% endblock %}
 {% block content %}
 {% call page_header(environment.name, "Environment") %}
-<a class="btn" href="{{ route_path('index') }}">Back to environments</a>
+{{ back_actions(route_path('index'), "Back to environments", origin) }}
 {% if detail.can_manage %}
 <a class="btn" href="{{ route_path('environment_edit', environment_id=environment.id) }}">Edit</a>
 <a class="btn btn--danger-quiet" href="{{ route_path('environment_delete_confirm') }}?id={{ environment.id }}">Delete</a>
@@ -145,7 +146,7 @@
 {% endif %}
 
 {% if access_view is not none %}
-{{ access_section("environment", access_view.direct, route_path('environment_access_grant', environment_id=environment.id), route_path('environment_access_revoke', environment_id=environment.id), fields.get("grantee"), grantee_kind, grantee_name, inherited=access_view.inherited, group=access_view.group, is_local=environment.is_local) }}
+{{ access_section("environment", access_view.direct, route_path('environment_access_grant', environment_id=environment.id), route_path('environment_access_revoke', environment_id=environment.id), fields.get("grantee"), grantee_kind, grantee_name, inherited=access_view.inherited, group=access_view.group, is_local=environment.is_local, origin="environment:-:" ~ environment.id) }}
 {% endif %}
 {% if activity_log is defined and activity_log is not none %}
 {{ activity_panel("Recent activity", activity_log) }}

@@ -5,6 +5,7 @@
 {% from "partials/error_state.html" import error_state %}
 {% from "partials/page_header.html" import page_header %}
 {% from "partials/back_actions.html" import back_actions %}
+{% from "partials/object_links.html" import user_link with context %}
 {% block title %}{{ view.rule.name }} - dockmin{% endblock %}
 {% set crumb_object = view.rule.name %}
 {% block content %}
@@ -84,7 +85,7 @@
     {% endif %}
     {% if view.owner %}
     <dt>Owner</dt>
-    <dd>{{ view.owner }}</dd>
+    <dd>{{ user_link(rule.created_by_user_id, view.owner, "automation:-:" ~ rule.id) }}</dd>
     {% endif %}
     {% if not view.subsystem_enabled %}
     <dt>Subsystem switch</dt>
@@ -154,7 +155,7 @@
       <tbody>
         {% for held in holds.containers %}
         <tr>
-          <th scope="row" class="cell-wrap">{{ held.name }}</th>
+          <th scope="row" class="cell-wrap">{% if rule.environment_id is not none %}<a href="{{ with_origin(route_path('environment_container_detail', environment_id=rule.environment_id, container_id=held.container_id), 'automation:-:' ~ rule.id) }}">{{ held.name }}</a>{% else %}{{ held.name }}{% endif %}</th>
           <td><time datetime="{{ held.held_since|timestamp_iso }}">{{ held.held_since|timestamp }}</time></td>
           <td><time datetime="{{ held.last_unhealthy_at|timestamp_iso }}">{{ held.last_unhealthy_at|timestamp }}</time></td>
           <td>

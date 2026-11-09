@@ -4,11 +4,12 @@
 {% from "partials/badge.html" import badge %}
 {% from "partials/page_header.html" import page_header %}
 {% from "registries/_parts.html" import ca_certificates with context %}
+{% from "partials/back_actions.html" import back_actions %}
 {% block title %}{{ target.name }} - dockmin{% endblock %}
 {% set crumb_object = target.name %}
 {% block content %}
 {% call page_header(target.name, "Object storage target") %}
-<a class="btn" href="{{ route_path('object_storage_targets') }}">Back to targets</a>
+{{ back_actions(route_path('object_storage_targets'), "Back to targets", origin) }}
 <a class="btn" href="{{ route_path('object_storage_target_edit', target_id=target.id) }}">Edit</a>
 <a class="btn btn--danger-quiet" href="{{ route_path('object_storage_target_delete_confirm', target_id=target.id) }}">Delete</a>
 {% endcall %}

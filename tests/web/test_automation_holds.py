@@ -42,7 +42,9 @@ REMOVED = "d" * 64
 DB_SELECTOR = json.dumps({"kind": "container", "names": ["db"]})
 HELD_SECTION = re.compile(r'id="holds-heading".*?</section>', re.DOTALL)
 RELEASE_ACTIONS = re.compile(r'action="([^"]*/holds/[0-9a-f]{64}/release)"')
-HELD_NAMES = re.compile(r'<th scope="row" class="cell-wrap">(.*?)</th>')
+HELD_NAMES = re.compile(
+    r'<th scope="row" class="cell-wrap">(?:<a href="[^"]*">)?(.*?)(?:</a>)?</th>'
+)
 TIMES = re.compile(r'<time datetime="([^"]+)"')
 
 
@@ -154,6 +156,8 @@ async def test_the_rule_page_lists_each_held_container_with_its_times_and_a_rele
     assert "Held containers" in text
     assert "Container Held since Last seen unhealthy" in text
     assert HELD_NAMES.findall(section) == ["web", "db"]
+    held_href = f"/environments/{world.remote_id}/containers/{WEB}?from=automation%3A-%3A{rule.id}"
+    assert held_href in section
     assert NONE_HELD not in text
 
 

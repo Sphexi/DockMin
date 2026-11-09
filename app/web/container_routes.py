@@ -86,6 +86,7 @@ from app.services.host_objects import NetworkListTooLarge
 from app.services.networks import AttachOffer
 from app.services.object_inspector import ContainerTooLarge, EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectBusy, TooManyStreams
+from app.services.origins import list_ref
 from app.services.terminals import TerminalForm
 from app.web.activity_routes import (
     ACCESS_ACTIVITY,
@@ -114,6 +115,7 @@ from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import error_copy, unreachable_copy
 from app.web.results import show_result
+from app.web.stack_links import stack_links
 from app.web.templating import is_htmx_request, render_fragment, render_page, render_partial
 
 TABS_REGION: Final = Region("container-tabs", "outerHTML")
@@ -481,6 +483,9 @@ async def list_containers(
         "errors": errors,
         "failure": failure,
         "retry_href": _self_href(request),
+        "stack_links": await stack_links(
+            request, actor, environment_id, ((row.stack_kind, row.stack) for row in page.items)
+        ),
     }
     instance_href = _instance_href(request, actor)
     if is_htmx_request(request):
@@ -565,6 +570,8 @@ async def container_effective_access(
             "access": result.access,
             "resource_type": "container",
             "names": result.names,
+            "object_base": list_href,
+            "object_origin": list_ref("containers", environment_id),
             "back_href": list_href,
             "back_label": "Back to containers",
         },
@@ -1122,6 +1129,11 @@ async def _detail_response(
             await _last_output(request, containers, actor, detail) if tab == "overview" else None
         ),
         "show_last_exit": detail.state in STOPPED_STATES,
+        "stack_links": (
+            await stack_links(request, actor, environment_id, [(detail.stack_kind, detail.stack)])
+            if tab == "overview"
+            else {}
+        ),
     }
     if is_htmx_request(request):
         return _fragment(
@@ -1458,6 +1470,9 @@ async def _updated_fragment(
             headers=CHANGED_HEADERS,
             row=row,
             may_create=may_create,
+            stack_links=await stack_links(
+                request, actor, outcome.environment_id, [(row.stack_kind, row.stack)]
+            ),
             **common,
         )
     except (ResourceNotFound, PermissionDenied, EnvironmentUnavailable, ContainerTooLarge):

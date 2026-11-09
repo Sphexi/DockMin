@@ -60,7 +60,7 @@
       <tbody>
         {% for entry in access.entries %}
         <tr>
-          <th scope="row">{{ names.get(entry.resource_id, entry.resource_id) }}</th>
+          <th scope="row">{% if object_base %}<a href="{{ with_origin(object_base ~ '/' ~ entry.resource_id, object_origin) }}">{{ names.get(entry.resource_id, entry.resource_id) }}</a>{% else %}{{ names.get(entry.resource_id, entry.resource_id) }}{% endif %}</th>
           <td>
             <ul class="reason-list">
               {% for reason in entry.reasons %}

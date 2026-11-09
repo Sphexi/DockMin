@@ -36,6 +36,7 @@ from app.web.identifiers import BoundedId, PathId, QueryId
 from app.web.nav_keys import ROUTE_PREFIXES
 from app.web.navigation import no_store, redirect
 from app.web.object_pages import HX_TARGET
+from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.results import show_result
 from app.web.sidebar import snapshot_pokes
@@ -656,7 +657,12 @@ async def delete_environments(
     return show_result(request, "environments/delete_result.html", {"result": result})
 
 
-@router.get("/{environment_id}", response_class=HTMLResponse, name="environment_detail")
+@router.get(
+    "/{environment_id}",
+    response_class=HTMLResponse,
+    name="environment_detail",
+    dependencies=[RequestOrigin],
+)
 async def environment_detail(
     request: Request,
     services: Environments,

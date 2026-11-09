@@ -4,7 +4,7 @@
 {% from "partials/data_table.html" import data_table %}
 {% from "partials/error_state.html" import error_state %}
 
-{% macro object_row(kind, row) %}
+{% macro object_row(kind, row, stack_links=none) %}
 {% set args = {"environment_id": row.environment_id, "object_id": row.id} %}
 <tr id="{{ kind }}-{{ row.id }}">
   <th scope="row">
@@ -13,7 +13,7 @@
       <span class="cell-note mono">{{ row.short_id }}</span>
     </div>
   </th>
-  <td>{{ stack_link(row.stack, row.environment_id) }}</td>
+  <td>{{ stack_link(row, stack_links, list_origin(kind ~ "s", row.environment_id)) }}</td>
   <td>{{ age(row.created_at, "—") }}</td>
   <td>
     <div class="row-actions">
@@ -26,12 +26,12 @@
 </tr>
 {% endmacro %}
 
-{% macro objects_table(kind, rows, columns, pager, filtered, environment_id=none, can_create=false) %}
+{% macro objects_table(kind, rows, columns, pager, filtered, environment_id=none, can_create=false, stack_links=none) %}
 {% set empty_body = "Change the filters, or clear them to see every " ~ kind ~ "." if filtered else ("This cluster has no " ~ kind ~ "s." if principal.is_administrator else "You cannot see any " ~ kind ~ "s on this cluster. Ask an administrator for access to more " ~ kind ~ "s.") %}
 {% set show_create = principal.is_administrator and can_create and not filtered and environment_id is not none %}
 {% call data_table(kind ~ "s-table", kind|capitalize ~ "s", columns, pager, empty_title=("No matching " ~ kind ~ "s" if filtered else "No " ~ kind ~ "s"), empty_body=empty_body, empty_action_label=("Create " ~ kind if show_create else none), empty_action_href=(route_path("environment_swarm_" ~ kind ~ "_new", environment_id=environment_id) if show_create else none), filtered=filtered, region_id=kind ~ "s-results") %}
 {% for row in rows %}
-{{ object_row(kind, row) }}
+{{ object_row(kind, row, stack_links) }}
 {% endfor %}
 {% endcall %}
 {% endmacro %}
@@ -43,7 +43,7 @@
 </p>
 {% endmacro %}
 
-{% macro objects_results(kind, rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false) %}
+{% macro objects_results(kind, rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false, stack_links=none) %}
 {% if oob %}
 {{ results_summary(kind, none if (errors or failure) else total, visible, filtered, true) }}
 {% endif %}
@@ -54,6 +54,6 @@
 {% elif failure %}
 {{ error_state(kind|capitalize ~ "s cannot be listed", failure, retry_href=retry_href, region_id=kind ~ "s-results", swap="innerHTML") }}
 {% else %}
-{{ objects_table(kind, rows, columns, pager, filtered, environment_id, can_create) }}
+{{ objects_table(kind, rows, columns, pager, filtered, environment_id, can_create, stack_links) }}
 {% endif %}
 {% endmacro %}

@@ -1,5 +1,6 @@
 {# Free text goes through visible_text, so a control or bidirectional character shows as its code point. Import with context. #}
 {% from "partials/badge.html" import badge %}
+{% from "partials/object_links.html" import user_link with context %}
 
 {% macro result_badge(result) -%}
 {% if result == "success" %}{{ badge("Success", "ok") }}{% else %}{{ badge("Failure", "danger") }}{% endif %}
@@ -9,16 +10,16 @@
 <time datetime="{{ event.occurred_at|timestamp_iso }}">{{ event.occurred_at|timestamp(seconds=True) }}</time>
 {%- endmacro %}
 
-{% macro actor_cell(view) %}
+{% macro actor_cell(view, origin=none) %}
 {% set event = view.event %}
 {% set detail = event.detail or {} %}
 {% if event.actor_type == "user" %}
-<span class="cell-wrap">{% if view.actor_username is not none %}{{ view.actor_username|visible_text }}{% else %}User {{ event.actor_user_id }}{% endif %}</span>
+<span class="cell-wrap">{% if view.actor_username is not none %}{{ user_link(event.actor_user_id, view.actor_username|visible_text, origin) }}{% else %}User {{ event.actor_user_id }}{% endif %}</span>
 {% elif event.actor_type == "subsystem" %}
 <div class="cell-stack">
   <span class="mono cell-wrap">{{ event.actor_subsystem|visible_text }}</span>
   {% if detail.get("rule_name") %}
-  <span class="cell-note cell-wrap">Automation: {{ detail.get("rule_name")|visible_text }}</span>
+  <span class="cell-note cell-wrap">Automation: {% if event.rule_id is not none %}<a href="{{ with_origin(route_path('automation_rule_detail', rule_id=event.rule_id), origin) }}">{{ detail.get("rule_name")|visible_text }}</a>{% else %}{{ detail.get("rule_name")|visible_text }}{% endif %}</span>
   {% endif %}
 </div>
 {% else %}
@@ -31,16 +32,16 @@
 {% endif %}
 {% endmacro %}
 
-{% macro target_cell(event) %}
+{% macro target_cell(event, href=none, origin=none) %}
 <div class="cell-stack">
-  <span class="cell-wrap">{% if event.target_id is not none %}{{ event.target_id|visible_text }}{% else %}&mdash;{% endif %}</span>
+  <span class="cell-wrap">{% if event.target_id is none %}&mdash;{% elif href %}<a href="{{ with_origin(href, origin) }}">{{ event.target_id|visible_text }}</a>{% else %}{{ event.target_id|visible_text }}{% endif %}</span>
   <span class="cell-note mono">{{ event.target_type|visible_text }}</span>
 </div>
 {% endmacro %}
 
-{% macro environment_cell(view) %}
+{% macro environment_cell(view, origin=none) %}
 {% if view.environment_name is not none %}
-<a class="cell-wrap" href="{{ route_path('environment_detail', environment_id=view.event.environment_id) }}">{{ view.environment_name|visible_text }}</a>
+<a class="cell-wrap" href="{{ with_origin(route_path('environment_detail', environment_id=view.event.environment_id), origin) }}">{{ view.environment_name|visible_text }}</a>
 {% elif view.event.environment_id is not none %}
 <span class="cell-note">Environment {{ view.event.environment_id }}</span>
 {% else %}

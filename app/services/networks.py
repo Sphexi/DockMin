@@ -22,6 +22,7 @@ from app.db.repositories.clocked import Clock
 from app.db.repositories.environment import Environment
 from app.db.repositories.pagination import CursorPosition, Page, encode_cursor
 from app.db.repositories.resource_control import ResourceControlRepository
+from app.db.repositories.stack import StackKind
 from app.db.repositories.team import TeamRepository
 from app.db.repositories.user import UserRepository
 from app.docker_engine.client import EngineClient
@@ -57,6 +58,7 @@ from app.services.containers import (
     joins_networks,
     parse_engine_time,
     short_id,
+    stack_kind,
     stack_name,
 )
 from app.services.grantees import GranteeDirectory
@@ -303,6 +305,7 @@ class NetworkRow:
     container_count: int = 0
     service_count: int = 0
     services_known: bool = True
+    stack_kind: StackKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,6 +388,7 @@ class NetworkDetail:
     container_count: int = 0
     service_count: int = 0
     services_known: bool = True
+    stack_kind: StackKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -926,6 +930,7 @@ class NetworkQueryService:
             attachable=network.attachable,
             ipv6=network.enable_ipv6,
             stack=stack_name(network.labels),
+            stack_kind=stack_kind(network.labels),
             pools=tuple(
                 PoolView(clip_text(p.subnet), clip_text(p.gateway), clip_text(p.ip_range))
                 for p in network.ipam[:MAX_POOLS_SHOWN]
@@ -1166,6 +1171,7 @@ class NetworkQueryService:
             attachable=network.attachable,
             ipv6=network.enable_ipv6,
             stack=stack_name(network.labels),
+            stack_kind=stack_kind(network.labels),
             created_at=parse_engine_time(network.created),
             in_use=len(using) + len(serving),
             containers=named,

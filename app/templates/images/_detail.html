@@ -40,7 +40,7 @@
   <dt>Platform</dt>
   <dd class="mono">{% if detail.os or detail.architecture %}{{ detail.os or "—" }}/{{ detail.architecture or "—" }}{% else %}—{% endif %}</dd>
   <dt>Used by</dt>
-  <dd>{{ using_containers(detail.containers, detail.containers_hidden, detail.containers_total, detail.environment_id) }}</dd>
+  <dd>{{ using_containers(detail.containers, detail.containers_hidden, detail.containers_total, detail.environment_id, "image:" ~ detail.environment_id ~ ":sha256:" ~ detail.id) }}</dd>
 </dl>
 
 <h3>References</h3>

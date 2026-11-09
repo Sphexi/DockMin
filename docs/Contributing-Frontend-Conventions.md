@@ -40,7 +40,7 @@ Partials live in [`app/templates/partials/`](https://github.com/Sphexi/DockMin/t
 | `page_header` | `<h1>`, subtitle, and an action area | `title` | `subtitle`; `{% call %}` body becomes the actions |
 | `data_table` | Scrollable table (a focusable region labelled `<caption> table`), sortable headers, loading line, pagination, empty state | `table_id`, `caption`, `columns`, `pager`; `{% call %}` body supplies the `<tr>` rows | `empty_title`, `empty_body`, `empty_action_label`, `empty_action_href`, `filtered`, `clear_href` ([Empty, loading and error states](#empty-loading-and-error-states)), `region_id` (sort and page links swap that region's contents instead of the table) |
 | `pagination` | First-page and next-page links with a count summary | `pager`, `table_id` | `label` (default `Pagination`; `data_table` passes `<caption> pagination`), `region_id` |
-| `back_actions` | The page's back button, then `Back to <kind> <name>` when the page was reached from another object ([Origin](#origin)) | `back_href`, `back_label` | `origin` |
+| `back_actions` | The page's back button, then `Back to <kind> <name>` or `Back to <list>` when the page was reached from another object or a list, unless it targets the same page ([Origin](#origin)) | `back_href`, `back_label` | `origin` |
 | `empty_state` | "Nothing here" panel with an optional call to action | `title` | `body`, `action_label`, `action_href` |
 | `error_state` | Error panel with `role="alert"`, the `Docker said` block, reference id, retry link ([Retry region](#retry-region)) | `title`, `message` | `request_id`, `retry_href`, `region_id`, `swap` (`outerHTML` or `innerHTML`; default `outerHTML`), `region_root` (default true), `engine_detail` |
 | `engine_detail` | The `Docker said` block: Engine text in a labelled, focusable `<pre>`; renders nothing for an empty value. Defines `engine_detail_block(detail)` | `detail` | — |
@@ -63,7 +63,8 @@ Partials live in [`app/templates/partials/`](https://github.com/Sphexi/DockMin/t
 | `key_value_rows` | Repeatable key and value rows with a blank row in a `<template>`; `Add rows` posts the form back without script. Also defines the helpers `cell` and `row`. Import with context | `prefix` (`option` or `label`), `legend`, `subject`, `help`, `count`, `cap`, `values`, `errors`, `submit_href` | `key_list` (id of a `<datalist>` for the key inputs) |
 | `error_summary` | Alert panel listing form errors | `errors`: a mapping of field to message, or a single message | — |
 | `users_table` | The user list table (`#users-table`) with `You` on the signed-in user's row | `rows`, `columns`, `pager`, `current_user_id` | — |
-| `object_users` | Containers that use a network or volume, linked, with a note for the remainder. Also defines the helper `users_overflow(more, hidden, noun)` | `rows` (items with `id` and `name`), `more`, `hidden`, `total`, `link_base` | `empty` (default `Not used`), `suffix` |
+| `object_users` | Containers that use a network or volume, linked, with a note for the remainder. Also defines the helper `users_overflow(more, hidden, noun)` | `rows` (items with `id` and `name`), `more`, `hidden`, `total`, `link_base` | `empty` (default `Not used`), `suffix`, `origin` (carried as `from`) |
+| `object_links` | `stack_link`: a stack's page or the filter link; `user_link`: a user's page for administrators, text otherwise; `environment_link`: an environment's page ([Object links](#object-links)) | `stack_link`: `environment_id`, `kind`, `name`, `links`, `filter_href`. `user_link`: `user_id`, `username`. `environment_link`: `environment_id`, `name` | `origin` |
 | `network_badge` | Badge for a predefined or system network | `label` | `kind` (`predefined` or `system`) |
 | `job_state_badge` | Badge for the state of a scheduled job. The label names the state; the tone never carries it alone. Labels: `Running`, `Scheduled`, `Waits for calls` (`on_call`), `Paused`, `Automation disabled` (`rule_disabled`), `Disabled after` (`Disabled after failures` without `detail`), `Subsystem disabled`, `Not available`. An unknown `status` renders as its own text with the `neutral` tone | `status`: `running`, `scheduled`, `on_call`, `paused`, `rule_disabled`, `auto_disabled`, `subsystem_disabled`, `unavailable` | `detail`: text appended to the label, such as `until 2026-01-30 14:05 UTC` or `5 failures` |
 | `automation_panel` | The automation acting on one object: each rule's schedule, state, next run and last outcome, with `Pause` or `Resume` and `Add automation` where allowed. A rule of another user renders without name, target or link. It draws no heading: the Automation tab supplies it. Import with context | `panel` (reads `rules`, `more`, `can_add`, `pause_options`), `add_href`, `return_to` (`container:<id>`, `stack:<name>`, `service:<id>` or `swarm_stack:<name>`) | — |
@@ -428,7 +429,7 @@ The image list is in `templates/images/`; its macros are in `_parts.html`.
 
 | Macro | Renders |
 |---|---|
-| `reference_list(references, hidden, environment_id, empty)` | One item per reference: the reference text, the binding state, then `stored_update` |
+| `reference_list(references, hidden, environment_id, empty, href)` | One item per reference: the reference text, linked to `href` when given, the binding state, then `stored_update` |
 | `stored_update(reference)` | The stored update status of one reference: `update_badge(reference.update_state)` and `checked <time>`; `Not checked` when `update_state` is empty or `not_bound` |
 | `update_badge(state)` | The badge for an update state |
 | `transfer_progress(progress, running, label)` | The bar, the `role="status"` summary line and the layer table of one pull or push. Used by the image transfer page and, per image, by the Compose and Swarm stack job pages |
@@ -845,20 +846,47 @@ The sidebar keeps showing the last environment on pages that belong to none.
 
 ### Origin
 
-An object page reached from another object's page shows a second button, `Back to <kind> <name>`, beside its own back button.
+An object page reached from another object's page, or from a list, shows a second button beside its own back button: `Back to <kind> <name>` for an object, `Back to <list>` for a list.
 
 | Rule | Value |
 |---|---|
-| Parameter | `from=<kind>:<environment id>:<key>`, at most 320 characters. The kinds are `stack`, `container`, `service`, `network`, `volume`, `image`, `automation` and `activity`. `automation` and `activity` use `-` for the environment and a row id for the key. Anything else is no origin |
+| Parameter | `from=<kind>:<environment id>:<key>`, at most 320 characters. Anything else is no origin |
+| Object kinds | `stack`, `container`, `service`, `config`, `secret`, `network`, `volume` and `image`, keyed by environment id. `automation`, `activity`, `environment` and `team` use `-` for the environment and a row id for the key |
+| List kind | `list:<environment id>:<list>` for `containers`, `images`, `volumes`, `networks`, `services`, `configs` and `secrets`; `list:-:<list>` for `automation`, `templates`, `jobs`, `activity` and `backups`. A list resolves when the viewer may see its environment; `services`, `configs` and `secrets` also need a Swarm environment; `jobs`, `activity` and `backups` need an administrator |
+| Same target | No second button when the origin's `href` equals the page's own back button |
 | Resolution | Per request, under the viewer's access, by [`app/services/origins.py`](https://github.com/Sphexi/DockMin/blob/main/app/services/origins.py). An object the viewer cannot read, a missing one, an unparseable value, a host read that fails and a read that takes more than 2 seconds give no button |
 | Rendering | The label and `href` come from the object that was read. The parameter is never rendered or echoed, and no value of it can produce an off-site or arbitrary path |
 | Route | Adds `dependencies=[RequestOrigin]` from [`app/web/origins.py`](https://github.com/Sphexi/DockMin/blob/main/app/web/origins.py) to a detail route. The templates receive `origin` and `origin_ref` ([Template context and filters](#template-context-and-filters)) |
 | Button | The page header calls `back_actions(back_href, back_label, origin)` |
-| Carrying it on a link | `with_origin(href, ref)` appends `from` to an internal path. `ref` is the canonical reference of the page the link sits on, `'<kind>:<environment id>:<key>'`, or `origin_ref` for a tab link of the target page. `ref` of `none`, an unparseable `ref`, and an `href` that is not an internal path return `href` unchanged |
+| Carrying it on a link | `with_origin(href, ref)` appends `from` to an internal path. `ref` is the canonical reference of the page the link sits on, `'<kind>:<environment id>:<key>'`, `list_origin(list, environment_id)` on a list page, or `origin_ref` for a tab link of the target page. `ref` of `none`, an unparseable `ref`, and an `href` that is not an internal path return `href` unchanged. `list_origin` raises for an unknown list or a missing or extra environment |
 | Tabs | Tab links, and a refresh trigger that re-requests a tab, carry `origin_ref`. They never copy the received text |
 | Forms | A form does not post `from`, and a redirect after a post does not carry it |
 | Chain | Only the immediate origin is kept. The target page's own links carry the target as their origin, not its origin |
 | Links that carry it | Only links to a page that shows `back_actions` |
+
+### Object links
+
+A table cell or fact whose value names an object links to that object's page when one exists and the viewer may open it, and carries the page it sits on as `from`.
+
+| Value | Target | Otherwise |
+|---|---|---|
+| Stack of a container, volume or network | Compose stack page when the project is a managed stack the viewer may read; Swarm stack page on a Swarm environment when the viewer may read the namespace | The list filtered by `stack` |
+| Stack of a service, config or secret | Swarm stack page when the viewer may read the namespace | The service list filtered by `stack` |
+| Image of a container | Image page, by the container's image id | The image list filtered by the reference; a bare id is text |
+| Volume mounted by a container | Volume page, when the viewer may open the volume through its own control or as an administrator | Text |
+| User: automation owner, activity actor, team member, environment grantee | User page, administrators only | Text; a deleted actor is `User <id>` |
+| Team: environment grantee | Team page | — |
+| Environment: automation, job, activity | Environment page, when the viewer may see the environment | Text |
+| Automation of an activity event | Automation page | Text when the automation was deleted |
+| Activity target | The target's page, by the same rules as the event page, without the existence check; a stack only when it is a managed stack, looked up once per environment | Text |
+| Object storage target of a backup | Target page | `Target deleted` |
+| Catalogue of a template | Catalogue page, administrators only | Text |
+
+| Item | Value |
+|---|---|
+| Macros | `stack_link`, `user_link` and `environment_link` in `partials/object_links.html`; import with context |
+| Stack links | The route passes `stack_links`, from `stack_links(request, actor, environment_id, refs)` in [`app/web/stack_links.py`](https://github.com/Sphexi/DockMin/blob/main/app/web/stack_links.py), keyed `<kind>:<name>`. Rows carry `stack` and `stack_kind`; Compose is read before Swarm. Nothing is read from the host, and at most 500 names are looked up per page |
+| Macro arguments | A row or table macro takes `stack_links=none`; with none every stack cell is the filter link |
 
 ### Sidebar counts
 

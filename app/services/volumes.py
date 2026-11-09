@@ -65,6 +65,7 @@ from app.services.containers import (
     display_name,
     parse_engine_time,
     short_id,
+    stack_kind,
     stack_name,
 )
 from app.services.grantees import GranteeDirectory
@@ -638,6 +639,7 @@ class VolumeQueryService:
             kind=_kind(volume),
             created_at=parse_engine_time(volume.created_at),
             stack=stack_name(volume.labels),
+            stack_kind=stack_kind(volume.labels),
             labels=label_views(volume.labels, actor.is_administrator),
             labels_truncated=volume.labels_truncated,
             mountpoint=volume.mountpoint[:MAX_NAME] if actor.is_administrator else None,
@@ -842,6 +844,7 @@ class VolumeQueryService:
             kind=entry.kind,
             created_at=parse_engine_time(volume.created_at),
             stack=stack_name(volume.labels),
+            stack_kind=stack_kind(volume.labels),
             in_use=len(using),
             containers=named,
             containers_more=more,

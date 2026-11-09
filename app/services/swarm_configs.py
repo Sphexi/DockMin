@@ -826,6 +826,12 @@ class _SwarmObjectQueries:
         """Describe the lock holder to a viewer: names only for administrators."""
         return busy_view(busy, viewer, self._locks.now())
 
+    async def origin_name(self, actor: Principal, environment_id: int, object_id: str) -> str:
+        """Return the name of an object the caller may read; ResourceNotFound otherwise."""
+        await require_swarm(self._authoriser, self._hosts, actor, environment_id)
+        await self._authorise(actor, environment_id, object_id, "read")
+        return (await self._fetch(environment_id, object_id)).name[:MAX_NAME]
+
     async def _authorise(
         self, actor: Principal, environment_id: int, object_id: str, level: Literal["read", "write"]
     ) -> None:

@@ -20,7 +20,7 @@
 </section>
 {% endmacro %}
 
-{% macro overview_tab(kind, detail) %}
+{% macro overview_tab(kind, detail, stack_links=none) %}
 <h2 id="tab-heading">Overview</h2>
 <dl class="facts">
   <dt>Name</dt>
@@ -32,7 +32,7 @@
   <dt>Updated</dt>
   <dd>{{ when(detail.updated_at, "—") }}</dd>
   <dt>Stack</dt>
-  <dd>{{ stack_link(detail.stack, detail.environment_id) }}</dd>
+  <dd>{{ stack_link(detail, stack_links, kind ~ ":" ~ detail.environment_id ~ ":" ~ detail.id) }}</dd>
   <dt>Used by</dt>
   <dd>
     {% if not detail.usage_known %}
@@ -75,7 +75,7 @@
 {{ access_panel(panel.control, panel.key, panel.names, panel.digest, route_path("environment_swarm_" ~ kind ~ "_access_save", **args), route_path("environment_swarm_" ~ kind ~ "_access_delete", **args), values=values, fields=fields) }}
 {% endmacro %}
 
-{% macro object_tabs(kind, detail, tab, tabs, panel, values, fields) %}
+{% macro object_tabs(kind, detail, tab, tabs, panel, values, fields, stack_links=none) %}
 {% set detail_href = route_path("environment_swarm_" ~ kind ~ "_detail", environment_id=detail.environment_id, object_id=detail.id) %}
 {% set labels = {"overview": "Overview", "access": "Access"} %}
 <div id="{{ kind }}-tabs" class="tabs">
@@ -92,7 +92,7 @@
     </ul>
   </nav>
   <div class="tabs__panel" role="region" {% if tab == "access" %}aria-label="Access"{% else %}aria-labelledby="tab-heading"{% endif %}>
-    {% if tab == "overview" %}{{ overview_tab(kind, detail) }}
+    {% if tab == "overview" %}{{ overview_tab(kind, detail, stack_links) }}
     {% elif tab == "access" %}{{ access_tab(kind, detail, panel, values, fields) }}
     {% endif %}
   </div>

@@ -25,6 +25,7 @@ from app.web.flash import Flash
 from app.web.identifiers import PathId
 from app.web.navigation import no_store
 from app.web.object_pages import redirect, route
+from app.web.origins import RequestOrigin
 from app.web.pagination import DEFAULT_LIMIT, Column, PageView
 from app.web.templating import is_htmx_request, render_fragment, render_page
 
@@ -209,7 +210,12 @@ async def create_catalogue(
     )
 
 
-@router.get("/{catalogue_id}", response_class=HTMLResponse, name="template_catalogue_detail")
+@router.get(
+    "/{catalogue_id}",
+    response_class=HTMLResponse,
+    name="template_catalogue_detail",
+    dependencies=[RequestOrigin],
+)
 async def catalogue_detail(
     request: Request, services: CatalogueAdmin, actor: CurrentAdministrator, catalogue_id: PathId
 ) -> Response:

@@ -5,11 +5,11 @@
 {% from "partials/name_field.html" import name_field %}
 {% from "partials/radio_field.html" import radio_field %}
 
-{% macro grant_rows(kind, grantees, revoke_action, scope) %}
+{% macro grant_rows(kind, grantees, revoke_action, scope, origin=none) %}
 {% for grantee in grantees %}
 {% set query = ("?user_id=" if kind == "user" else "?team_id=") ~ grantee.id %}
 <tr>
-  <th scope="row">{{ grantee.name }}</th>
+  <th scope="row"><a href="{{ with_origin(route_path('user_detail', user_id=grantee.id) if kind == 'user' else route_path('team_detail', team_id=grantee.id), origin) }}">{{ grantee.name }}</a></th>
   <td>{{ "User" if kind == "user" else "Team" }}</td>
   <td>
     {{ confirm_button("revoke-" ~ kind ~ "-" ~ grantee.id, "Remove " ~ grantee.name) }}
@@ -19,7 +19,7 @@
 {% endfor %}
 {% endmacro %}
 
-{% macro access_section(kind, grants, grant_action, revoke_action, error, selected_kind, selected_name, inherited=none, group=none, is_local=false) %}
+{% macro access_section(kind, grants, grant_action, revoke_action, error, selected_kind, selected_name, inherited=none, group=none, is_local=false, origin=none) %}
 {% set scope = "this environment" if kind == "environment" else "every environment in this group" %}
 {% call disclosure("access", "Access", open=error) %}
   {% if is_local %}
@@ -41,8 +41,8 @@
         </tr>
       </thead>
       <tbody>
-        {{ grant_rows("user", grants.users, revoke_action, scope) }}
-        {{ grant_rows("team", grants.teams, revoke_action, scope) }}
+        {{ grant_rows("user", grants.users, revoke_action, scope, origin) }}
+        {{ grant_rows("team", grants.teams, revoke_action, scope, origin) }}
       </tbody>
     </table>
   </div>

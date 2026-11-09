@@ -13,7 +13,7 @@
       <span>Download</span>
       {% else %}
       {% set name = targets.get(row.object_storage_target_id) %}
-      <span>{% if name %}{{ name }}{% else %}Target deleted{% endif %}</span>
+      <span>{% if name %}<a href="{{ with_origin(route_path('object_storage_target_detail', target_id=row.object_storage_target_id), list_origin('backups')) }}">{{ name }}</a>{% else %}Target deleted{% endif %}</span>
       {% if row.destination_key %}<span class="cell-note mono cell-wrap">{{ row.destination_key|visible_text }}</span>{% endif %}
       {% endif %}
     </div>

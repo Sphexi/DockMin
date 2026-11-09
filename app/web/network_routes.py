@@ -80,6 +80,7 @@ from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import unreachable_copy
 from app.web.results import show_result
+from app.web.stack_links import stack_links
 from app.web.templating import is_htmx_request
 
 TABS_REGION: Final = Region("network-tabs", "outerHTML")
@@ -318,6 +319,9 @@ async def list_networks(
         "errors": errors,
         "failure": failure,
         "retry_href": self_href(request),
+        "stack_links": await stack_links(
+            request, actor, environment_id, ((row.stack_kind, row.stack) for row in rows)
+        ),
     }
     if is_htmx_request(request):
         return fragment_response(
@@ -620,6 +624,11 @@ async def _detail_response(
         "panel": bind_digest(panel, values),
         "values": values,
         "fields": fields or {},
+        "stack_links": (
+            await stack_links(request, actor, environment_id, [(detail.stack_kind, detail.stack)])
+            if tab == "overview"
+            else {}
+        ),
     }
     if is_htmx_request(request):
         return fragment_response(request, DETAIL, "network_tabs", status_code, **arguments)

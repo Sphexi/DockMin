@@ -14,6 +14,7 @@ from jinja2.runtime import Context
 from starlette.responses import HTMLResponse, Response
 
 from app.services.activity import request_changed_environment
+from app.services.origins import list_ref
 from app.services.template_markup import plain_text, safe_markup
 from app.web import filters
 from app.web.csrf import CSRF_HEADER, attach_csrf_cookie, csrf_token
@@ -135,6 +136,7 @@ def build_environment(*, development_checks: bool = False) -> Environment:
         choice=_choice,
         csrf_header=CSRF_HEADER,
         with_origin=with_origin,
+        list_origin=list_ref,
     )
     return env
 

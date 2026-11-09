@@ -7,11 +7,12 @@
 {% from "partials/name_field.html" import name_field %}
 {% from "partials/page_header.html" import page_header %}
 {% from "teams/_tables.html" import roster_table with context %}
+{% from "partials/back_actions.html" import back_actions %}
 {% block title %}{{ team.name }} - dockmin{% endblock %}
 {% set crumb_object = team.name %}
 {% block content %}
 {% call page_header(team.name, "Team") %}
-<a class="btn" href="{{ route_path('teams') }}">Back to teams</a>
+{{ back_actions(route_path('teams'), "Back to teams", origin) }}
 {% endcall %}
 
 {% if error %}

@@ -31,6 +31,6 @@
 {% endif %}
 {% endcall %}
 <div id="{{ kind }}s-results">
-  {{ objects_results(kind, rows, columns, pager, total, visible, filtered, errors, failure, retry_href, environment_id=environment.id, can_create=can_create) }}
+  {{ objects_results(kind, rows, columns, pager, total, visible, filtered, errors, failure, retry_href, environment_id=environment.id, can_create=can_create, stack_links=stack_links) }}
 </div>
 {% endblock %}
