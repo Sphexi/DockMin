@@ -38,6 +38,9 @@
   {% if template_ref %}
   <input type="hidden" name="template_ref" value="{{ template_ref }}">
   {% endif %}
+  {% if imported_ref %}
+  <input type="hidden" name="imported_ref" value="{{ imported_ref }}">
+  {% endif %}
   {% for name, value in review.state.hidden_fields() %}
   <input type="hidden" name="{{ name }}" value="{{ value }}">
   {% endfor %}

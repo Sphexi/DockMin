@@ -1503,7 +1503,7 @@ Export downloads one container's configuration as a gzip archive: the state of t
 | Output | `application/gzip`, `Content-Disposition: attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` |
 | Lock | Each chosen volume, from the confirmed download until it ends. The container is not locked ([Busy](#busy)) |
 | Concurrency | One export at a time on an environment, two in all, shared with volume and stack exports ([Export limits](Usage-Stacks#export-limits)) |
-| Import | Not available |
+| Import | [Import](#import) |
 | Recorded | `container_exported` ([Export rows](#export-rows)) |
 
 ### Export confirmation
@@ -1661,6 +1661,348 @@ A refusal before the download starts renders a page at the real status code, wit
 ### Export limits and format version
 
 [Export limits](Usage-Stacks#export-limits) and [Export format version](Usage-Stacks#export-format-version) apply to a container export.
+
+## Import
+
+Import prepares one container from a [container export archive](#export-archive) in a chosen environment: it creates the user-defined networks and volumes the archive needs, fills the volumes, and opens the [create form](#create) filled from the archive. The container is created by that form. Administrators only.
+
+1. Open `Import container` on the container list.
+2. Choose the archive and `Upload and check`. The archive is read in full. Nothing is created.
+3. Open the sealed environment values with the passphrase, or enter each secret value, when the archive holds secrets.
+4. Read the review. Rename a volume whose name is in use, decide each host path, then choose `Check the choices`.
+5. Choose `Create networks and volumes, then open the form`. The networks are created, the volumes are created and filled, and the create form opens.
+6. Review the form and create the container as in [Create](#create).
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on every import route, before a request body is read, and nothing is recorded |
+| Pages | [Import pages](#import-pages) |
+| Accepts | An archive whose manifest `kind` is `container`. A stack archive is refused at upload |
+| Upload | At most 7 GiB as uploaded, within 3,600 seconds, with 15 seconds allowed between body messages ([Import limits](#import-limits)) |
+| Disk | The upload is kept in a private directory under the data directory until the import ends, expires or is discarded. Stack imports use the same directory, the same hold and the same counters ([Import limits](#import-limits)) |
+| Validation | Every member of the archive is checked before anything is created ([Import archive checks](#import-archive-checks)) |
+| Secret values | Opened with the passphrase on the review page, or entered one by one ([Import secret values](#import-secret-values)) |
+| Networks | Each user-defined network the archive names is created from the archive's options when the environment has none of that name, and used as it is when it has ([Import networks](#import-networks)) |
+| Volumes | Each archived volume is created with the `local` driver and filled before the form opens ([Import volumes](#import-volumes)) |
+| Host paths | Each bind source is kept or replaced with a new named volume ([Import host paths](#import-host-paths)) |
+| Name | Not asked on the review. The form's `Name` field is filled from the archive and takes another name when the name is in use ([Import create form](#import-create-form)) |
+| Image | Nothing is pulled by the import. The credential set for the pull is chosen on the create form ([Import image](#import-image)) |
+| Container | Created by the create form, with its validation, [restrictions](#options-restricted-to-administrators) and [job](#create-and-recreate-jobs). The import checks none of them |
+| Overwrites | Nothing. A volume that exists blocks the import until another name is chosen. A network that exists is used as it is and never changed |
+| Owner | The importing administrator owns each network and volume the import creates ([Ownership](#ownership)). No team or other grant is carried |
+| Not carried | The items in [What is left out](#export-what-is-left-out) |
+| Lock | Each archived volume and each replacing volume, while the import runs ([Busy](#busy)) |
+| JSON | None |
+| Recorded | `container_imported`, then the rows of the create ([Import rows](#import-rows)) |
+
+### Import pages
+
+All paths are under `/environments/{id}/containers`.
+
+| Page | Path | Method |
+|---|---|---|
+| Upload form | `/-/import` | `GET` |
+| Upload | `/-/import` | `POST` |
+| Review | `/-/import/{upload_id}` | `GET` |
+| Check the choices, import | `/-/import/{upload_id}` | `POST` |
+| Open the sealed values | `/-/import/{upload_id}/unlock` | `POST` |
+| Discard the upload | `/-/import/{upload_id}/cancel` | `POST` |
+| Create form, filled | `/new?imported={id}` | `GET` |
+
+- `{upload_id}` is 32 lowercase hexadecimal characters. Any other form of at most 64 characters answers `404`; a longer one answers `422`.
+- `Import container` sits beside `Create container` on the container list, for administrators.
+- Every page works without script. Every import page is sent with `Cache-Control: no-store`.
+- The review form posts `action=check` or `action=import`. A post with any other `action` is a check.
+- A review form reads at most 600 fields. A field name is cut to 512 characters and a secret value to 70,000.
+
+#### Import upload
+
+`GET /environments/{id}/containers/-/import`.
+
+| Element | Text |
+|---|---|
+| Heading | `Import container`, with the environment name and badge |
+| Panel `Upload an archive` | `The archive must hold a container written by a container export. It is checked in full before anything is created. You review the networks and volumes it needs, decide what happens to host paths and open the sealed environment values, and the create form then opens filled from the archive. The container is created from that form, not by the import.` |
+| Field `Archive` | Required file input, `.gz`, `.tgz` or `application/gzip`. Help: `A .tar.gz file written by a container export, up to 7 GiB as uploaded. Every member passes the same rules as a volume import: devices, FIFOs, sockets, absolute names, names containing .. and entries below a symbolic link are refused.` |
+| Buttons | `Upload and check`, `Cancel` |
+
+The upload is a multipart `POST` with the fields in this order: `csrf_token`, then `archive`. The token is verified before any byte of the file is read.
+
+| Result | Status | Shown |
+|---|---|---|
+| Archive accepted | `303` | The review |
+| Archive refused, wrong kind, upload refused for size or space | `422` | The upload page, with the message beside `Archive` ([Import archive checks](#import-archive-checks)) |
+| Token missing or wrong, or Origin not accepted | `403` | |
+| The body is not a multipart form of the token followed by one file | `400` | |
+| No body data for 15 seconds, or the body takes over 3,600 seconds | `408`, `Connection: close` | |
+| The body exceeds 7 GiB plus 64 KiB | `413` | |
+
+### Import archive checks
+
+The whole archive is read once, in a worker thread, before the review is shown. The checks are those of a [stack import](Usage-Stacks#import-archive-checks), with these differences.
+
+| Check | Rule |
+|---|---|
+| Kind | `container` on this route |
+| Documents | A container manifest declares none. The first member after `manifest.json` is under `volumes/`, or there is none |
+| Volumes | Each `volumes/{index}/` comes in the manifest's order, holds a `manifest.json` equal to the same volume's section of the top-level manifest, then its entries, then `skipped.json` when present. The tar rules are those of [Accepted and refused entries](Usage-Volumes#accepted-and-refused-entries) |
+| Empty volume | Accepted |
+| Shared limits | 2,000,000 entries and 64 GiB of file data across every volume together |
+| Concurrency | Two archives are validated at once across the process, shared with volume import, stack import and build context validation |
+
+| Condition | Message beside `Archive` |
+|---|---|
+| A stack archive, Compose or Swarm | `The archive holds a stack, not a container.` |
+| A member before `volumes/` other than `manifest.json`, a volume out of order, a member the manifest does not declare | `The archive's members do not match its manifest.` With ` Entry: {name}.` when one entry is at fault |
+| A newer `format_version` | `The archive's format version is {N}; this build reads up to 1.` |
+| More than 7 GiB uploaded | `The archive is larger than the upload limit.` |
+| Less than 256 MiB free on the data volume after the upload's size | `There is not enough free space on the data volume for this upload.` |
+
+The other messages (not gzip, unreadable, too large when extracted, no `manifest.json`, an invalid manifest, a volume manifest that is missing or differs, an entry that breaks a tar rule) are those of [Import archive checks](Usage-Stacks#import-archive-checks).
+
+- The entry named is shown with unprintable characters replaced by `?`, cut to 80 characters.
+- A refused upload is removed from disk at once.
+
+### Import review
+
+`GET /environments/{id}/containers/-/import/{upload_id}`. Nothing is created or recorded. The page reads the held upload and the host, never the request body.
+
+| Section | Content |
+|---|---|
+| Heading | `Review the import`. Subtitle: `Nothing has been created yet. Check what the archive needs, then continue to the create form.` Button `Back to containers` |
+| `The archive` | Environment; Format version (`{N}, written by dockmin {version}`); Exported (time); Source container (the name in the manifest); Size as uploaded; Volume data (`{size} in {N} volumes`); SHA-256 of the uploaded file |
+| `Sealed values` | Shown when the archive's `secrets` is `sealed`. [Import secret values](#import-secret-values) |
+| `Networks` | [Import networks](#import-networks) |
+| `Volumes and their data` | [Import volumes](#import-volumes) |
+| `Host paths` | Shown when the form binds a host path. [Import host paths](#import-host-paths) |
+| `Environment variables` | [Import secret values](#import-secret-values) |
+| `Image` | [Import image](#import-image) |
+| `Not in the archive` | Shown when the archive's `not_exported_fields` is not empty. One line for each group, `{reason}: {items}`, with the underscores of the reason replaced by spaces |
+| `What happens` | Two statements ([What the import does](#what-the-import-does)) |
+| Buttons | `Create networks and volumes, then open the form` (absent while the plan has a problem, or when volume data is to be written and the host has no image), `Check the choices`, `Back to containers`, and a separate form `Discard the upload` |
+
+##### What the import does
+
+| Statement |
+|---|
+| `The networks and volumes this import creates become yours; no team or other access is carried from the archive.` |
+| `The container is not created yet. The create form opens filled from the archive; every restriction, the credential picker and the start option apply there as for any container` and, when the name is in use, `, and a container of the archive's name already exists on this host, so the form needs another name`, then `.` |
+
+#### Import networks
+
+| Item | Value |
+|---|---|
+| Table | `Network`, `Driver`, `What happens`. One row for each user-defined network the archive names. With none: `The container joins no user-defined network.` |
+| Missing on the host | `Created from the archive's options` |
+| Present on the host | `Exists and is used as it is`. When the host's network differs from the archive's in the driver, `internal`, IPv6 or the set of subnets: `Exists and is used as it is. It differs from the archive in: {aspects}.`, the aspects being `driver`, `internal`, `IPv6` and `subnets` |
+| Created with | The archive's driver, `internal`, `attachable` and IPv6 settings, address pool, options and labels, and the default address management driver, as the [network create form](Usage-Networks#create) sends them |
+| Checks | The network create form's validation ([Addressing](Usage-Networks#addressing), [Options](Usage-Networks#options)), the check that no label is one dockmin reserves, and a comparison of each address pool with the pools of every network on the host |
+| Cannot be created | `Cannot be created: {problem}` in the row, and `Network {name}: {problem}` in the refusal. The import is not offered and nothing is created. Problems: an address management driver other than the default (`Only the default address management driver is created.`), more than one address pool of a family (`More than one address pool per family.`), a subnet that overlaps an existing network (`its subnet overlaps the existing network {name}.`), and any message of the network form |
+| Existing network | Never changed, whatever it differs in. The container joins it by name |
+| Order | In the archive's order, before any volume |
+| Removed on failure | Each network this import created ([Import failure behaviour](#import-failure-behaviour)) |
+
+#### Import volumes
+
+| Item | Value |
+|---|---|
+| Table | `Archived volume`, `Created as`, `Mounted at`, `Entries`, `Size`. `Created as` is a text input holding the name the volume is created under, defaulting to the archived name |
+| Volumes offered | Archived volumes of driver `local` that a `volume` mount of the form uses |
+| Not written | `Archived volumes that are not written:` lists a volume with a driver other than `local` (`Only volumes of the local driver are written.`) and a volume no mount uses (`No mount of the container uses this volume.`) |
+| Created with | Driver `local`, no driver options and no labels. Archived driver options and labels are not applied, so an archive cannot create a volume backed by a path on the host |
+| Written | Before the form opens. A helper container, created from an image already on the host and never started, mounts the volume read-write and receives the files ([Import helper](Usage-Volumes#import-helper)) |
+| Files | Written as archived: numeric owner ids and modes are kept, setuid and setgid bits are cleared, owner names are emptied. The volume's root owner and mode are not applied. Only `user.` extended attributes are applied ([Modes and owners](Usage-Volumes#modes-and-owners)) |
+| Empty volume | A volume with no entries is created empty and needs no helper |
+| Re-validation | Each volume is read from the held file again as it is sent, under the same rules |
+| Name in use | A volume of that name on the host blocks the import. The row reads `A volume with this name already exists and is never written to. Use another name, such as {suggestion}, then choose Check.` The suggestion is the name with the smallest numeric suffix from `-2` that is free |
+| Invalid name | The rules of the [volume create form](Usage-Volumes#create). The message of the rule is shown under the field. Two volumes of the import cannot take one name (`another volume of this import uses this name.`) |
+| Rename | A new name is posted with `Check the choices`. The `volume` mounts of the form that used the archived name use the new one |
+| Helper image | `dockmin creates a helper container from the image {first 12 digits of the image id}, which is already on the host, once for each volume. It is never started, has no network and no capabilities, and is removed when its volume has been written.` With no image on the host and data to write: the alert `The host has no image to use`, `The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then check the import again.` The import is not offered |
+| Statements | `Each volume is created with the local driver, without the archive's driver options or labels, and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.` `If anything cannot be created or written, everything this import created is removed and nothing else changes.` |
+| No data | With no archived volume: `The archive carries no volume data.` Nothing is written and no helper image is needed |
+| Name check | Each volume is checked absent on the host under its lock, when its turn comes. One that exists refuses the import (reason `name_in_use`) |
+
+#### Import host paths
+
+A host path is the source of a `bind` mount of the form.
+
+| Item | Value |
+|---|---|
+| Listed | `Host paths`: for each distinct source, `Mounted at {targets}.` and a choice |
+| Choices | `Keep the path` and `Replace it with a new named volume`, with a name field. None is selected. Each is required |
+| Text | `The container binds these paths on the host. Choose what happens to each. Keeping a path leaves the bind mount as it is; the create form still restricts bind mounts to administrators. Replacing it mounts a new, empty named volume instead, created when the container is.` |
+| Keep | The form holds the bind mount as archived. The import creates no directory and reads no content |
+| Replace | Every mount of that source becomes a `volume` mount of the named volume. The volume is not created by the import: the create form's own flow creates it, empty, when the container is created |
+| Name | Defaults to `{container name}-hostpath-{N}`, `{N}` counting from 1 in the order of the sources, with `container` in place of the name when the name is not a valid volume name. The name must be free on the host and unique within the import |
+| Name in use | `A volume with this name already exists. Use another name, such as {suggestion}, then choose Check.` The import is not offered |
+| Not decided | The import is refused with `Choose what to do with each host path the container binds.` (`409`, reason `paths_undecided`) |
+| Contents | The directory's contents are not in the archive and are not read |
+| Restrictions | A kept bind mount is a [restricted option](#options-restricted-to-administrators), checked by the create form on the final request |
+
+#### Import image
+
+| Item | Value |
+|---|---|
+| Fields | `Reference`, `Archive digest` (`not recorded` when the archive holds none), `On this host` |
+| `On this host` | `The same digest`; `A different digest: {digest}. The form keeps the tag, so a pull resolves whatever the tag names.`; `Not on this host. A pull resolves the tag when it runs, and can return a different digest.`; `The archive recorded no digest.` |
+| Note | `The image is not in the archive. The credential set for a pull is chosen on the create form.` |
+| Pull | By the create form, through the set chosen in `Credential set for the pull`, which binds the image to it ([Credential sets for a pull](#credential-sets-for-a-pull)). The import pulls nothing and binds nothing |
+
+### Import secret values
+
+| Item | Value |
+|---|---|
+| Table | `Environment variables`: `Variable` and `Value`. Names only. A value that is not marked secret reads `Written to the form as plain text`. With no variable: `The archive carries no environment variable.` |
+| Archive with `secrets` `none` | No `Sealed values` panel. Every value is plain |
+| Archive with `secrets` `sealed` | The `Sealed values` panel offers `Passphrase` and `Open the sealed values`. A value can instead be entered in the table |
+| Archive with `secrets` `omitted` | No `Sealed values` panel. The table asks for each secret value |
+| Panel text, not opened | `The archive's secret environment values are sealed under a passphrase. Enter it to open them, or enter each value by hand in the form below. The passphrase is used once and is not stored or shown again. {N} attempts left in this session.` One attempt reads `1 attempt left in this session.` |
+| Panel text, opened | `The sealed environment values were opened with the passphrase. They are held until the create form has been opened, you discard the upload or it expires, and are never shown on this page.` |
+| Field | `Passphrase`, a password field with `autocomplete="off"`. Never put back into a page |
+| Open | `POST /environments/{id}/containers/-/import/{upload_id}/unlock`. The passphrase is applied in a worker thread and used once. The opened values are held in memory with the upload |
+| Success | `303` to the review with the notice `The sealed values were opened.` |
+| Wrong passphrase, or a sealed value that was altered | `422`, the review with `The passphrase did not open the archive. {N} attempts left in this session.` at `Passphrase`. The sealed values stay unopened |
+| Attempt limit | 5 failed attempts for each session, counted for the life of the process, whatever the upload, and shared with stack import: a failed attempt against either kind counts toward the same five. A success does not reset the count. Further attempts answer `429` with `Too many wrong passphrases in this session. Sign in again to try more, or enter the secret values by hand.` Signing in again starts a new session |
+| Empty passphrase | `422`, `Enter the passphrase.` Not counted |
+| Archive with no sealed values | `422`, `This archive holds no sealed values.` |
+| Entry | One password field `Value of {name}`, `autocomplete="off"`, for each secret not opened. Help: `Not opened. Open the archive above, or enter the value.` for a sealed archive, `The archive carries only the name. Enter the value.` for one that left them out. An opened value reads `Opened from the archive` |
+| Entered values | Posted with `Check the choices` and `Create networks and volumes, then open the form`, normalised to Unicode NFC, held for that request only and never put back into a page. A value of only whitespace counts as not entered. After a check the field reads `Entered. Enter it again to keep it through another check.` |
+| Precedence | An opened value is used in place of an entered one |
+| Required | The import is refused while a secret is neither opened nor entered (`409`, reason `secrets_needed`): `The values of some secrets are neither opened nor entered.` |
+| Opened value | UTF-8 text. Otherwise the import is refused with `A secret value is not UTF-8 text.` |
+| Held | Plain, opened and entered values go to the create form's environment fields and are held in memory with the form's state ([Import create form](#import-create-form)) |
+| Logged, recorded | No passphrase, name or value is logged or recorded. A failed attempt logs `container_import_unlock_failed` with the environment id |
+| Review note | `Values are held in memory on the server until the create form has been opened and are filled into the form's own fields. They are not logged or recorded.` |
+
+The algorithm: [Export sealing](Reference-Security#export-sealing).
+
+### Import confirmation
+
+`POST /environments/{id}/containers/-/import/{upload_id}` with `action=import`. The form carries the CSRF token, `expected_plan`, a name for each volume, a choice and a name for each host path and a value for each secret that is not opened.
+
+| Step | Detail |
+|---|---|
+| 1 | Administrator, and the environment. The upload is held for this user, session and environment, else `The upload is gone` |
+| 2 | The plan is made again from the held archive and the host and compared with `expected_plan`, else `changed_since_review` |
+| 3 | No problem in the plan, every secret opened or entered, every host path decided, else the review again with the refusal ([Import refusals](#import-refusals)) |
+| 4 | The form's values are built from the archive ([Import create form](#import-create-form)) |
+| 5 | The helper image, when volume data is to be written |
+| 6 | Each archived volume and each replacing volume is locked, without waiting |
+| 7 | Each missing network is created, in the archive's order |
+| 8 | Each replacing volume is checked absent. Each archived volume is then checked absent, created, and written, one at a time |
+| 9 | In one transaction: an access control for each created network and volume, owned by the importing administrator. A control left by an earlier volume of the same name is replaced |
+| 10 | The form's values are held. The held upload is removed |
+| 11 | The import answers `303` to `/environments/{id}/containers/new?imported={id}` with the notice `Created {N} networks and {N} volumes. Review every value, then create the container.` (`network` and `volume` when the count is 1) |
+
+| Item | Value |
+|---|---|
+| Plan binding | `expected_plan` is a keyed SHA-256 over the archive's digest, the container's name, the image reference and its status, whether the name is in use, each network (name, driver, action, differences, problem), each volume (source, chosen name, prefix, entries, whether the name is in use, problem), the skipped volumes, the host path sources and mount targets, the environment names and secret flags, and the helper image. The key is random for each process and is never stored, so a restart between the review and the confirmation answers `changed_since_review` |
+| Not in the plan | The choice and the name for each host path, and the secret values. Deciding them does not change the plan |
+| Rename | A volume's name is in the plan. `Create networks and volumes, then open the form` after a rename without a check answers `The plan changed since you reviewed it; nothing was changed.` (`409`, reason `changed_since_review`) |
+| Control claim | A claim that cannot be saved is logged as `container_import_control_claim_failed` and the import continues. The object has no control, and the row records `controls_created` `0` |
+| Held upload | Removed once any object has been created, whether the import then succeeds or fails. Kept after a refusal that created nothing |
+| Recorded | One `container_imported` row for each confirmation that reaches the service ([Import rows](#import-rows)) |
+
+### Import create form
+
+`GET /environments/{id}/containers/new?imported={id}`. The id is 32 lowercase hexadecimal characters and is the only import state in the URL.
+
+| Item | Value |
+|---|---|
+| Held state | The form's field values, including environment values and secret values, kept in memory under the id |
+| Contents | The archive's form fields; the environment rows at their archived positions; `Name` from the archive when the archived form has none; each `volume` mount renamed to the name its volume was created under; each replaced host path as a `volume` mount of the new volume's name. Only fields the form knows are kept |
+| Usable by | The user, the session and the environment that made it |
+| Lifetime | 30 minutes from the import, not extended by use |
+| Held | One for each user and environment, so a newer import replaces the earlier one. Eight in all; the oldest is dropped past eight |
+| Gone | At a restart of dockmin, at expiry, when replaced, and when the create starts |
+| Precedence | `?imported` replaces `?template`. Values of the import replace those of `?from` |
+| Not held | An id that is unknown, expired, of another session, user or environment, or not 32 hexadecimal characters: a blank form with the notice below |
+| Hidden field | `imported_ref` on the form and the review, carrying the id. A refused review or create shows the form again with every posted value and keeps the state |
+| Released | When the form's create is accepted: the job has started, or the container exists |
+| Not checked | The import does not check the form's values. The form's validation, the [restrictions](#options-restricted-to-administrators), the self-protection checks, the credential choice and the `Start` option run on the final request, as for any container |
+| `Start` | The archive's value, editable. It decides whether the container is started after it is created |
+| `Name` | In use on the host: the create is refused beside `Name` (`409`, `A container with this name already exists.`, [Create results](#create-results)). The review states it beforehand |
+
+| Element | Text |
+|---|---|
+| Panel, held | Heading `Imported from the archive of {name}`. `Exported {time}. Review every value before you create the container. Host restrictions, the credential choice for the image and the start option apply as for any container.` Then `{N} networks created: {names}.`, `{N} volumes created and filled: {names}.`, `{N} environment variables filled in, {N} of them secret.` (`network`, `volume` and `variable` when the count is 1) and one line for each group of `not_exported_fields` |
+| Panel, not held | Heading `The imported values are no longer held`. `The form is blank. Import the archive again to fill it; networks and volumes the earlier import created stay on the host.` |
+
+| `not_exported_fields` reason | Line begins |
+|---|---|
+| `labels_dropped` | `Not exported, stack labels are not carried: ` |
+| `restricted` | `Not exported, only administrators may set them: ` |
+| `withheld` | `Not exported, withheld from the exporting user: ` |
+| `not_copied` | `Not exported, the create form cannot set them: ` |
+| `dropped_invalid` | `Not exported, the values were not valid in the form: ` |
+| `anonymous_volumes` | `Anonymous volumes are created new and empty at: ` |
+| `converted` | `Converted to the form's own terms: ` |
+| Any other | `Not exported: ` |
+
+- The panel lists only the networks and volumes this import created. A network that existed is not listed.
+- Importing the archive again finds the volumes of the first import in use. They are renamed on the review or removed first.
+
+### Import failure behaviour
+
+| Stage | Result |
+|---|---|
+| Before the first object is created | Nothing is changed. The upload stays held |
+| A network or volume cannot be created, or a volume cannot be written | Every network and volume this import created is removed, in reverse order. A volume is removed without force. Only an object this import created is removed. The page answers `502`, `The import failed`: `The archive's networks and volumes could not be created. Every object this import created was removed.` The upload is removed |
+| An object cannot be removed | The same page: `The archive's networks and volumes could not be created. These could not be removed; remove them from the networks and volumes lists: {kind name, ...}.` The row records them in `objects_kept` |
+| Docker refuses a create | `502`, `Docker refused the request`, with `Docker refused this network configuration.` or `Docker refused this volume configuration.` Objects created before it are removed. An administrator sees the Engine's text under the message |
+| A name is in use when its turn comes | The objects created before it are removed (`409`). The review is shown with the refusal when nothing had been created. Otherwise the upload has been removed and the page reads `The upload is gone` |
+| The request is cancelled or the client leaves | The objects created are removed. A failure row with reason `interrupted` is written on a session of its own |
+| The helper container | Removed when its volume has been written, however that ends |
+| The form's values | Held only after every object was created and every control claimed |
+
+### Import refusals
+
+A refusal at the confirmation renders the review again at the status shown, with the error summarised at the top, unless the table names another page. A refusal that created nothing keeps the upload held.
+
+| Condition | Status | Page | Message | Reason |
+|---|---|---|---|---|
+| Not an administrator, an environment or upload id of the wrong form | 404 | | Not found | No row |
+| The upload is not held for this session, user and environment, was discarded, or is a stack archive | 409 | `The upload is gone` | `This upload is no longer held. Upload the archive again; nothing was changed.` Link `Upload the archive again` | `upload_gone` |
+| The plan differs from the review's | 409 | The review | `The plan changed since you reviewed it; nothing was changed.` | `changed_since_review` |
+| A network cannot be created, or a volume name is in use, invalid or repeated | 409 | The review | `Network {name}: {problem}; Volume {name}: {problem}; Host path {path}: {problem}; ...` for up to ten, as `Volume {name}: a volume with this name already exists.` for a name in use | `collision` |
+| A secret is neither opened nor entered | 409 | The review | `The values of some secrets are neither opened nor entered.` | `secrets_needed` |
+| A host path has no choice | 409 | The review | `Choose what to do with each host path the container binds.` | `paths_undecided` |
+| The host has no image for the helper | 409 | The review | `The host has no image to create the helper container from. Pull or load an image on the host, then try again.` | `helper_image_missing` |
+| An opened value is not UTF-8 | 409 | The review | `A secret value is not UTF-8 text.` | `ValidationFailed` |
+| A volume or network of the name exists when its turn comes | 409 | The review when nothing had been created, else `The upload is gone` | `A volume with this name already exists.` or `A network with this name already exists.` | `name_in_use` |
+| Another action holds an archived or replacing volume | 409 | `An object is busy` | The message of [Busy](#busy), the action being `import` | `object_busy` |
+| Docker refuses a network or volume create | 502 | `Docker refused the request` | The refusal of the previous section | `engine_rejected` |
+| The host is unreachable, or did not answer in time | 503 | The host message | [Host failures](#host-failures) | `unreachable`, `outcome_unknown` |
+| Objects were created and the import then failed | 502 | `The import failed` | [Import failure behaviour](#import-failure-behaviour) | [Failure reasons](Administration-Activity#container-import-rows) |
+
+### Import limits
+
+| Limit | Value |
+|---|---|
+| Upload | 7 GiB as uploaded, with 64 KiB of multipart framing |
+| Upload time | 3,600 seconds for the whole body; 15 seconds without a body message. The 256 KiB body cap and 30 second deadline of every other route are unchanged ([Body size](Reference-Deployment#body-size)) |
+| Free space | At least 256 MiB free on the data volume before the first byte, plus the declared length when the request has one, and after every write |
+| Entries | 2,000,000 across every volume |
+| File data | 64 GiB across every volume |
+| Volumes | At most 64, the limit of the manifest |
+| Validation at once | 2 archives across the process, shared with volume import, stack import and build context validation |
+| Held uploads | 1 for each user, 4 in all, 30 minutes, shared with stack import. A newer upload by the same user, of either kind, replaces the earlier one; the oldest is dropped past four. An upload whose import is running is never dropped and does not expire |
+| Removed | On a refused archive, a failed upload, a newer upload by the same user, discard, expiry, shutdown, and at start, when the whole directory is deleted. When any object has been created, and when the import succeeds |
+| Usable by | The user, the session and the environment that uploaded it |
+| Unlock | 5 failed attempts for each session, shared with stack import |
+| Held form state | 8 in all, 1 for each user and environment, 30 minutes, in memory |
+| Write stall | The import fails when the host accepts no byte for 60 seconds. The host's reply is waited for 600 seconds |
+| Write time | No total limit |
+
+The held file is `{data directory}/stack-import/{32 hexadecimal digits}.tar.gz`, mode `0600` ([Data directory](Reference-Deployment#data-directory)). The reverse proxy limits are in [Deployment](Reference-Deployment#reverse-proxy-limits-for-stack-imports).
+
+### Import format versions
+
+| Item | Value |
+|---|---|
+| Read | `format_version` `1`, and every earlier version a later release reads |
+| Newer archive | Refused when the `format_version` of the manifest, or of a volume manifest in it, is above the version the release knows. The message names the version: `The archive's format version is {N}; this build reads up to 1.` |
+| Written | [Export manifest](#export-manifest) |
 
 ## Terminal
 
@@ -2035,6 +2377,14 @@ No row is written when the original could not be restored (`rollback_failed` on 
 | `reason`, `message` | Failure rows |
 
 The row holds counts and the secret mode, never a variable name, a value, a path or a passphrase. The keys and reasons: [Activity](Administration-Activity#container-export-rows).
+
+### Import rows
+
+| Action | Target | Written |
+|---|---|---|
+| `container_imported` | The archived container's name, cut to 255 characters | Once for each confirmation that reaches the service, when it ends: success, or failure. The upload, the review, the passphrase and the discard write none |
+
+The row holds counts, the names of the networks and volumes it removed or could not remove, and no variable name, value, path or passphrase. The container is created by the create form, which writes `container_created` ([Create and duplicate](#create-and-duplicate)). The keys and reasons: [Activity](Administration-Activity#container-import-rows).
 
 ### Terminal and attach
 

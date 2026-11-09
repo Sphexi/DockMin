@@ -80,6 +80,9 @@
 {% if may_create %}
 <a class="btn btn--primary" href="{{ route_path('environment_container_new', environment_id=environment.id) }}">Create container</a>
 {% endif %}
+{% if is_admin %}
+<a class="btn" href="{{ route_path('environment_container_import_form', environment_id=environment.id) }}">Import container</a>
+{% endif %}
 {% endcall %}
 <div id="containers-results">
   {{ containers_results(rows, columns, pager, total, writable, filtered, errors, failure, retry_href, environment_id, actions, health_unavailable, may_create, instance_href=instance_href, stack_links=stack_links) }}

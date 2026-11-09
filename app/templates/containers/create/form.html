@@ -34,6 +34,25 @@
 {% if template_panel %}
 {{ render_template_panel(template_panel, "Review every value before you create the container.") }}
 {% endif %}
+{% if import_panel %}
+<div class="panel panel--notice" role="note">
+  {% if import_panel.gone %}
+  <h2>The imported values are no longer held</h2>
+  <p>The form is blank. Import the archive again to fill it; networks and volumes the earlier import created stay on the host.</p>
+  {% else %}
+  <h2>Imported from the archive of {{ import_panel.source_name|visible_text }}</h2>
+  <p class="field__help">Exported {{ import_panel.exported }}. Review every value before you create the container. Host restrictions, the credential choice for the image and the start option apply as for any container.</p>
+  <ul>
+    <li>{{ import_panel.networks|length }} {{ "network" if import_panel.networks|length == 1 else "networks" }} created{% if import_panel.networks %}: {% for name in import_panel.networks %}<span class="mono cell-wrap">{{ name|visible_text }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</li>
+    <li>{{ import_panel.volumes|length }} {{ "volume" if import_panel.volumes|length == 1 else "volumes" }} created and filled{% if import_panel.volumes %}: {% for name in import_panel.volumes %}<span class="mono cell-wrap">{{ name|visible_text }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</li>
+    <li>{{ import_panel.variables }} environment {{ "variable" if import_panel.variables == 1 else "variables" }} filled in, {{ import_panel.secrets }} of them secret.</li>
+    {% for notice in import_panel.notices %}
+    <li>{{ notice|visible_text }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
 {% if context.notices %}
 <div class="panel panel--notice" role="note">
   <h2>Not carried over from the source</h2>
@@ -52,6 +71,9 @@
   {% endif %}
   {% if template_ref %}
   <input type="hidden" name="template_ref" value="{{ template_ref }}">
+  {% endif %}
+  {% if imported_ref %}
+  <input type="hidden" name="imported_ref" value="{{ imported_ref }}">
   {% endif %}
   <button type="submit" class="visually-hidden" name="intent" value="review" tabindex="-1" aria-hidden="true">Review</button>
 

@@ -38,6 +38,10 @@ VOLUME_IMPORT_UPLOAD_PATH: Final = re.compile(r"/environments/[1-9][0-9]{0,18}/v
 STACK_IMPORT_UPLOAD_PATH: Final = re.compile(
     r"/environments/[1-9][0-9]{0,18}/(?:swarm/)?stacks/-/import"
 )
+# The container import upload, with a body cap and deadline of its own.
+CONTAINER_IMPORT_UPLOAD_PATH: Final = re.compile(
+    r"/environments/[1-9][0-9]{0,18}/containers/-/import"
+)
 # Webhook calls authenticate by a secret in the URL or the Authorization header and read no cookie.
 TOKEN_AUTHENTICATED_PATH: Final = re.compile(rf"{re.escape(HOOKS_PATH)}(/[^/]*)?")
 
@@ -57,6 +61,11 @@ def is_stack_import_upload(method: str, path: str) -> bool:
     return method == "POST" and STACK_IMPORT_UPLOAD_PATH.fullmatch(path) is not None
 
 
+def is_container_import_upload(method: str, path: str) -> bool:
+    """Report whether the request is the archive upload of a container import."""
+    return method == "POST" and CONTAINER_IMPORT_UPLOAD_PATH.fullmatch(path) is not None
+
+
 def is_streamed_upload(method: str, path: str) -> bool:
     """Report whether the route reads its own body and checks the token from its first part."""
     return (
@@ -64,6 +73,7 @@ def is_streamed_upload(method: str, path: str) -> bool:
         or is_context_upload(method, path)
         or is_volume_import_upload(method, path)
         or is_stack_import_upload(method, path)
+        or is_container_import_upload(method, path)
     )
 
 

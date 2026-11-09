@@ -337,7 +337,9 @@ class StackImportService:
             summary = await run_limited(inspect_stack_archive, upload.path)
             archive_kind = _ARCHIVE_KIND.get(summary.manifest.kind)
             if archive_kind is None:
-                raise StackArchiveRefused("The archive holds a container, not a stack.")
+                raise StackArchiveRefused(
+                    "The archive holds a container. Import it from the Containers list."
+                )
             if archive_kind != kind:
                 raise StackArchiveRefused(
                     f"The archive holds {_KIND_TEXT[archive_kind]}. Import it from the "

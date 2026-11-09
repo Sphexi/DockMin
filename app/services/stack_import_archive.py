@@ -45,6 +45,7 @@ __all__ = [
     "StackArchiveSummary",
     "StackLimits",
     "VolumeSummary",
+    "inspect_container_archive",
     "inspect_stack_archive",
     "read_contexts",
     "stack_volume_tar",
@@ -224,8 +225,7 @@ def _read_documents(
     Returns the first entry below `volumes/`, which ended the documents, or None.
     """
     declared = manifest.documents()
-    stack = manifest.stack
-    if stack is None:
+    if manifest.stack is None and manifest.kind != "container":
         raise StackArchiveRefused("The archive does not hold a stack.")
     seen: set[str] = set()
     compose = ""
@@ -380,6 +380,22 @@ def inspect_stack_archive(path: Path, limits: StackLimits | None = None) -> Stac
         compose, files, pending = _read_documents(manifest, entries)
         volumes = _check_volumes(manifest, pending, entries, bounds)
     return StackArchiveSummary(manifest, compose, files, volumes)
+
+
+def inspect_container_archive(path: Path, limits: StackLimits | None = None) -> StackArchiveSummary:
+    """Read the whole archive of a container export and return what it holds.
+
+    The archive is checked as a stack archive is; the summary carries no stack file or companion
+    files. StackArchiveRefused when the archive does not hold a container.
+    """
+    bounds = limits or StackLimits()
+    with closing(_entries(path, bounds)) as entries:
+        manifest = _read_manifest(entries)
+        if manifest.kind != "container":
+            raise StackArchiveRefused("The archive holds a stack, not a container.")
+        _, _, pending = _read_documents(manifest, entries)
+        volumes = _check_volumes(manifest, pending, entries, bounds)
+    return StackArchiveSummary(manifest, "", {}, volumes)
 
 
 def read_contexts(

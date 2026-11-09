@@ -18,6 +18,8 @@ from app.services.container_actions import (
     ContainerGone,
     ContainerStateConflict,
 )
+from app.services.container_import_assembly import PreparedContainers
+from app.services.container_import_store import PreparedContainerStore
 from app.services.container_jobs import start_container_create_job, start_container_recreate_job
 from app.services.container_provisioning import (
     START_FAILED,
@@ -60,6 +62,13 @@ from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectBusy
 from app.services.pull_credentials import CHOICE_FIELD, BindingCredentialMissing
 from app.services.registry_resolution import CredentialSetUnavailable
+from app.web.container_import_panel import (
+    IMPORT_FIELD,
+    IMPORT_PARAM,
+    ImportPanel,
+    panel_of,
+    valid_ref,
+)
 from app.web.identifiers import PathId
 from app.web.image_helpers import credential_choice_of, selected_choice
 from app.web.navigation import no_store, redirect
@@ -132,6 +141,7 @@ ADMIN_ONLY = {
 }
 
 Source = Annotated[str | None, Query(alias="from", max_length=SOURCE_MAX)]
+Imported = Annotated[str | None, Query(alias=IMPORT_PARAM, max_length=SOURCE_MAX)]
 ContainerPath = Annotated[str, Path(max_length=SEGMENT_MAX)]
 
 
@@ -325,6 +335,7 @@ async def _review_page(
             "review": review,
             "source_id": _source_of(form),
             "template_ref": bound_ref(request),
+            "imported_ref": valid_ref(_text(form, IMPORT_FIELD)),
             "offer": offer,
             "selected": (
                 "" if offer is None else selected_choice(offer, _text(form, CHOICE_FIELD))
@@ -377,6 +388,8 @@ def _form_page(
     banner: _Banner | None = None,
     carried_choice: str = "",
     offer: CredentialOffer | None = None,
+    imported: ImportPanel | None = None,
+    imported_ref: str | None = None,
 ) -> Response:
     environment_id = context.environment_id
     return _page(
@@ -387,6 +400,8 @@ def _form_page(
             "carried_choice": carried_choice,
             "template_panel": container_panel(request, is_administrator=context.is_administrator),
             "template_ref": bound_ref(request),
+            "import_panel": imported,
+            "imported_ref": imported_ref,
             "offer": offer,
             "catalogue": CATALOGUE,
             "selected": "" if offer is None else selected_choice(offer, carried_choice),
@@ -432,6 +447,7 @@ async def _rendered_form(
         banner=banner,
         carried_choice=_carried_choice(form),
         offer=await _picker(containers, actor, environment_id, state.get("image")),
+        imported_ref=valid_ref(_text(form, IMPORT_FIELD)),
     )
 
 
@@ -489,10 +505,12 @@ async def new_container(
     containers: Containers,
     actor: CurrentUser,
     environment_id: PathId,
+    prepared: PreparedContainers,
     source: Source = None,
+    imported: Imported = None,
 ) -> Response:
-    """Show the create form, blank or prefilled from an existing container or a template."""
-    if source is not None:
+    """Show the create form: blank, or prefilled from a container, a template or an import."""
+    if source is not None or imported is not None:
         request.state.template = None
     try:
         context = await _context(containers, actor, environment_id, source, strict=True)
@@ -510,11 +528,29 @@ async def new_container(
     values = container_values(request, is_administrator=context.is_administrator)
     if values is not None:
         state = FormState.from_form({**state.values, **values})
+    panel: ImportPanel | None = None
+    ref = valid_ref(imported)
+    if imported is not None:
+        held = (
+            None
+            if ref is None or actor.session_id is None
+            else prepared.get(
+                ref,
+                user_id=actor.user_id,
+                session_id=actor.session_id,
+                environment_id=environment_id,
+            )
+        )
+        panel = panel_of(held)
+        if held is not None:
+            state = FormState.from_form({**state.values, **held.values})
     return _form_page(
         request,
         context,
         state,
         offer=await _picker(containers, actor, environment_id, state.get("image")),
+        imported=panel,
+        imported_ref=None if panel is None or panel.gone else ref,
     )
 
 
@@ -600,10 +636,15 @@ async def submit_form(
     dependencies=[RequestTemplate],
 )
 async def create_container(
-    request: Request, containers: Containers, actor: CurrentUser, environment_id: PathId
+    request: Request,
+    containers: Containers,
+    actor: CurrentUser,
+    environment_id: PathId,
+    prepared: PreparedContainers,
 ) -> Response:
     """Create the container; a refusal returns to the form with every value kept."""
     form = await _read_form(request)
+    imported = valid_ref(_text(form, IMPORT_FIELD))
     try:
         choice = credential_choice_of(_text(form, CHOICE_FIELD))
         if await containers.creation.prepare_create(
@@ -618,6 +659,7 @@ async def create_container(
                 credential_choice=choice,
                 template=bound_ref(request),
             )
+            _release(prepared, actor, environment_id, imported)
             return no_store(
                 redirect(
                     request,
@@ -728,6 +770,7 @@ async def create_container(
             status_code=503,
             banner=_unavailable_banner(unavailable),
         )
+    _release(prepared, actor, environment_id, imported)
     location = _path(
         request,
         "environment_container_detail",
@@ -737,6 +780,19 @@ async def create_container(
     return no_store(
         RedirectResponse(f"{location}?{urlencode(created_flags(outcome))}", status_code=303)
     )
+
+
+def _release(
+    prepared: PreparedContainerStore, actor: Principal, environment_id: int, ref: str | None
+) -> None:
+    """Drop the form state an import held once the container is being created from it."""
+    if ref is not None and actor.session_id is not None:
+        prepared.discard(
+            ref,
+            user_id=actor.user_id,
+            session_id=actor.session_id,
+            environment_id=environment_id,
+        )
 
 
 async def _confirm_page(

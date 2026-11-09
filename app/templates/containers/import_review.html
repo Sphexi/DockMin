@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Review import on {{ review.environment_name }} - dockmin{% endblock %}
+{% set crumb_page = "Import container" %}
+{% block content %}
+{% call page_header("Review the import", "Nothing has been created yet. Check what the archive needs, then continue to the create form.") %}
+<a class="btn" href="{{ list_href }}">Back to containers</a>
+{% endcall %}
+
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+
+<section class="panel" aria-labelledby="archive-heading">
+  <h2 id="archive-heading">The archive</h2>
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ review.environment_name }}</dd>
+    <dt>Format version</dt>
+    <dd>{{ review.format_version }}, written by dockmin <span class="mono">{{ review.instance_version|visible_text }}</span></dd>
+    <dt>Exported</dt>
+    <dd><time datetime="{{ review.exported_at|timestamp_iso }}">{{ review.exported_at|timestamp }}</time></dd>
+    <dt>Source container</dt>
+    <dd class="mono cell-wrap">{{ plan.source_name|visible_text }}</dd>
+    <dt>Size as uploaded</dt>
+    <dd>{{ review.archive_size|filesize }}</dd>
+    <dt>Volume data</dt>
+    <dd>{{ plan.data_bytes|filesize }} in {{ plan.volumes|length }} {{ "volume" if plan.volumes|length == 1 else "volumes" }}</dd>
+    <dt>SHA-256</dt>
+    <dd class="mono cell-wrap">{{ review.archive_digest }}</dd>
+  </dl>
+</section>
+
+{% if review.secrets_mode == "sealed" %}
+<section class="panel" aria-labelledby="unlock-heading">
+  <h2 id="unlock-heading">Sealed values</h2>
+  {% if review.opened %}
+  <p>The sealed environment values were opened with the passphrase. They are held until the create form has been opened, you discard the upload or it expires, and are never shown on this page.</p>
+  {% else %}
+  <p>The archive's secret environment values are sealed under a passphrase. Enter it to open them, or enter each value by hand in the form below. The passphrase is used once and is not stored or shown again. {{ review.unlock_remaining }} {{ "attempt" if review.unlock_remaining == 1 else "attempts" }} left in this session.</p>
+  <form class="form" method="post" action="{{ unlock_href }}" data-submit-once aria-labelledby="unlock-heading">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("passphrase", "Passphrase", type="password", autocomplete="off", error=errors.get("passphrase")) }}
+    <div class="form__actions">
+      <button type="submit" class="btn">Open the sealed values</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ post_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_plan" value="{{ plan.digest }}">
+
+  <section class="panel create-section" aria-labelledby="networks-title">
+    <h2 class="create-section__title" id="networks-title">Networks</h2>
+    <div class="create-section__body">
+      {% if plan.networks %}
+      <div class="data-table__scroll" role="region" aria-label="Networks the container joins" tabindex="0">
+        <table class="table">
+          <caption class="visually-hidden">The user-defined networks the container joins and what happens to each</caption>
+          <thead><tr><th scope="col">Network</th><th scope="col">Driver</th><th scope="col">What happens</th></tr></thead>
+          <tbody>
+            {% for item in plan.networks %}
+            <tr>
+              <th scope="row"><span class="mono cell-wrap">{{ item.name|visible_text }}</span></th>
+              <td>{{ item.driver|visible_text }}</td>
+              <td>
+                {% if item.problem %}<strong>Cannot be created:</strong> {{ item.problem }}
+                {% elif item.action == "create" %}Created from the archive's options
+                {% elif item.differences %}Exists and is used as it is. It differs from the archive in: {{ item.differences|join(", ") }}.
+                {% else %}Exists and is used as it is{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="field__help">A network that is missing is created with the archive's driver, internal and IPv6 settings, address pool, options and labels, with the default address management driver. A network that already exists is never changed.</p>
+      {% else %}
+      <p>The container joins no user-defined network.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="volumes-title">
+    <h2 class="create-section__title" id="volumes-title">Volumes and their data</h2>
+    <div class="create-section__body">
+      {% if plan.volumes %}
+      <div class="data-table__scroll" role="region" aria-label="Volumes the import creates" tabindex="0">
+        <table class="table">
+          <caption class="visually-hidden">The archived volumes, the name each is created under and what is written into it</caption>
+          <thead><tr><th scope="col">Archived volume</th><th scope="col">Created as</th><th scope="col">Mounted at</th><th scope="col">Entries</th><th scope="col">Size</th></tr></thead>
+          <tbody>
+            {% for item in plan.volumes %}
+            <tr>
+              <th scope="row"><span class="mono cell-wrap">{{ item.source|visible_text }}</span></th>
+              <td>
+                <input type="hidden" name="volume-{{ loop.index0 }}-source" value="{{ item.source }}">
+                <label class="visually-hidden" for="volume-{{ loop.index0 }}-name">Name of the volume created from {{ item.source }}</label>
+                <input class="field__input" type="text" id="volume-{{ loop.index0 }}-name" name="volume-{{ loop.index0 }}-name" value="{{ item.name }}" autocomplete="off" maxlength="255" required>
+                {% if item.problem %}
+                <p class="field__help" role="alert">{{ item.problem }}</p>
+                {% elif item.taken %}
+                <p class="field__help" role="alert">A volume with this name already exists and is never written to. Use another name{% if item.suggestion %}, such as <span class="mono">{{ item.suggestion }}</span>{% endif %}, then choose Check.</p>
+                {% endif %}
+              </td>
+              <td class="mono cell-wrap">{{ item.targets|join(", ") }}</td>
+              <td>{{ item.entries }}</td>
+              <td>{{ item.size|filesize }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p>The archive carries no volume data.</p>
+      {% endif %}
+      {% if plan.skipped_volumes %}
+      <p>Archived volumes that are not written:</p>
+      <ul>
+        {% for item in plan.skipped_volumes %}
+        <li><span class="mono cell-wrap">{{ item.name|visible_text }}</span>. {{ item.reason }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if plan.volumes %}
+      <ul>
+        <li>Each volume is created with the local driver, without the archive's driver options or labels, and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.</li>
+        <li>If anything cannot be created or written, everything this import created is removed and nothing else changes.</li>
+      </ul>
+      {% if plan.has_data %}
+      {% if plan.helper_image %}
+      <p>dockmin creates a helper container from the image <span class="mono">{{ plan.helper_image|replace("sha256:", "")|truncate(12, true, "") }}</span>, which is already on the host, once for each volume. It is never started, has no network and no capabilities, and is removed when its volume has been written.</p>
+      {% else %}
+      <div class="panel panel--alert" role="note">
+        <h3>The host has no image to use</h3>
+        <p>The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then check the import again.</p>
+      </div>
+      {% endif %}
+      {% endif %}
+      {% endif %}
+    </div>
+  </section>
+
+  {% if plan.host_paths %}
+  <section class="panel create-section" aria-labelledby="paths-title">
+    <h2 class="create-section__title" id="paths-title">Host paths</h2>
+    <div class="create-section__body">
+      <p>The container binds these paths on the host. Choose what happens to each. Keeping a path leaves the bind mount as it is; the create form still restricts bind mounts to administrators. Replacing it mounts a new, empty named volume instead, created when the container is.</p>
+      {% for item in plan.host_paths %}
+      {% set number = loop.index0 %}
+      <fieldset class="choice-group">
+        <legend>Host path <span class="mono cell-wrap">{{ item.source|visible_text }}</span></legend>
+        <p class="field__help">Mounted at {{ item.targets|join(", ") }}.</p>
+        <input type="hidden" name="path-{{ number }}-source" value="{{ item.source }}">
+        <div class="choice">
+          <input class="choice__input" type="radio" id="path-{{ number }}-keep" name="path-{{ number }}-choice" value="keep"{% if item.choice == "keep" %} checked{% endif %} required>
+          <label class="choice__label" for="path-{{ number }}-keep">Keep the path</label>
+        </div>
+        <div class="choice">
+          <input class="choice__input" type="radio" id="path-{{ number }}-volume" name="path-{{ number }}-choice" value="volume"{% if item.choice == "volume" %} checked{% endif %} required>
+          <label class="choice__label" for="path-{{ number }}-volume">Replace it with a new named volume</label>
+        </div>
+        <label class="field__label" for="path-{{ number }}-name">Name of the new volume</label>
+        <input class="field__input" type="text" id="path-{{ number }}-name" name="path-{{ number }}-name" value="{{ item.volume }}" autocomplete="off" maxlength="255">
+        {% if item.problem %}
+        <p class="field__help" role="alert">{{ item.problem }}</p>
+        {% elif item.choice == "volume" and item.volume_taken %}
+        <p class="field__help" role="alert">A volume with this name already exists. Use another name{% if item.suggestion %}, such as <span class="mono">{{ item.suggestion }}</span>{% endif %}, then choose Check.</p>
+        {% endif %}
+      </fieldset>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel create-section" aria-labelledby="environment-title">
+    <h2 class="create-section__title" id="environment-title">Environment variables</h2>
+    <div class="create-section__body">
+      {% if plan.environment %}
+      <table class="table">
+        <caption class="visually-hidden">The environment variables of the archive and where each value comes from</caption>
+        <thead><tr><th scope="col">Variable</th><th scope="col">Value</th></tr></thead>
+        <tbody>
+          {% for item in plan.environment %}
+          <tr>
+            <th scope="row"><span class="mono cell-wrap">{{ item.name|visible_text }}</span></th>
+            <td>
+              {% if not item.secret %}
+              Written to the form as plain text
+              {% elif item.state == "opened" %}
+              Opened from the archive
+              {% elif item.state == "entered" %}
+              <label class="visually-hidden" for="secret-{{ loop.index0 }}-value">Value of {{ item.name }}</label>
+              <input type="hidden" name="secret-{{ loop.index0 }}-name" value="{{ item.sealed_name }}">
+              <input class="field__input" type="password" id="secret-{{ loop.index0 }}-value" name="secret-{{ loop.index0 }}-value" autocomplete="off" required>
+              <p class="field__help">Entered. Enter it again to keep it through another check.</p>
+              {% else %}
+              <label class="visually-hidden" for="secret-{{ loop.index0 }}-value">Value of {{ item.name }}</label>
+              <input type="hidden" name="secret-{{ loop.index0 }}-name" value="{{ item.sealed_name }}">
+              <input class="field__input" type="password" id="secret-{{ loop.index0 }}-value" name="secret-{{ loop.index0 }}-value" autocomplete="off" required>
+              <p class="field__help">{% if item.archive_sealed %}Not opened. Open the archive above, or enter the value.{% else %}The archive carries only the name. Enter the value.{% endif %}</p>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="field__help">Values are held in memory on the server until the create form has been opened and are filled into the form's own fields. They are not logged or recorded.</p>
+      {% else %}
+      <p>The archive carries no environment variable.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="image-title">
+    <h2 class="create-section__title" id="image-title">Image</h2>
+    <div class="create-section__body">
+      <dl class="facts">
+        <dt>Reference</dt>
+        <dd class="mono cell-wrap">{{ plan.image|visible_text }}</dd>
+        <dt>Archive digest</dt>
+        <dd class="mono cell-wrap">{{ plan.archive_digest or "not recorded" }}</dd>
+        <dt>On this host</dt>
+        <dd>
+          {% if plan.image_status == "same" %}The same digest
+          {% elif plan.image_status == "differs" %}<strong>A different digest:</strong> <span class="mono cell-wrap">{{ plan.local_digest }}</span>. The form keeps the tag, so a pull resolves whatever the tag names.
+          {% elif plan.image_status == "not_present" %}Not on this host. A pull resolves the tag when it runs, and can return a different digest.
+          {% else %}The archive recorded no digest.{% endif %}
+        </dd>
+      </dl>
+      <p class="field__help">The image is not in the archive. The credential set for a pull is chosen on the create form.</p>
+    </div>
+  </section>
+
+  {% if plan.not_exported %}
+  <section class="panel create-section" aria-labelledby="left-title">
+    <h2 class="create-section__title" id="left-title">Not in the archive</h2>
+    <div class="create-section__body">
+      <p>The export carried the create form's state only. These settings of the source container were not exported:</p>
+      <ul>
+        {% for reason, items in plan.not_exported %}
+        {% if items %}
+        <li>{{ reason|replace("_", " ") }}: {% for entry in items %}<span class="mono cell-wrap">{{ entry|visible_text }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</li>
+        {% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel create-section" aria-labelledby="effects-title">
+    <h2 class="create-section__title" id="effects-title">What happens</h2>
+    <div class="create-section__body">
+      <ul>
+        <li>The networks and volumes this import creates become yours; no team or other access is carried from the archive.</li>
+        <li>The container is not created yet. The create form opens filled from the archive; every restriction, the credential picker and the start option apply there as for any container{% if plan.name_taken %}, and a container of the archive's name already exists on this host, so the form needs another name{% endif %}.</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="form__actions">
+    {% if plan.can_import %}
+    <button type="submit" class="btn btn--primary" name="action" value="import">Create networks and volumes, then open the form</button>
+    {% endif %}
+    <button type="submit" class="btn" name="action" value="check" formnovalidate>Check the choices</button>
+    <a class="btn" href="{{ list_href }}">Back to containers</a>
+  </div>
+</form>
+
+<form class="form" method="post" action="{{ cancel_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="form__actions">
+    <button type="submit" class="btn">Discard the upload</button>
+  </div>
+</form>
+{% endblock %}

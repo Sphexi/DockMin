@@ -11,6 +11,7 @@ from app.db.repositories.clocked import Clock
 from app.docker_engine.registry import EngineClientRegistry
 from app.docker_engine.transport import configure_tls_workdir
 from app.services.compose_setup import ComposeRuntime
+from app.services.container_import_store import PreparedContainerStore
 from app.services.environment_connector import ProbeCoordinator
 from app.services.environment_snapshots import (
     EnvironmentSnapshotService,
@@ -57,6 +58,7 @@ class EngineRuntime:
     volume_imports: VolumeImportStore = field(default_factory=VolumeImportStore)
     stack_imports: StackImportStore = field(default_factory=StackImportStore)
     imported_volumes: ImportedVolumes = field(default_factory=ImportedVolumes)
+    prepared_containers: PreparedContainerStore = field(default_factory=PreparedContainerStore)
     instance_name: str = DEFAULT_INSTANCE_NAME
 
     @property
@@ -75,6 +77,7 @@ class EngineRuntime:
         await self.refresher.aclose()
         await self.volume_imports.aclose()
         await self.stack_imports.aclose()
+        self.prepared_containers.clear()
         await self.probes.aclose()
         await self.registry.aclose()
 

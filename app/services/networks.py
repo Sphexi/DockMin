@@ -150,6 +150,7 @@ __all__ = [
     "RestrictedNetwork",
     "clip_text",
     "container_joins_networks",
+    "network_engine_body",
     "network_kind",
 ]
 
@@ -696,7 +697,7 @@ def _prune_candidates(
     return found
 
 
-def _engine_body(request: NetworkRequest) -> dict[str, Any]:
+def network_engine_body(request: NetworkRequest) -> dict[str, Any]:
     config: list[dict[str, str]] = []
     for pool in request.pools:
         entry = {"Subnet": str(pool.subnet)}
@@ -1259,7 +1260,7 @@ class NetworkService:
         run = _CreateRun()
         try:
             network_id = await run_shielded(
-                partial(self._create_on_host, client, _engine_body(request), run),
+                partial(self._create_on_host, client, network_engine_body(request), run),
                 partial(self._interrupted_create, actor, environment_id, run),
             )
         except EngineError as error:

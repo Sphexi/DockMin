@@ -310,6 +310,31 @@ An administrator can create a managed stack from a stack export archive ([Compos
 | Owner | The importing administrator. No team or other grant is carried |
 | Recorded | `stack_imported`, with counts and never a value, a passphrase, a variable or file name, or a path ([Activity](Administration-Activity#stack-import-rows)) |
 
+## Container import
+
+An administrator can prepare a container from a container export archive: the import creates its networks and volumes and opens the create form filled from the archive ([Containers](Usage-Containers#import)).
+
+| Item | Value |
+|---|---|
+| Who | Administrators only. Any other user receives `404` on every import route, before a request body is read, and nothing is recorded |
+| Archives accepted | Only archives written by a container export. The archive is not signed or authenticated: any archive in the format is accepted. A stack archive is refused at upload |
+| Upload, held upload | As [stack import](#stack-import): the CSRF token is the first multipart part and is verified before any byte of the file is read; at most 7 GiB and 64 KiB within 3,600 seconds; a `0600` file under `{data directory}/stack-import/`; held for one user, session and environment under a random 128-bit identifier; one for each user, four in all, 30 minutes, shared with stack import |
+| Validation, tar rules, limits | As [stack import](#stack-import): the whole archive is read and checked before anything is created, with the rules of [volume import](#volume-import) applied to each volume under its own prefix. Devices, FIFOs, sockets, absolute names, `..` components and entries below a symbolic link are refused. 2,000,000 entries, 64 GiB of file data, a ceiling on decompressed bytes |
+| Modes and owners | The setuid and setgid bits are cleared. Numeric owner ids are kept. Only `user.` extended attributes are applied |
+| Passphrase, attempt limit | As [stack import](#stack-import): used once, in a worker thread, and never stored, logged, recorded or put back into a page. 5 failed passphrases for each session, shared with stack import, counted for the life of the process and not reset by a success. Further attempts answer `429` until the administrator signs in again |
+| Values in a URL | None. The create form opens at `?imported={id}`, where `{id}` is a random 128-bit identifier. No environment value, secret value, passphrase, name or path is in the URL, a redirect or a notice |
+| Held form values | The form's field values, with the opened and entered secret values, are held in memory only, usable only by the user, the session and the environment that made them. 30 minutes, one for each user and environment, eight in all. Released when the create starts. Never in a log line, an activity row or a URL. They appear in the response only as the value of the form's own fields |
+| Volumes | Created with the `local` driver, without the archive's driver options and labels, so an archive cannot create a volume backed by a path on the host. An archived volume with another driver is not written. A volume that exists is never written to: the import refuses until another name is chosen. Each name is checked absent under the volume's lock |
+| Networks | Created only when the environment has none of that name, with the default address management driver, after the checks of the network create form, the check for labels dockmin reserves and a comparison with the address pools of every network on the host. An invalid, overlapping or unsupported network refuses the whole import. A network that exists is used as it is and never changed |
+| Host access | A helper container created from an image already on the host, never started, with the volume mounted read-write, no network, a read-only root file system and all capabilities dropped. It is removed when its volume has been written |
+| Host paths | Listed with a required choice for each, none preselected. The import creates no directory and reads no content. A kept bind mount stays a [restricted option](Usage-Containers#options-restricted-to-administrators), checked on the final request of the create form. A replaced path becomes a named volume that the create form creates |
+| Container creation | By the create form, never by the import. The restriction set runs on the final request of every submission: an administrator sees the restricted options in use under `Administrator options in use`, and a label dockmin sets is refused for every role ([Refused labels](Usage-Containers#refused-labels)); the checks against reaching dockmin's own container run for every role; the credential set for the pull is chosen on the form and binds the image ([Images](Usage-Images)). The import neither pre-checks nor bypasses any of them |
+| Plan binding | The confirmation carries a keyed SHA-256 over what the review showed of the archive and of the host. The key is random for each process and never stored. A plan that differs, including after a restart, is refused (`changed_since_review`) and nothing is changed |
+| Failure | Every network and volume the import created is removed, in reverse order, volumes without force. An object that existed before is never removed. The failure row names the objects removed and any that could not be removed |
+| Owner | The importing administrator owns each network and volume the import creates. No team or other grant is carried |
+| Contents | Not scanned. A container that mounts a volume runs with whatever the files contain, including executables |
+| Recorded | `container_imported`, with counts and never a value, a passphrase, a variable name or a path ([Activity](Administration-Activity#container-import-rows)) |
+
 ## Stack builds
 
 An administrator's Compose stack can build images on its host ([Stacks](Usage-Stacks#builds)). A `RUN` step of a Dockerfile executes on that host while the image builds.

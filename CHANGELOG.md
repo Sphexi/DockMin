@@ -20,12 +20,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 - Container export: an administrator downloads a container's create form state, environment, user-defined networks and the data of the named volumes chosen as a `tar.gz` archive. Environment variables marked secret on the confirmation are sealed under a passphrase or left out; every other value is written as plain text. Each export writes a `container_exported` activity row: [Export](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#export).
 - Sealing of exported secret values, with the algorithm and parameters and the effect of a lost passphrase: [Export sealing](https://github.com/Sphexi/DockMin/wiki/Reference-Security#export-sealing).
 - Stack import: an administrator uploads a Compose or Swarm stack archive written by a stack export, reviews every object it creates, every host path and every name collision, and imports it as a managed stack owned by the importer. The archive passes the volume import's tar rules. Sealed secret values are opened with the passphrase, limited to 5 failed attempts for each session, or entered by hand. Each host path is kept or replaced with a new named volume, a new stack name renames every name derived from it, and a credential set is chosen for each image with none preselected. Volumes are created and filled before the first deployment, which accepts exactly the volumes the import created. A failed import removes the volumes it created. The upload has its own cap of 7 GiB and 3,600 seconds. Each import writes a `stack_imported` activity row: [Import (Compose)](https://github.com/Sphexi/DockMin/wiki/Usage-Stacks#import-compose), [Import (Swarm stacks)](https://github.com/Sphexi/DockMin/wiki/Usage-Swarm#import-swarm-stacks).
+- Container import: an administrator uploads a container archive written by a container export, reviews the user-defined networks and volumes it needs and each host path, and the create form then opens filled from the archive. Missing networks are created from the archive's options and existing ones are used as they are; volumes are created with the `local` driver and filled; each host path is kept or replaced with a new named volume. Sealed environment values are opened with the passphrase, limited to the same 5 failed attempts for each session as stack import, or entered by hand. The form's values are held on the server under an id, and the URL carries only that id. The container is created by the form, with its restrictions, credential choice and start option unchanged. A failed import removes the networks and volumes it created. The upload has its own cap of 7 GiB and 3,600 seconds, and shares the hold of stack import. Each import writes a `container_imported` activity row: [Import](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#import).
 
 ### Changed
 
 - The Request value on the activity event page links to the log filtered by that id.
 - A WebSocket connection is given a request id, so the activity rows and log lines written during a terminal session carry one.
 - `backup_downloaded` activity rows record the id of the backup record as the target id.
+
+### Fixed
+
+- Duplicating a container created on a user-defined network showed the network's id as a second network row.
 
 ## 0.2.2 - 2026-11-08
 

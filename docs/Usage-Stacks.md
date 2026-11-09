@@ -1880,7 +1880,7 @@ The whole archive is read once, in a worker thread, before the review is shown. 
 | A volume manifest that is not valid, differs from the top-level one or is missing | `A volume manifest of the archive is not valid.`, `A volume manifest of the archive differs from the archive's manifest.`, `A volume of the archive has no manifest.` |
 | An entry of a volume breaks a rule | `Volume {index}: ` and the message of [Refusals of the archive](Usage-Volumes#refusals-of-the-archive) |
 | A Swarm stack archive | `The archive holds a Swarm stack. Import it from the Swarm stacks list.` |
-| A container archive | `The archive holds a container, not a stack.` |
+| A container archive | `The archive holds a container. Import it from the Containers list.` |
 | More than 7 GiB uploaded | `The archive is larger than the upload limit.` |
 | Less than 256 MiB free on the data volume after the upload's size | `There is not enough free space on the data volume for this upload.` |
 

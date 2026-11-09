@@ -745,7 +745,7 @@ The delete confirmation page has a section `Activity held for export`.
 
 ## Rows recorded by other features
 
-Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Stack export rows](#stack-export-rows), [Stack import rows](#stack-import-rows), [Container export rows](#container-export-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
+Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Stack export rows](#stack-export-rows), [Stack import rows](#stack-import-rows), [Container export rows](#container-export-rows), [Container import rows](#container-import-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
 
 | Rows | Described on |
 |---|---|
@@ -960,6 +960,45 @@ Target type `container`, the full container id as the target id, in the containe
 - A request from a user who is not an administrator, for a container that does not exist or is not visible, or with an id that is not a full container id, writes no row. A host failure met on the first read of the container writes no row. A request refused by the page's own checks (the secret choice, the two passphrases) writes no row.
 - A row holds no container name, no variable name or value, no volume name, no path and no passphrase.
 - A `container_exported` row that cannot be written logs `activity_event_write_failed` with `action` `container_exported`.
+
+## Container import rows
+
+Target type `container`, the archived container's name (from the archive's manifest, cut to 255 characters) as the target id, in the environment the import runs in. Actor: a user, always an administrator. Category `user_action`. An import writes one row for the networks and volumes step ([Containers](Usage-Containers#import)). The container is created by the create form, which writes `container_created` ([Containers](Usage-Containers#create-and-duplicate)).
+
+| Action | Written | Detail keys |
+|---|---|---|
+| `container_imported` | Once for each confirmation that reaches the service, when it ends: success, or failure | `format_version`, `volumes_archived`, `environment`, `secret_values`, `networks`, `volumes`, `volumes_skipped`, `host_paths_kept`, `host_paths_replaced`, `secrets_opened`, `secrets_entered`, `networks_created`, `volumes_created`, `bytes_written`, `helpers_created`, `helper_container`, `controls_created` |
+
+| Detail key | Value |
+|---|---|
+| `format_version` | The archive's format version |
+| `volumes_archived` | The number of volumes in the archive |
+| `environment` | The number of environment variables |
+| `secret_values` | The number of environment variables marked secret |
+| `networks` | The number of user-defined networks the archive names, created or existing |
+| `volumes` | The number of volumes the import creates |
+| `volumes_skipped` | The number of archived volumes that are not written |
+| `host_paths_kept`, `host_paths_replaced` | The number of host paths kept, and replaced with a named volume |
+| `secrets_opened`, `secrets_entered` | The number of secret values opened with the passphrase, and entered by hand |
+| `networks_created` | The number of networks created. `0` until the first is created |
+| `volumes_created` | The number of volumes created. `0` until the first is created |
+| `bytes_written` | Bytes of tar sent to the host for all volumes |
+| `helpers_created` | The number of helper containers created |
+| `helper_container` | The full id of the helper container of the last volume written |
+| `controls_created` | The number of access controls saved for the networks and volumes created. Present once the objects were created |
+| `objects_removed` | Failure after an object was created: the objects removed, as `network {name}` and `volume {name}`, comma-separated |
+| `objects_kept` | The objects that could not be removed, in the same form, when any |
+| `problems` | Reason `collision`: the number of problems in the plan |
+| `holder_action` | Failure row for a busy volume |
+| `interrupted` | `true` when the request ended before the import finished |
+| `reason`, `message` | Failure rows |
+
+- A key is present once its value is known. A failure row holds the keys known when the import stopped: `format_version` to `secret_values` once the held archive was found; `networks` to `helpers_created` once the plan was made.
+- The target id is empty until the held archive is found.
+- Failure reasons: `upload_gone`, `changed_since_review`, `collision`, `secrets_needed`, `paths_undecided`, `helper_image_missing`, `name_in_use`, `engine_rejected`, `engine_error`, `helper_refused`, `archive_invalid`, `archive_rejected`, `object_busy`, `interrupted` and the host failure reasons ([Host failures](Usage-Containers#host-failures)). An unexpected error records the name of its class.
+- A request cancelled while the import runs removes the objects this import created and writes a failure row with `interrupted` `true` and reason `interrupted`, on a session of its own.
+- A request from a user who is not an administrator, or with an environment or upload identifier of the wrong form, writes no row. The upload, the review, the passphrase and the discard write no row.
+- A row holds no passphrase, no secret value, no variable name, no label and no path. It names the networks and volumes it removed or could not remove.
 
 ## Reveal and dismissal rows
 

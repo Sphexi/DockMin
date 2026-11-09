@@ -124,6 +124,7 @@ from app.web import (
     backup_routes,
     container_create_routes,
     container_export_routes,
+    container_import_routes,
     container_job_routes,
     container_routes,
     container_stream_routes,
@@ -852,6 +853,7 @@ def build_app(options: AppOptions) -> FastAPI:
     app.include_router(token_routes.router)
     app.include_router(container_create_routes.router)
     app.include_router(container_export_routes.router)
+    app.include_router(container_import_routes.router)
     app.include_router(container_job_routes.router)
     app.include_router(container_stream_routes.router)
     app.include_router(container_stream_routes.socket_router)

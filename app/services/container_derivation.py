@@ -261,6 +261,17 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _network_name(mode: str, networks: Mapping[str, Any]) -> str:
+    """Return the attached network's name when `NetworkMode` names it by id."""
+    if not mode or mode in networks:
+        return mode
+    for name, endpoint in networks.items():
+        network_id = _mapping(endpoint).get("NetworkID")
+        if isinstance(network_id, str) and network_id and network_id.startswith(mode):
+            return str(name)
+    return mode
+
+
 def _str_list(value: Any) -> list[str]:
     return [item for item in _list(value) if isinstance(item, str)]
 
@@ -664,6 +675,7 @@ class _Duplicator:
         mode = mode if isinstance(mode, str) else ""
         networks = _mapping(_mapping(self.inspect.get("NetworkSettings")).get("Networks"))
         names = [n for n in networks if isinstance(n, str) and n not in ("host", "none")]
+        mode = _network_name(mode, networks)
         self.kwargs["network_mode"] = "bridge"
         self.kwargs["networks"] = []
         if mode == "none":

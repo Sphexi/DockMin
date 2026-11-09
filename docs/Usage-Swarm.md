@@ -893,7 +893,7 @@ Import creates one managed Swarm stack from a stack export archive, creates and 
 |---|---|
 | Who | Administrators. A standard user receives `404` on every import route, before a request body is read, and nothing is recorded |
 | Environment | A Swarm manager ([Environments](#environments)). Any other environment answers `404` |
-| Accepts | An archive whose manifest `kind` is `swarm_stack`. A Compose stack archive is refused at upload: `The archive holds a Compose stack. Import it from the Compose stacks list.` A container archive is refused: `The archive holds a container, not a stack.` A Swarm stack imports only into a Swarm environment |
+| Accepts | An archive whose manifest `kind` is `swarm_stack`. A Compose stack archive is refused at upload: `The archive holds a Compose stack. Import it from the Compose stacks list.` A container archive is refused: `The archive holds a container. Import it from the Containers list.` A Swarm stack imports only into a Swarm environment |
 | Pages | [Import pages (Swarm stacks)](#import-pages-swarm-stacks) |
 | Objects | Services, networks, configs and secrets of the stack, and its volumes ([Import review (Swarm stacks)](#import-review-swarm-stacks)) |
 | Secret values | The secret variables and secret companion files that were exported. Swarm secrets that existed only in the cluster are not in the archive |

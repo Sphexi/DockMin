@@ -25,6 +25,7 @@ IMAGE_ID = OLD_IMAGE_ID
 ANONYMOUS = "a" * 64
 FRONT, BACK = "f" * 64, "e" * 64
 SHARED_NAMESPACE = "container:" + "9" * 64
+NETWORK_ID = "f" * 64
 DAEMON = DaemonDefaults(runtime="runc", logging_driver="json-file", cgroup_version="1")
 KIB, MIB = 1024, 1024 * 1024
 MASKED = [
@@ -852,6 +853,20 @@ def test_every_user_defined_network_becomes_a_row_with_the_primary_first() -> No
         ("bridge", (), ""),
         ("front", ("web",), "10.0.0.2"),
     ]
+
+
+@pytest.mark.parametrize("mode", [NETWORK_ID, NETWORK_ID[:12]], ids=["full", "short"])
+def test_a_network_mode_holding_a_network_id_becomes_a_row_named_for_that_network(
+    mode: str,
+) -> None:
+    document = inspected(
+        host={"NetworkMode": mode}, networks={"front": {"NetworkID": NETWORK_ID, "Aliases": []}}
+    )
+
+    result = spec_from_inspect(document, is_administrator=False)
+
+    assert result.spec.network_mode == "networks"
+    assert [n.name for n in result.spec.networks] == ["front"]
 
 
 def test_a_duplicate_with_nothing_to_report_has_no_notices() -> None:
