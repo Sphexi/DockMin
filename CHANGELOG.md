@@ -2,6 +2,18 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses [Semantic Versioning](https://semver.org/).
 
+## 0.2.2 - 2026-11-08
+
+### Changed
+
+- Stack, image, volume, user, environment, team, automation and storage target names in tables open that object's page when the viewer can read it.
+- Links from list pages and between detail pages carry the page they start from, and the target page offers a button back to it.
+
+### Fixed
+
+- The stack name on the container list filtered the list instead of opening the stack.
+- A Compose file generated from a project's containers dropped a container's shared network and wrote the borrowed hostname, so a redeploy gave that container a network of its own. It is now written as `network_mode: service:{key}`, or `container:{name}` for a container outside the project.
+
 ## 0.2.1 - 2026-11-07
 
 ### Fixed
