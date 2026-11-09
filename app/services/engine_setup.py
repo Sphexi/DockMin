@@ -22,6 +22,7 @@ from app.services.object_locks import ObjectLockRegistry, StreamSlots
 from app.services.onboarding_store import OnboardingReviewStore
 from app.services.stack_jobs import StackJobRegistry
 from app.services.terminals import RestrictedCache, TerminalTickets
+from app.services.volume_import_store import VolumeImportStore
 
 STALE_AFTER_INTERVALS = 3
 
@@ -51,6 +52,7 @@ class EngineRuntime:
     stack_jobs: StackJobRegistry = field(default_factory=StackJobRegistry)
     host_reads: HostReadStash = field(default_factory=HostReadStash)
     onboarding_reviews: OnboardingReviewStore = field(default_factory=OnboardingReviewStore)
+    volume_imports: VolumeImportStore = field(default_factory=VolumeImportStore)
     instance_name: str = DEFAULT_INSTANCE_NAME
 
     @property
@@ -67,6 +69,7 @@ class EngineRuntime:
         await self.image_jobs.aclose()
         await self.stack_jobs.aclose()
         await self.refresher.aclose()
+        await self.volume_imports.aclose()
         await self.probes.aclose()
         await self.registry.aclose()
 

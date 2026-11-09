@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 - Access lines for refused requests and refused WebSocket handshakes of the redirect listener, with a `listener` field: [Redirect listener](https://github.com/Sphexi/DockMin/wiki/Reference-Deployment#redirect-listener).
 - Links to the Swarm config, Swarm secret and notification channel pages from activity targets, and `Deleted` marks on the event page for those targets and for backups: [Deleted targets](https://github.com/Sphexi/DockMin/wiki/Administration-Activity#deleted-targets).
 - Volume export: an administrator downloads one `local` volume as a `tar.gz` archive of its files with a `manifest.json` (`format_version` 1) and a `skipped.json`, read through a helper container that is never started and is removed when the export ends, with `volume_export_started` and `volume_exported` activity rows: [Export](https://github.com/Sphexi/DockMin/wiki/Usage-Volumes#export).
+- Volume import: an administrator uploads an archive written by a volume export, reviews the volume it creates, and imports it as a new `local` volume owned by the importer, written through a helper container that is never started and removed when the import ends. The upload is checked in full before anything is created, the volume is removed if the write fails, and each import writes a `volume_imported` activity row: [Import](https://github.com/Sphexi/DockMin/wiki/Usage-Volumes#import).
 
 ### Changed
 

@@ -205,7 +205,9 @@ _ROW: Final = re.compile(r"(option|label)-([0-9]{1,4})-(key|value)")
 
 
 @dataclass(frozen=True, slots=True)
-class _Request:
+class VolumeRequest:
+    """A volume to create, validated; `option_fields` names the form row of each option."""
+
     name: str
     driver: str
     options: Mapping[str, str] = field(repr=False)
@@ -342,7 +344,7 @@ def _matches(entry: _Entry, criteria: _Criteria, used: int) -> bool:
     return criteria.q is None or criteria.q in volume.name.casefold()
 
 
-def _is_plain(created: Volume, request: _Request) -> bool:
+def _is_plain(created: Volume, request: VolumeRequest) -> bool:
     return (
         created.driver == request.driver
         and dict(created.options) == dict(request.options)
@@ -477,7 +479,8 @@ def _parse_labels(form: Mapping[str, str], errors: dict[str, str]) -> dict[str, 
     return labels
 
 
-def _parse_form(form: Mapping[str, str]) -> _Request:
+def parse_volume_form(form: Mapping[str, str]) -> VolumeRequest:
+    """Validate a create form's name, driver, option rows and label rows; ValidationFailed."""
     errors: dict[str, str] = {}
     name = form.get("name", "").strip()
     if not name:
@@ -496,7 +499,7 @@ def _parse_form(form: Mapping[str, str]) -> _Request:
     labels = _parse_labels(form, errors)
     if errors:
         raise ValidationFailed(errors)
-    return _Request(name, driver, options, option_fields, labels)
+    return VolumeRequest(name, driver, options, option_fields, labels)
 
 
 async def _take(
@@ -1293,10 +1296,10 @@ class VolumeService:
             return step("failed", "The container could not be removed.")
         return step("removed", "Removed.")
 
-    def _validated(self, actor: Principal, form: Mapping[str, str]) -> _Request:
+    def _validated(self, actor: Principal, form: Mapping[str, str]) -> VolumeRequest:
         audit = current_audit()
         try:
-            request = _parse_form(form)
+            request = parse_volume_form(form)
             SubmittedLabels(request.labels)
         except ValidationFailed as invalid:
             audit.reason = "invalid"
@@ -1335,7 +1338,7 @@ class VolumeService:
         raise VolumeNameInUse()
 
     async def _create_on_host(
-        self, client: EngineClient, request: _Request, run: _CreateRun
+        self, client: EngineClient, request: VolumeRequest, run: _CreateRun
     ) -> Volume:
         volume = await client.volumes.create(
             name=request.name,
@@ -1477,7 +1480,7 @@ class VolumeService:
         self,
         actor: Principal,
         environment_id: int,
-        request: _Request,
+        request: VolumeRequest,
         run: _CreateRun,
         task: asyncio.Future[Volume],
     ) -> None:
@@ -1520,7 +1523,7 @@ class VolumeService:
         self,
         actor: Principal,
         environment_id: int,
-        request: _Request,
+        request: VolumeRequest,
         detail: dict[str, DetailValue],
         task: asyncio.Future[Volume],
     ) -> None:

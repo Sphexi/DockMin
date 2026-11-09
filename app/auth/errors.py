@@ -133,6 +133,15 @@ class SelfProtected(ProductError):
         )
 
     @classmethod
+    def import_target(cls) -> Self:
+        """Return the refusal for importing into a path dockmin's own container mounts."""
+        return cls(
+            "The volume's device option names a path that the container dockmin runs in has "
+            "mounted, or dockmin cannot establish which paths it mounts. "
+            "Data cannot be imported into it from dockmin."
+        )
+
+    @classmethod
     def node(cls) -> Self:
         """Return the refusal for draining the Swarm node that runs dockmin's container."""
         return cls(

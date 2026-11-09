@@ -32,6 +32,8 @@ STREAMED_UPLOAD_ROUTES: Final[frozenset[tuple[str, str]]] = frozenset(
 CONTEXT_UPLOAD_PATH: Final = re.compile(
     r"/environments/[1-9][0-9]{0,18}/stacks/[a-z0-9][a-z0-9_-]{0,62}/contexts/-/upload"
 )
+# The volume import upload, with a body cap and deadline of its own.
+VOLUME_IMPORT_UPLOAD_PATH: Final = re.compile(r"/environments/[1-9][0-9]{0,18}/volumes/-/import")
 # Webhook calls authenticate by a secret in the URL or the Authorization header and read no cookie.
 TOKEN_AUTHENTICATED_PATH: Final = re.compile(rf"{re.escape(HOOKS_PATH)}(/[^/]*)?")
 
@@ -41,9 +43,18 @@ def is_context_upload(method: str, path: str) -> bool:
     return method == "POST" and CONTEXT_UPLOAD_PATH.fullmatch(path) is not None
 
 
+def is_volume_import_upload(method: str, path: str) -> bool:
+    """Report whether the request is the archive upload of a volume import."""
+    return method == "POST" and VOLUME_IMPORT_UPLOAD_PATH.fullmatch(path) is not None
+
+
 def is_streamed_upload(method: str, path: str) -> bool:
     """Report whether the route reads its own body and checks the token from its first part."""
-    return (method, path) in STREAMED_UPLOAD_ROUTES or is_context_upload(method, path)
+    return (
+        (method, path) in STREAMED_UPLOAD_ROUTES
+        or is_context_upload(method, path)
+        or is_volume_import_upload(method, path)
+    )
 
 
 def is_webhook_call(connection: HTTPConnection) -> bool:

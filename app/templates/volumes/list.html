@@ -68,6 +68,7 @@
 <a class="btn" href="{{ route_path('environment_volume_backfill', environment_id=environment.id) }}">Assign owners</a>
 {% endif %}
 {% if can_prune %}
+<a class="btn" href="{{ route_path('environment_volume_import_form', environment_id=environment.id) }}">Import volume</a>
 <a class="btn" href="{{ route_path('environment_volume_prune', environment_id=environment.id) }}">Prune volumes</a>
 {% endif %}
 {% endcall %}

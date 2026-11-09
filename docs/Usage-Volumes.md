@@ -21,6 +21,11 @@ All paths are under `/environments/{id}/volumes`.
 | Bulk removal | `/-/remove` | `POST` |
 | Export confirmation | `/{volume_name}/export` | `GET` |
 | Export download | `/{volume_name}/export` | `POST` |
+| Import upload form | `/-/import` | `GET` |
+| Import upload | `/-/import` | `POST` |
+| Import review | `/-/import/{upload_id}` | `GET` |
+| Import, or add option rows | `/-/import/{upload_id}` | `POST` |
+| Import discard | `/-/import/{upload_id}/cancel` | `POST` |
 | Owner assignment review | `/-/backfill` | `GET` |
 | Owner assignment | `/-/backfill` | `POST` |
 | Save or delete the access control | `/{volume_name}/access`, `/{volume_name}/access/delete` | `POST` |
@@ -30,7 +35,8 @@ All paths are under `/environments/{id}/volumes`.
 - `{tab}` is `overview` (default), `containers` or `access`. Any other value answers `404`. `access` is shown to administrators; other roles receive `403`.
 - `{mode}` is `anonymous` (default) or `all`.
 - `/-/remove` takes 1 to 25 distinct `volume` values. Outside that, an administrator receives `400`. A standard user's request with no `volume` value answers `404`.
-- Every `POST` except the export download redirects (`303`) on success. Create redirects to the new volume, remove to the list. The export download answers `200` with the archive ([Export](#export)). A forced removal and a prune redirect to a result page, `/results/{token}` ([Result pages](Contributing-Frontend-Conventions#result-pages)), which lists each target and outcome; reloading it repeats nothing.
+- `{upload_id}` is 32 lowercase hexadecimal digits. Any other form answers `404` for every role.
+- Every `POST` except the export download and the import run redirects (`303`) on success. Create redirects to the new volume, remove to the list, the import upload to its review, the import discard to the list. The export download answers `200` with the archive ([Export](#export)). The import run answers `200` with its result page ([Import](#import)). A forced removal and a prune redirect to a result page, `/results/{token}` ([Result pages](Contributing-Frontend-Conventions#result-pages)), which lists each target and outcome; reloading it repeats nothing.
 - A refusal renders a page at the real status code, with a `Review again` link for `409`, `502` and `503`.
 - Volume routes have no JSON form.
 
@@ -49,6 +55,7 @@ A volume is identified by its name. Visibility follows the order in [Visibility]
 | Remove with its containers | Yes | Write access to the volume and to every container that uses it. `403` on a local socket |
 | Prune | Yes | Refused (`403`) |
 | Export | Yes, except a volume dockmin's own container mounts | `404` on both routes |
+| Import | Yes | `404` on every import route |
 | Assign owners | Yes | `404` on both routes |
 | Access tab | Yes | Refused (`403`) |
 
@@ -79,7 +86,7 @@ Secret-named keys follow the rule in [Withheld from standard users](Usage-Contai
 | Paging | `cursor`; an invalid cursor answers `400` |
 | Count | `N volumes`, or `N volumes match these filters, of M you can see` |
 | Used by | Names of up to 10 containers the viewer may see, linked. Containers beyond the limit, and containers the viewer may not see, are counted and not named |
-| Buttons | `Create volume` for users who may create; `Assign owners` for administrators when a volume is uncontrolled ([Assign owners](#assign-owners)); `Prune volumes` for administrators; `Remove selected...` for users who may remove |
+| Buttons | `Create volume` for users who may create; `Assign owners` for administrators when a volume is uncontrolled ([Assign owners](#assign-owners)); `Import volume` and `Prune volumes` for administrators; `Remove selected...` for users who may remove |
 
 Every volume the viewer may see is listed. A container uses a volume when it has a mount of type `volume` with the volume's name, in any state. Bind mounts and tmpfs mounts do not count.
 
@@ -286,7 +293,7 @@ Export downloads one volume as a gzip archive holding its files and a manifest. 
 | Disk | Nothing is written to dockmin's disk. The archive is produced while the data is read |
 | Lock | The volume is held until the download ends ([Busy](#busy)) |
 | Concurrency | One export at a time on an environment, two in all ([Limits](#limits)) |
-| Import | Not available |
+| Import | An export archive is imported as a new volume ([Import](#import)) |
 
 ### Confirmation
 
@@ -441,6 +448,314 @@ A refusal before the download starts renders a page at the real status code. Not
 | Reading | A later release reads every earlier `format_version` |
 | Newer archive | An archive whose `format_version` is above the version the release knows is refused |
 
+## Import
+
+Import creates one new volume from a volume export archive and writes the archive's files into it. Administrators only.
+
+1. Open `Import volume` on the volume list.
+2. Choose the archive and `Upload and check`. The archive is read in full. Nothing is created.
+3. Read the review. Change the name, driver or driver options if needed.
+4. Choose `Import volume`. The result page opens.
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on every import route and nothing is recorded |
+| Accepts | Only an archive written by a volume export ([Archive](#archive)). A plain tar file, or any archive that does not start with `manifest.json`, is refused |
+| Creates | A new volume on the host the environment connects to. On a Swarm environment that is the manager the environment reaches, no other node. An existing volume is never written to, replaced or adopted |
+| Owner | The importing administrator ([Ownership](#ownership)) |
+| Write | A helper container is created on the host and never started; the new volume is mounted into it read-write and the files are sent to the Engine's archive call ([Import helper](#import-helper)) |
+| Disk | The upload is kept in a private directory under the data directory until the import ends ([Held uploads](#held-uploads)) |
+| Lock | The volume name is held from the absence check until the owner is saved ([Busy](#busy)) |
+| Recorded | One `volume_imported` row for each import request that reaches the import. The upload, the review and the discard record nothing ([Recorded actions](#recorded-actions)) |
+
+### Pages
+
+#### Upload
+
+`GET /environments/{id}/volumes/-/import`.
+
+| Element | Text |
+|---|---|
+| Heading | `Import volume`, with the environment name and badge |
+| Panel `Upload an archive` | `The archive must have been written by a volume export. It is checked in full before anything is created, and you review what it holds before the volume is created.` |
+| Field `Archive` | Required file input, `.gz`, `.tgz` or `application/gzip`. Help: `A .tar.gz file written by a volume export, up to 7 GiB as uploaded. Devices, FIFOs, sockets, absolute names, names containing .. and entries below a symbolic link are refused.` |
+| Buttons | `Upload and check`, `Cancel` |
+
+The upload is a multipart `POST` with the fields in this order: `csrf_token`, then `archive`. The token is verified before any byte of the file is read. The form works without script.
+
+| Result | Status | Shown |
+|---|---|---|
+| Archive accepted | `303` | The review |
+| Archive refused, upload refused for size or space, or archive of a driver other than `local` | `422` | The upload page, with the message beside `Archive` ([Refusals of the archive](#refusals-of-the-archive)) |
+| Token missing or wrong, or Origin not accepted | `403` | |
+| The body is not a multipart form of the token followed by one file | `400` | |
+| No body data for 15 seconds, or the body takes over 3,600 seconds | `408`, `Connection: close` | |
+| The body exceeds 7 GiB plus 64 KiB | `413` | |
+
+#### Review
+
+`GET /environments/{id}/volumes/-/import/{upload_id}`. Nothing is created or recorded. The page reads the held upload, never the request body.
+
+| Section | Content |
+|---|---|
+| Heading | `Review the import`. Subtitle: `Nothing has been created yet. Check what the archive holds, then confirm.` Button `Back to volumes` |
+| `The archive` | Environment; Format version; Exported (time); Source volume (the name in the manifest); Size as uploaded; Entries (`{N}: {n} files, {n} directories, {n} symbolic links, {n} hard links`); File data (total size of file content); Left out when exported (`{N} devices or FIFOs`, from `skipped.json`); SHA-256 of the uploaded file |
+| `The volume this creates` | `Name` (required, default the source name), `Driver` (default the archive's), `Driver options` rows (default the archive's), and the note on removed credential keys |
+| `Labels` | The labels that will be applied, and the labels that will not |
+| `What happens` | Five statements ([What happens](#what-happens)) and the helper container description |
+| Buttons | `Import volume` (absent when the host has no image), `Back to volumes`, and a separate form `Discard the upload` |
+
+| Element | Text |
+|---|---|
+| Alert when the name exists | `A volume named {name} already exists on this host. An existing volume is never written to. Choose another name.` |
+| `Name` help | `At least two characters: letters, digits, underscore, period and hyphen, starting with a letter or digit. The name must not exist on the host.` |
+| `Driver` help | `Only the local driver can be imported. Leave empty for local.` |
+| `Driver options` help | `Passed to the driver as they are. For the local driver, type, device and o bind a host path or mount a remote filesystem.` |
+| Removed option keys present | `Left out when the volume was exported, because they can hold credentials: {keys}. Enter them above if the volume needs them.` |
+| No option key removed | `No driver option was left out of the archive.` |
+| Labels applied | `Applied as archived:` and a table of `Label` and `Value`. Values are cut to 256 characters with `...` |
+| No label to apply | `The archive carries no labels to apply.` |
+| Labels dropped | `Not applied, because they grant access to a stack, belong to dockmin or are set by Docker:` and the keys |
+| No label dropped | `No label was dropped.` |
+| No image on the host | The alert `The host has no image to use`: `The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then review the import again.` |
+
+- The review reads the host to show whether the name exists and whether a helper image exists. A host that cannot be read answers a page at `503`.
+- The option rows are added by a form post that imports nothing.
+- Credentials are shown nowhere. The review lists the keys the export removed and never a value.
+
+##### What happens
+
+| Statement |
+|---|
+| `The volume becomes yours, as when you create one.` |
+| `Files are written as archived: their numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.` |
+| `The data directory's own owner and mode are not applied; the new volume's root keeps Docker's defaults.` |
+| `Extended attributes other than user. ones are not applied` and, when entries carried others, `({N} entries carried some).` |
+| `If the data cannot be written, the volume this import created is removed.` |
+
+The helper paragraph reads: `dockmin creates a container named dockmin-read- followed by twelve characters from the image {first 12 digits of the image id}, which is already on the host. The container is never started. It mounts the new volume, has no network and no capabilities, and appears in the container list until the import ends. It is removed when the import ends, however it ends.`
+
+#### Result
+
+`POST /environments/{id}/volumes/-/import/{upload_id}` answers `200` with the result page. The upload is removed once the volume has been created, so a second post of the same `{upload_id}` answers `The upload is gone`.
+
+| Element | Text |
+|---|---|
+| Heading | `Volume imported`, with the environment name. Buttons `Open the volume`, `Back to volumes` |
+| Status | `The volume {name} was created and holds the archived data.` |
+| Facts | Environment; Driver; Entries written; File data; Labels applied (count); Labels dropped (the keys, or `None`); Owner |
+| Owner | `You`, or `Not recorded. An administrator can assign access to the volume.` when the owner could not be saved |
+
+#### Discard
+
+`POST /environments/{id}/volumes/-/import/{upload_id}/cancel` removes the held upload and redirects to the list with the message `The upload was discarded. Nothing was changed.` An upload whose import is running is not discarded.
+
+### Accepted and refused entries
+
+An archive is read twice: when it is uploaded, and again while it is sent to the Engine. Both reads apply every rule below.
+
+| Rule | Value |
+|---|---|
+| Compression | gzip only |
+| First entry | A regular file named `manifest.json` |
+| Last entry | `skipped.json` when present. An entry after it is refused |
+| Every other entry | `data`, or a name below `data/` |
+| Data directory entry | `data/` may appear once, as a directory. It is not written |
+| Empty archive | An archive with no entry below `data/` is refused |
+
+| Entry type | Result |
+|---|---|
+| Regular file | Written with its content |
+| Directory | Written |
+| Symbolic link | Written as a link with its target as stored. An absolute target is stored as written. A relative target that resolves outside the volume's root is refused |
+| Hard link | Written as a hard link. The target must be a regular file that comes earlier in the archive, named relative to `data/` |
+| Character device, block device, FIFO, socket, sparse file, any other type | Refused |
+
+| Name rule | Result |
+|---|---|
+| Absolute name | Refused |
+| A `..` component | Refused |
+| Empty or `.` component below `data/` (`data//x`, `data/./x`) | Refused |
+| Control character, or a name that is not valid UTF-8 | Refused |
+| Path over 4,096 bytes, or a component over 255 bytes | Refused |
+| A name that appears twice | Refused |
+| A name used as both a file and a directory | Refused |
+| An entry below a symbolic link of the archive | Refused |
+| Owner uid or gid outside 0 to 4294967295 | Refused |
+| A directory entry with a size | Refused |
+
+A hard link target that fails the name rules, or that is not an earlier regular file, is refused as a bad hard link target.
+
+#### Refusals of the archive
+
+The message is shown beside `Archive` with ` Entry: {name}.` appended when the refusal concerns one entry. The name is shown with unprintable characters replaced by `?`, cut to 80 characters.
+
+| Condition | Message |
+|---|---|
+| The first two bytes are not a gzip header | `The file is not a gzip archive.` |
+| A truncated or corrupt gzip or tar stream, a `skipped.json` that is not an object with an integer `count` of 0 or more, a `skipped.json` over 16 MiB, a directory entry with a size, or an unreadable modification time | `The file is not a readable volume export archive.` |
+| The first entry is not `manifest.json` | `The archive was not written by a volume export: it does not start with manifest.json.` |
+| `manifest.json` over 1 MiB, not JSON, a `format_version` that is missing, not an integer or below 1, a field missing or not in the [manifest](#manifest), `kind` other than `volume`, or `data_path` other than `data` | `The archive's manifest.json is not a valid volume manifest.` |
+| `format_version` above the reader's | `The archive's format version is {N}; this build reads up to 1.` |
+| An entry of a type that is refused | `The archive holds an entry that is not a file, directory or link, such as a device, FIFO or socket.` |
+| An absolute name | `The archive holds an entry with an absolute name.` |
+| A `..` component | ``The archive holds an entry whose name contains `..`.`` |
+| A name or component over the limit | `The archive holds an entry with a name that is too long.` |
+| An unusable name, or an unusable symbolic link target (empty, a control character, over 4,096 bytes) | `The archive holds an entry with an unusable name or link target.` |
+| An entry that is not below `data/`, or follows `skipped.json` | `The archive holds an entry outside its data directory.` |
+| A repeated name | `The archive holds the same name twice.` |
+| A name used as a file and a directory | `The archive uses a name as both a file and a directory.` |
+| An entry below a symbolic link | `The archive holds an entry below a symbolic link.` |
+| A symbolic link target that leaves the volume | `The archive holds a symbolic link whose relative target leaves the volume.` |
+| A hard link whose target is not an earlier regular file | `The archive holds a hard link to a file that does not come earlier in the archive.` |
+| An owner id out of range | `The archive holds an entry with an owner id out of range.` |
+| More than 2,000,000 entries | `The archive holds more entries than the limit allows.` |
+| File data over 64 GiB, or more decompressed bytes than the ceiling ([Limits](#import-limits)) | `The archive extracts to more than the size limit.` |
+| No entry below `data/` | `The archive holds no data.` |
+| The manifest's driver is not `local` | `Only volumes of the local driver can be imported. A plugin driver can run code on the host when its volume is mounted.` |
+| The upload exceeds 7 GiB | `The archive is larger than the upload limit.` |
+| The data volume has less than 256 MiB free after the upload's size | `There is not enough free space on the data volume for this upload.` |
+
+A refused upload is removed from disk at once. The refusal names the first entry that broke a rule.
+
+### Modes and owners
+
+| Property | Result |
+|---|---|
+| Owner uid and gid | Kept as archived, numerically. Owner names are not applied |
+| Permission bits | Kept as archived, except the setuid and setgid bits, which are cleared. The sticky bit is kept |
+| Modification time | Kept as archived, clamped to the range 0 to 17179869184 seconds |
+| Extended attributes | Only `user.` attributes are applied. Others are dropped and counted on the review as entries that carried some |
+| A directory with no entry of its own in the archive | Created by the Engine with owner `0:0` and mode `0755` |
+| The volume's root | The `data/` entry's owner and mode are not applied. The root keeps Docker's defaults for a new volume |
+| Existing content | None. The volume is new |
+
+- The files are written as archived. A container that mounts the volume runs with whatever the files contain.
+- An application that runs as a non-root user reads its data only if the archived uid and gid match the user it runs as on the target.
+
+### Labels
+
+| Label | Result |
+|---|---|
+| `com.docker.stack.namespace`, and every label beginning `com.docker.compose.` or `dockmin.`, matched without regard to case | Not applied. Listed as dropped |
+| `com.docker.volume.anonymous` | Not applied. Listed as dropped |
+| Every other label | Applied as archived. Not editable on the review |
+
+- A label set that fails the create rules ([Create](#create)) refuses the import with `invalid`.
+- The review and the result page list each dropped key. The row records their count.
+
+### Driver and options
+
+| Item | Result |
+|---|---|
+| Defaults | The archive's driver and options |
+| Editable | `Driver` and the option rows, on the review. Rules as [Create](#create) for an administrator |
+| Driver | `local`, or empty. Any other driver is refused: at upload when it is the archive's, and on confirmation when it is typed. Message: `Only volumes of the local driver can be imported. A plugin driver can run code on the host when its volume is mounted.` |
+| Options | Up to 32 rows. Written to the volume as entered |
+| Removed credentials | Options the export removed are not restored. The review lists their keys. Enter them in the option rows if the volume needs them |
+| `device` option | Refused when the path is, holds or lies inside a source of a mount of dockmin's own container, or while dockmin's own mounts on the host are unknown. Reason `self_protected` |
+
+- A volume with the options `type`, `device` and `o` binds a host path or mounts a remote filesystem. The files are written to that path when the volume is mounted by the helper.
+- A `device` path that is not a source of dockmin's own container is not otherwise checked.
+
+### Name collision
+
+| Item | Result |
+|---|---|
+| Review | When the name exists, the review shows the alert above the `Name` field. `Import volume` is still offered |
+| Confirmation | The name is checked on the host while the volume name is held. A name that exists answers `409`: the review again, with `A volume with this name already exists.` at `Name`, the typed values kept, and the upload still held |
+| Existing volume | Never written to, replaced or adopted. The import does not call the create route that returns an existing volume |
+| Appears between the check and the create | A volume of identical driver, options and labels that another client creates in that interval cannot be told apart from the new one. It is written to, and removed if the write fails |
+| Stale access control | A control left on the name by a volume removed outside dockmin is replaced by the new owner's. The row records `stale_control_replaced` |
+
+### Held uploads
+
+| Item | Value |
+|---|---|
+| File | `{data directory}/volume-import/{32 hexadecimal digits}.tar.gz`, mode `0600` in a `0700` directory. Written under a `.partial` name and renamed when complete |
+| Usable by | The user, the session and the environment that uploaded it. Any other use answers `The upload is gone` |
+| Count | One for each user. A newer upload by the same user replaces the earlier one. Four in all; the oldest is dropped past four. An upload whose import is running is never dropped |
+| Lifetime | 30 minutes from the upload. An upload whose import is running does not expire |
+| Removed | On a refused archive, a failed upload, a newer upload by the same user, discard, expiry, shutdown, and at start, when the whole directory is deleted. When the volume has been created, whether the import then succeeds or fails |
+| Kept | After a refusal that created nothing: name in use, invalid fields, a changed digest, no helper image, an unreachable host, a busy volume, a protected path |
+| Digest | SHA-256 of the file, shown on the review and sent back with the confirmation. A different digest is refused |
+| Backups | Not part of a backup archive |
+
+### Import helper
+
+| Item | Value |
+|---|---|
+| Image | An image already on the host, chosen as for [export](#the-helper-container). Nothing is pulled. A host with no image cannot import |
+| Name, label, state | As [export](#the-helper-container): `dockmin-read-{12 hexadecimal digits}`, `dockmin.role=file-reader`, state `created`, never started |
+| Body | `NetworkDisabled` true. `HostConfig`: `Mounts` `[{"Type": "volume", "Source": "{volume}", "Target": "/dockmin-read", "ReadOnly": false}]`, `NetworkMode` `none`, `ReadonlyRootfs` true, `CapDrop` `["ALL"]`, `AutoRemove` false |
+| Write | One Engine archive call for `/dockmin-read`, with `noOverwriteDirNonDir` true, sent as a chunked tar body of `application/x-tar` |
+| Source of the tar | The held file, re-validated and rewritten as it is sent: setuid and setgid bits cleared, `uname` and `gname` emptied, names relative to the volume, the `data/` entry and `manifest.json` and `skipped.json` left out |
+| Visible | The helper is listed with the other containers while it exists |
+| Removed | When the import ends by completion, failure, client disconnect or cancellation, with its anonymous volumes. The volume is not removed by this step. Leftover helpers are swept as for export |
+| Recorded | `helper_container` (the full id) and `helper_removed` on the row |
+
+### Import limits
+
+| Limit | Value |
+|---|---|
+| Upload | 7 GiB as uploaded, with 64 KiB of multipart framing |
+| Upload time | 3,600 seconds for the whole body; 15 seconds without a body message |
+| Free space | At least 256 MiB free on the data volume before the first byte, plus the declared length when the request has one, and after every write |
+| Entries | 2,000,000 |
+| File data | 64 GiB in all |
+| Decompressed bytes read | The file data limit, plus 8 KiB for each allowed entry, plus 2 MiB. Past it, the archive is refused and no entry is named |
+| Path, component | 4,096 bytes, 255 bytes |
+| `manifest.json`, `skipped.json` | 1 MiB, 16 MiB |
+| Validation at once | 2 archives across the process, shared with build context validation |
+| Held uploads | 1 for each user, 4 in all, 30 minutes |
+| Write stall | The import fails when the host accepts no byte for 60 seconds. The host's reply is waited for 600 seconds |
+| Write time | No total limit |
+| Memory | The tar is rebuilt in a worker thread in steps of at most 256 KiB. No entry is held whole |
+
+The reverse proxy limits for the upload are in [Deployment](Reference-Deployment#reverse-proxy-limits-for-volume-imports).
+
+### Import refusals
+
+A refusal at the confirmation renders a page at the real status code. A page for a refusal that created nothing keeps the upload held, and carries a `Review again` link for `409`, `502` and `503`.
+
+| Condition | Status | Page | Message | Reason |
+|---|---|---|---|---|
+| Not an administrator, an environment id or upload id of the wrong form | 404 | | Not found | No row |
+| The upload is not held for this session, user and environment | 409 | `The upload is gone` | `This upload is no longer held. Upload the archive again; nothing was changed.` Link `Upload the archive again` | `upload_gone` |
+| The digest differs from the review's | 400 | The review | `The archive changed since you reviewed it; nothing was changed.` | `changed_since_review` |
+| A field fails validation | 400 | The review | The field's message | `invalid` |
+| The typed driver is not `local` | 400 | The review | `Only volumes of the local driver can be imported. A plugin driver can run code on the host when its volume is mounted.` at `Driver` | `invalid` |
+| The `device` option names a path dockmin's container mounts, or dockmin's mounts are unknown | 409 | `Protected` | `The volume's device option names a path that the container dockmin runs in has mounted, or dockmin cannot establish which paths it mounts. Data cannot be imported into it from dockmin.` | `self_protected` |
+| The name exists | 409 | The review | `A volume with this name already exists.` at `Name` | `name_in_use` |
+| Another action holds the volume | 409 | `This volume is busy` | [Busy](#busy) | `object_busy` |
+| The host has no image | 409 | `The volume cannot be imported` | `The host has no image to create the helper container from. Pull or load an image on the host, then try again.` | `helper_image_missing` |
+| Docker refused the volume's configuration | 502 | `Docker refused this configuration` | `Docker refused this volume configuration.` For administrators, the Engine's scrubbed message under `Docker said`, as for [Create](#create) | `engine_rejected` |
+| The host is unreachable, or did not answer in time | 503 | The host message | [Host failures](Usage-Containers#host-failures) | `unreachable`, `outcome_unknown` |
+| The data could not be written | 502 | `The import failed` | [Failure behaviour](#failure-behaviour) | [Failure reasons](#recorded-actions) |
+
+### Failure behaviour
+
+| Stage | Result |
+|---|---|
+| Before the volume is created | Nothing is changed. The upload stays held, except after `upload_gone` |
+| The data cannot be written after the volume was created (host unreachable, the Engine refused the archive, the archive no longer passes validation, the helper cannot be created) | The helper is removed, then the volume this import created. The page answers `502`: `The archive could not be written to the new volume. The volume this import created was removed.` The upload is removed |
+| That volume cannot be removed | The same page: `The archive could not be written to the new volume. The volume this import created could not be removed; remove it from the volumes list.` The row records `volume_removed` `false` |
+| The request is cancelled or the client leaves during the create or the write | The helper is removed, then the volume. A failure row with reason `interrupted` is written |
+| The request is cancelled while the owner is being saved | The volume and its data stay. A success row with `interrupted` `true` and `control_created` `false` is written |
+| The owner cannot be saved | The volume and its data stay. The result page shows `Owner: Not recorded.` and the row records `control_created` `false` |
+
+- Only the volume the import created is removed, without force. A volume that existed before the import is never removed.
+- The owner is saved last, after the data is written, so a failed import changes no access control.
+- A volume removed this way leaves no access control behind.
+
+### Format versions
+
+| Item | Value |
+|---|---|
+| Read | `format_version` 1, and every earlier version a later release reads |
+| Newer archive | Refused: `The archive's format version is {N}; this build reads up to 1.` |
+| Plain tar, or an archive with no manifest first | Refused: `The archive was not written by a volume export: it does not start with manifest.json.` |
+
 ## dockmin's volumes
 
 A volume mounted in the container dockmin runs in ([dockmin's own container](Usage-Containers#dockmins-own-container)) is listed and its page opens. It is never removed from dockmin.
@@ -572,6 +887,7 @@ A skipped volume writes no row and does not stop the others. Nothing is rolled b
 |---|---|
 | Create | The volume is put under a resource control owned by its creator, administrators included, in the same operation. The control's access level is `write`, and the owner holds the control's level ([Ownership](Usage-Stacks#ownership)). No other user or team is granted anything |
 | Saving fails | The volume is kept. The page shows `Volume created, but its ownership could not be recorded. An administrator can assign access to it.` The row records `control_created` as `false`. The default access policy for uncontrolled objects applies |
+| Import | The new volume is put under a control owned by the importing administrator, after the data is written. The row records `control_created`. Saving fails: the volume is kept and the result page shows `Owner: Not recorded.` |
 | Remove | The control is deleted. The row records `control_released` as `false` when it could not be deleted |
 | Volume made by a stack | It carries the stack's label and is visible to whoever may see the stack. A control on the volume itself overrides the stack's. Removing the stack without its volumes copies the stack's control onto each such volume that has none ([Volumes of a stack](#volumes-of-a-stack)) |
 | Volume with no control | The default access policy for uncontrolled objects applies. Administrators assign a control on the Access tab, or to many volumes at once with [Assign owners](#assign-owners) |
@@ -631,6 +947,7 @@ One action runs on a volume at a time. A second is refused at once; it does not 
 | Remove | The volume |
 | Remove with containers | Each container in turn, then the volume |
 | Export | The volume, from the start of the download until it ends |
+| Import | The new volume's name, from the absence check until the owner is saved |
 | Stack deploy, redeploy | The name of each volume the stack's file creates |
 | Stack remove with volumes | Each volume the remove deletes |
 
@@ -646,6 +963,7 @@ Every action records one activity row, for success and for failure. A refusal on
 | `volume_removed` | The volume's name |
 | `volume_export_started` | The volume's name. Written once the export is cleared and the helper container exists, before any data is read, or when the export is refused after the request reached the service |
 | `volume_exported` | The volume's name. Written when the download ends, for success and for failure |
+| `volume_imported` | The volume's name, cut to 255 characters. Written once for each import request that reaches the import, for success and for failure. The upload, the review and the discard write none |
 | `resource_control_created` | The volume's name. Written by an owner assignment, one row for each volume assigned, and by [Adopt everything on this host](Usage-Environments#adopt-everything-on-this-host), which records `onboarding` `true` and `candidate_source` and not `backfill` |
 
 | Detail key | Present when |
@@ -666,6 +984,7 @@ Every action records one activity row, for success and for failure. A refusal on
 | `control_released` | `volume_removed`: whether the access control was deleted |
 | `format_version`, `containers`, `running_containers`, `helper_container` | `volume_export_started`. Keys: [Activity](Administration-Activity#volume-export-rows) |
 | `name`, `bytes`, `source_bytes`, `skipped`, `completed`, `helper_removed` | `volume_exported`. Keys: [Activity](Administration-Activity#volume-export-rows) |
+| `name`, `driver`, `format_version`, `members`, `bytes`, `option_keys`, `labels`, `labels_dropped`, `helper_container`, `helper_removed`, `bytes_written`, `control_created`, `stale_control_replaced`, `volume_removed` | `volume_imported`. Keys: [Activity](Administration-Activity#volume-import-rows) |
 | `backfill` | `resource_control_created` from an owner assignment: `true` |
 | `candidate_source` | `resource_control_created` from an owner assignment: `container_control`, or `activity` when any mounting container's owner came from the activity log |
 | `containers` | `resource_control_created` from an owner assignment: the short ids of the mounting containers, comma-separated |
@@ -688,12 +1007,14 @@ A removal with containers writes a `container_removed` row for each container it
 | `restricted` | A standard user chose a driver or set an option |
 | `name_in_use` | A volume with the name exists |
 | `volume_in_use` | Removal of a volume that containers mount |
-| `changed_since_review` | The creation time or the use differs from the confirmation |
-| `self_protected` | The container dockmin runs in has the volume mounted. For an export: also while dockmin's own mounts on the host are unknown, and for a volume bound to a path dockmin's container mounts |
+| `changed_since_review` | The creation time or the use differs from the confirmation. For an import: the held archive's digest differs from the review's |
+| `self_protected` | The container dockmin runs in has the volume mounted. For an export: also while dockmin's own mounts on the host are unknown, and for a volume bound to a path dockmin's container mounts. For an import: a `device` option naming such a path |
 | `object_busy` | Another action holds the volume |
 | `export_busy` | `volume_export_started`: the export limit is reached |
-| `plugin_driver`, `helper_image_missing`, `helper_refused`, `unreadable` | `volume_export_started`: [Refusals](#refusals) |
-| `interrupted`, `malformed_stream` | `volume_exported`: the client left before the archive was complete; the host's stream was not the tar of one directory |
+| `plugin_driver`, `helper_image_missing`, `helper_refused`, `unreadable` | `volume_export_started`: [Refusals](#refusals). `helper_image_missing` and `helper_refused` also on `volume_imported` |
+| `upload_gone` | `volume_imported`: the upload is not held for this session, user and environment |
+| `archive_invalid`, `archive_rejected` | `volume_imported`: the held archive no longer passed validation while it was sent; the Engine refused the archive or the path |
+| `interrupted`, `malformed_stream` | `volume_exported`: the client left before the archive was complete; the host's stream was not the tar of one directory. `interrupted` also on `volume_imported`: the request ended during the create or the write |
 | `volume_gone` | The volume no longer exists |
 | `engine_rejected` | Docker refused the request |
 | `volume_changed` | `container_created`: a volume changed while a standard user's container was being created |

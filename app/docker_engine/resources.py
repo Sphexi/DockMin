@@ -6,14 +6,20 @@ import binascii
 import json
 import re
 import time
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import aclosing
 from typing import Any, Literal, Protocol
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from app.docker_engine.archive import ArchiveEntry, DirectoryStream, open_directory, read_archive
+from app.docker_engine.archive import (
+    ArchiveEntry,
+    DirectoryStream,
+    open_directory,
+    read_archive,
+    write_archive,
+)
 from app.docker_engine.engine_http import (
     ACTION_REPLY_BYTES,
     COUNT_RESPONSE_BYTES,
@@ -433,6 +439,15 @@ class ContainersApi:
         must be a full 64-hex id.
         """
         return await open_directory(self._http, container_id, path)
+
+    async def put_archive(self, container_id: str, path: str, chunks: AsyncIterator[bytes]) -> None:
+        """Extract a tar, sent as it is produced, into a directory of a container.
+
+        An existing directory is never replaced by a non-directory or the reverse. Fails with
+        an `ArchiveError` subclass when the Engine refuses the archive; a write that sends
+        nothing for 60 seconds fails. `container_id` must be a full 64-hex id.
+        """
+        await write_archive(self._http, container_id, path, chunks)
 
     async def create(self, body: Mapping[str, Any], *, name: str | None = None) -> str:
         """Create a container from an Engine create body and return its id.

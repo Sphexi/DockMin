@@ -189,15 +189,20 @@ def helper_body(image: str, working_dir: str) -> dict[str, Any]:
     }
 
 
-def volume_helper_body(image: str, volume: str) -> dict[str, Any]:
-    """Build the create body of a volume helper: the volume read-only, nothing else reachable."""
+def volume_helper_body(image: str, volume: str, *, writable: bool = False) -> dict[str, Any]:
+    """Build the create body of a volume helper: the volume read-only unless `writable`."""
     return {
         "Image": image,
         "Labels": {HELPER_ROLE_LABEL: HELPER_ROLE},
         "NetworkDisabled": True,
         "HostConfig": {
             "Mounts": [
-                {"Type": "volume", "Source": volume, "Target": MOUNT_POINT, "ReadOnly": True}
+                {
+                    "Type": "volume",
+                    "Source": volume,
+                    "Target": MOUNT_POINT,
+                    "ReadOnly": not writable,
+                }
             ],
             "NetworkMode": "none",
             "ReadonlyRootfs": True,
@@ -266,7 +271,7 @@ class HostFileSession:
 
 
 class VolumeHelper:
-    """A helper container with one volume mounted read-only; valid only inside `volume_session`."""
+    """A helper container with one volume mounted; valid only inside `volume_session`."""
 
     def __init__(
         self, client: EngineClient, container_id: str, leftovers: tuple[HelperLeftover, ...]
@@ -279,6 +284,10 @@ class VolumeHelper:
     async def stream(self) -> DirectoryStream:
         """Stream the volume's contents as a tar; the caller closes the stream."""
         return await self._client.containers.archive_directory(self.container_id, MOUNT_POINT)
+
+    async def write(self, chunks: AsyncIterator[bytes]) -> None:
+        """Extract a tar into the volume; the helper must have been made `writable`."""
+        await self._client.containers.put_archive(self.container_id, MOUNT_POINT, chunks)
 
 
 class HostFileReader:
@@ -316,9 +325,11 @@ class HostFileReader:
 
     @asynccontextmanager
     async def volume_session(
-        self, actor: Principal, volume: str, *, image: str
+        self, actor: Principal, volume: str, *, image: str, writable: bool = False
     ) -> AsyncIterator[VolumeHelper]:
-        """Sweep leftovers, create a helper that mounts `volume` read-only, and remove it on exit.
+        """Sweep leftovers, create a helper that mounts `volume`, and remove it on exit.
+
+        The mount is read-only unless `writable`.
 
         The helper is removed together with any anonymous volume its image declared, never the
         mounted volume, and is exempt from the leftover sweep while the block runs. `image` must
@@ -326,7 +337,9 @@ class HostFileReader:
         """
         require_administrator(actor)
         leftovers = await self.remove_leftovers()
-        container_id = await self._create_helper(volume_helper_body(image, volume), volumes=True)
+        container_id = await self._create_helper(
+            volume_helper_body(image, volume, writable=writable), volumes=True
+        )
         helper = VolumeHelper(self._client, container_id, leftovers)
         _IN_USE.add(container_id)
         try:

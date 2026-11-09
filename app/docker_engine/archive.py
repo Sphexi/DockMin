@@ -1,4 +1,4 @@
-"""Read a file or stream a directory out of a container through the Engine archive endpoint."""
+"""Read, stream and write container paths through the Engine archive endpoint."""
 
 import asyncio
 import base64
@@ -8,7 +8,7 @@ import json
 import posixpath
 import re
 import tarfile
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Final
@@ -22,6 +22,8 @@ STAT_HEADER_MAX_CHARS: Final = 8192
 TAR_OVERHEAD_BYTES: Final = 64 * 1024
 ARCHIVE_SECONDS: Final = 120.0
 STALL_SECONDS: Final = 60.0
+WRITE_REPLY_SECONDS: Final = 600.0
+WRITE_REPLY_BYTES: Final = 64 * 1024
 PATH_MAX_BYTES: Final = 4096
 
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
@@ -85,6 +87,12 @@ class MemberNameMismatch(ArchiveError):
     """The archive's member is not named after the requested path."""
 
     code = "member_name"
+
+
+class ArchiveRejected(ArchiveError):
+    """The Engine refused the archive that was sent."""
+
+    code = "rejected"
 
 
 class InvalidArchivePath(ArchiveError):
@@ -230,6 +238,38 @@ async def open_directory(http: EngineHttp, container_id: str, path: str) -> Dire
         await chunks.aclose()
         raise
     return DirectoryStream(chunks, first, stats[0].name)
+
+
+async def write_archive(
+    http: EngineHttp, container_id: str, path: str, chunks: AsyncIterator[bytes]
+) -> None:
+    """Send a tar as a chunked body to be extracted into the directory at `path`.
+
+    The Engine never replaces a directory with a non-directory or the reverse. There is no total
+    time limit; a write that stalls for `STALL_SECONDS` fails, and the reply is waited for
+    `WRITE_REPLY_SECONDS`. Cancelling closes the request. ArchiveRejected when the Engine
+    answers 400, FileMissing when it answers 404.
+    """
+    environment_id = http.environment_id
+    if _CONTAINER_ID.fullmatch(container_id) is None:
+        raise EngineError(environment_id, "archive writes need a full container id")
+    _requested_name(environment_id, path)
+    try:
+        await http.request(
+            "PUT",
+            f"/containers/{container_id}/archive",
+            params={"path": path, "noOverwriteDirNonDir": "true"},
+            content=chunks,
+            headers={"Content-Type": "application/x-tar"},
+            timeouts=Timeouts(connect=5.0, read=WRITE_REPLY_SECONDS, write=STALL_SECONDS, pool=5.0),
+            max_bytes=WRITE_REPLY_BYTES,
+        )
+    except NotFound:
+        raise FileMissing(environment_id, "the path does not exist") from None
+    except EngineError as error:
+        if error.status_code == _BAD_REQUEST:
+            raise ArchiveRejected(environment_id, "the Engine refused the archive") from None
+        raise
 
 
 def _checked_directory(environment_id: int, header: str | None) -> PathStat:

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Imported volume {{ result.name }} - dockmin{% endblock %}
+{% set crumb_page = "Import result" %}
+{% block content %}
+{% call page_header("Volume imported", environment.name) %}
+<a class="btn btn--primary" href="{{ detail_href }}">Open the volume</a>
+<a class="btn" href="{{ list_href }}">Back to volumes</a>
+{% endcall %}
+
+<div class="panel" role="status">
+  <p>The volume <span class="mono cell-wrap">{{ result.name }}</span> was created and holds the archived data.</p>
+</div>
+<section class="panel" aria-labelledby="result-heading">
+  <h2 id="result-heading">What was created</h2>
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ environment.name }}</dd>
+    <dt>Driver</dt>
+    <dd class="mono">{{ result.driver }}</dd>
+    <dt>Entries written</dt>
+    <dd>{{ result.members }}</dd>
+    <dt>File data</dt>
+    <dd>{{ result.bytes|filesize }}</dd>
+    <dt>Labels applied</dt>
+    <dd>{{ result.labels_applied }}</dd>
+    <dt>Labels dropped</dt>
+    <dd>{% if result.labels_dropped %}<span class="mono cell-wrap">{{ result.labels_dropped|join(", ")|visible_text }}</span>{% else %}None{% endif %}</dd>
+    <dt>Owner</dt>
+    <dd>{% if result.control_created %}You{% else %}Not recorded. An administrator can assign access to the volume.{% endif %}</dd>
+  </dl>
+</section>
+{% endblock %}

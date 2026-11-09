@@ -69,6 +69,18 @@ def removals(daemon: VolumeEngine) -> list[dict[str, str]]:
     return [dict(call.query) for call in daemon.calls("DELETE") if "/containers/" in call.path]
 
 
+def test_a_writable_helper_body_differs_only_in_the_mount_being_read_write() -> None:
+    read_only, writable = (
+        volume_helper_body("img", VOLUME),
+        volume_helper_body("img", VOLUME, writable=True),
+    )
+
+    (mount,) = writable["HostConfig"]["Mounts"]
+    assert (mount["ReadOnly"], mount["Target"], mount["Source"]) == (False, MOUNT_POINT, VOLUME)
+    assert writable["HostConfig"] | {"Mounts": []} == read_only["HostConfig"] | {"Mounts": []}
+    assert writable["NetworkDisabled"] is True
+
+
 def test_the_helper_body_mounts_the_volume_read_only_with_nothing_else_reachable() -> None:
     body = volume_helper_body("img", VOLUME)
 

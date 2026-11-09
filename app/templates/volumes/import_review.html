@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/key_value_rows.html" import key_value_rows %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Review import on {{ review.environment_name }} - dockmin{% endblock %}
+{% set crumb_page = "Import volume" %}
+{% set manifest = review.summary.manifest %}
+{% block content %}
+{% call page_header("Review the import", "Nothing has been created yet. Check what the archive holds, then confirm.") %}
+<a class="btn" href="{{ list_href }}">Back to volumes</a>
+{% endcall %}
+
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+
+<section class="panel" aria-labelledby="archive-heading">
+  <h2 id="archive-heading">The archive</h2>
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ review.environment_name }}</dd>
+    <dt>Format version</dt>
+    <dd>{{ manifest.format_version }}</dd>
+    <dt>Exported</dt>
+    <dd><time datetime="{{ manifest.exported_at|timestamp_iso }}">{{ manifest.exported_at|timestamp }}</time></dd>
+    <dt>Source volume</dt>
+    <dd class="mono cell-wrap">{{ manifest.name|visible_text }}</dd>
+    <dt>Size as uploaded</dt>
+    <dd>{{ review.archive_size|filesize }}</dd>
+    <dt>Entries</dt>
+    <dd>{{ review.summary.members }}: {{ review.summary.files }} files, {{ review.summary.directories }} directories, {{ review.summary.symlinks }} symbolic links, {{ review.summary.hardlinks }} hard links</dd>
+    <dt>File data</dt>
+    <dd>{{ review.summary.bytes|filesize }}</dd>
+    <dt>Left out when exported</dt>
+    <dd>{{ review.summary.skipped }} devices or FIFOs</dd>
+    <dt>SHA-256</dt>
+    <dd class="mono cell-wrap">{{ review.digest }}</dd>
+  </dl>
+</section>
+
+<form class="form create-form" method="post" action="{{ post_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_digest" value="{{ review.digest }}">
+
+  <section class="panel create-section" aria-labelledby="volume-title">
+    <h2 class="create-section__title" id="volume-title">The volume this creates</h2>
+    <div class="create-section__body">
+      {% if review.name_taken and not errors.get("name") %}
+      <div class="panel panel--alert" role="note">
+        <p>A volume named <span class="mono">{{ review.name|visible_text }}</span> already exists on this host. An existing volume is never written to. Choose another name.</p>
+      </div>
+      {% endif %}
+      {{ form_field("name", "Name", value=values.get("name", ""), error=errors.get("name"), required=true, help="At least two characters: letters, digits, underscore, period and hyphen, starting with a letter or digit. The name must not exist on the host.") }}
+      {{ form_field("driver", "Driver", value=values.get("driver", ""), error=errors.get("driver"), help="Only the local driver can be imported. Leave empty for local.") }}
+      {{ key_value_rows("option", "Driver options", "Option", "Passed to the driver as they are. For the local driver, type, device and o bind a host path or mount a remote filesystem.", option_count, row_cap, values, errors, post_href) }}
+      {% if review.removed_option_keys %}
+      <p class="field__help">Left out when the volume was exported, because they can hold credentials: <span class="mono">{{ review.removed_option_keys|join(", ") }}</span>. Enter them above if the volume needs them.</p>
+      {% else %}
+      <p class="field__help">No driver option was left out of the archive.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="labels-title">
+    <h2 class="create-section__title" id="labels-title">Labels</h2>
+    <div class="create-section__body">
+      {% if review.labels %}
+      <p>Applied as archived:</p>
+      <table class="table">
+        <caption class="visually-hidden">Labels applied to the new volume</caption>
+        <thead><tr><th scope="col">Label</th><th scope="col">Value</th></tr></thead>
+        <tbody>
+          {% for key, value in review.labels %}
+          <tr><th scope="row"><span class="mono cell-wrap">{{ key|visible_text }}</span></th><td class="mono cell-wrap">{{ value|visible_text }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p>The archive carries no labels to apply.</p>
+      {% endif %}
+      {% if review.labels_dropped %}
+      <p>Not applied, because they grant access to a stack, belong to dockmin or are set by Docker:</p>
+      <ul>
+        {% for key in review.labels_dropped %}
+        <li class="mono cell-wrap">{{ key|visible_text }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>No label was dropped.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="effects-title">
+    <h2 class="create-section__title" id="effects-title">What happens</h2>
+    <div class="create-section__body">
+      <ul>
+        <li>The volume becomes yours, as when you create one.</li>
+        <li>Files are written as archived: their numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.</li>
+        <li>The data directory's own owner and mode are not applied; the new volume's root keeps Docker's defaults.</li>
+        <li>Extended attributes other than <span class="mono">user.</span> ones are not applied{% if review.summary.xattr_members_dropped %} ({{ review.summary.xattr_members_dropped }} entries carried some){% endif %}.</li>
+        <li>If the data cannot be written, the volume this import created is removed.</li>
+      </ul>
+      {% if review.can_import %}
+      <p>dockmin creates a container named <span class="mono">{{ review.helper_name_prefix }}</span> followed by twelve characters from the image <span class="mono">{{ review.helper_image|replace("sha256:", "")|truncate(12, true, "") }}</span>, which is already on the host. The container is never started. It mounts the new volume, has no network and no capabilities, and appears in the container list until the import ends. It is removed when the import ends, however it ends.</p>
+      {% else %}
+      <div class="panel panel--alert" role="note">
+        <h3>The host has no image to use</h3>
+        <p>The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then review the import again.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="form__actions">
+    {% if review.can_import %}
+    <button type="submit" class="btn btn--primary">Import volume</button>
+    {% endif %}
+    <a class="btn" href="{{ list_href }}">Back to volumes</a>
+  </div>
+</form>
+
+<form class="form" method="post" action="{{ cancel_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="form__actions">
+    <button type="submit" class="btn">Discard the upload</button>
+  </div>
+</form>
+{% endblock %}

@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 import unicodedata
-from collections.abc import AsyncGenerator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterable, Callable, Mapping
 from typing import Any
 from urllib.parse import urlencode
 
@@ -301,7 +301,7 @@ class EngineHttp:
         *,
         params: Params | None = None,
         json_body: Any = None,
-        content: bytes | None = None,
+        content: bytes | AsyncIterable[bytes] | None = None,
         headers: Mapping[str, str] | None = None,
         timeouts: Timeouts | None = None,
         also_ok: frozenset[int] = frozenset(),
@@ -310,7 +310,8 @@ class EngineHttp:
         """Send a versioned request and return the response; map every failure.
 
         `content` is a body the caller already encoded, so a large document is serialised off
-        the event loop; the caller sets its Content-Type.
+        the event loop, or an async iterator of chunks sent chunked; the caller sets its
+        Content-Type.
         """
         await self.ensure_negotiated()
         return await self._send(
@@ -500,7 +501,7 @@ class EngineHttp:
         *,
         params: Params | None = None,
         json_body: Any = None,
-        content: bytes | None = None,
+        content: bytes | AsyncIterable[bytes] | None = None,
         headers: Mapping[str, str] | None = None,
         timeouts: Timeouts | None = None,
         also_ok: frozenset[int] = frozenset(),

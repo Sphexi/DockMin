@@ -146,6 +146,7 @@ dockmin finds the container it runs in at start ([Instance](Administration-Insta
 | Create, duplicate or recreate a container with `PidMode`, `IpcMode` or `NetworkMode` of the form `container:{name or id}` naming it, `VolumesFrom` naming it, or a named volume it has mounted | Refused, in every environment that reports the container |
 | Remove a volume it has mounted: single, with containers, bulk, prune, stack removal with volumes | Refused, or the volume is kept |
 | Export a volume it has mounted, or a `local` volume bound to a path it mounts | Refused. While its mounts on the host are unknown, every volume of that host is refused |
+| Import into a `local` volume whose `device` option names a path it mounts | Refused. While its mounts on the host are unknown, every `device` path is refused |
 | Deploy, redeploy, stop, restart or remove its Compose project | Refused |
 | Change or remove its Swarm service; change the Swarm stack that holds it; drain its node | Refused |
 | Restart | Only by an administrator, from the Instance page, through an environment on the local Docker socket |
@@ -186,6 +187,34 @@ An administrator can download a volume's files as one archive ([Volumes](Usage-V
 | Labels | `com.docker.compose.*`, `com.docker.stack.namespace` and `dockmin.*` are not written |
 | Host access | A helper container created from an image already on the host, never started, with the volume read-only, no network, a read-only root file system and all capabilities dropped. It is removed with its anonymous volumes when the export ends |
 | Recorded | `volume_export_started` and `volume_exported`, naming the volume and never an option value, a label value or a path ([Activity](Administration-Activity#volume-export-rows)) |
+
+## Volume import
+
+An administrator can create a volume from an export archive ([Volumes](Usage-Volumes#import)).
+
+| Item | Value |
+|---|---|
+| Who | Administrators only. Any other user receives `404` on every import route, before a request body is read, and nothing is recorded |
+| Archives accepted | Only archives written by a volume export. The first entry must be `manifest.json` with a valid manifest. A plain tar file is refused. The archive is not signed or authenticated: any archive in the format is accepted |
+| Upload | A multipart `POST` whose first part is the CSRF token, verified before any byte of the file is read. At most 7 GiB and 64 KiB, within 3,600 seconds. Written to `{data directory}/volume-import/` as a `0600` file in a `0700` directory, with at least 256 MiB left free at every write |
+| Held upload | Usable only by the user, the session and the environment that made it, under a random 128-bit identifier. One for each user, four in all, 30 minutes. Deleted on every way out, and the whole directory at start |
+| Validation | The whole archive is read and checked before any volume is created, and checked again while it is sent. A refusal names the first entry at fault |
+| Path rules | Absolute names, `..` components, empty or `.` components, control characters, names that are not UTF-8, paths over 4,096 bytes, components over 255 bytes, repeated names, a name used as both a file and a directory, and anything outside `data/` are refused |
+| Symbolic links | Written as links, never followed. An entry below a symbolic link of the archive is refused. A relative target that resolves outside the volume's root is refused. An absolute target is written as stored and resolves in the root of whatever container mounts the volume |
+| Hard links | Written only when the target is a regular file that comes earlier in the archive under `data/` |
+| Devices, FIFOs, sockets | Refused, with sparse files and every other entry type that is not a file, directory or link |
+| Modes | The setuid and setgid bits are cleared. The sticky bit is kept |
+| Owners | Numeric uid and gid are kept as archived, within 0 to 4294967295. Owner names are emptied. Files are written with the owners the archive names, including `0:0` |
+| Extended attributes | Only `user.` attributes are applied |
+| Resource limits | 2,000,000 entries, 64 GiB of file data, and a ceiling on decompressed bytes of the file data limit plus 8 KiB for each allowed entry plus 2 MiB, so a compression bomb is refused. At most 2 archives are validated at once |
+| Labels | `com.docker.compose.*`, `com.docker.stack.namespace` and `dockmin.*` are never applied, so an import cannot place a volume under a stack's access. `com.docker.volume.anonymous` is never applied |
+| Driver | Only `local`. A plugin driver is refused at upload and on confirmation |
+| Driver options | Shown and editable on the review. A `device` option that is, holds or lies inside a source of a mount of dockmin's own container is refused, as is every `device` while dockmin's mounts on the host are unknown. Any other `device` path receives the archive's files when the volume is mounted by the helper |
+| Name | An existing volume is never written to, replaced or adopted. The name is checked under the volume lock |
+| Host access | A helper container created from an image already on the host, never started, with the volume mounted read-write, no network, a read-only root file system and all capabilities dropped. It is removed with its anonymous volumes when the import ends |
+| Failure | The volume the import created is removed. A volume that existed before is never removed |
+| Contents | Not scanned. A container that mounts the volume runs with whatever the files contain, including executables |
+| Recorded | `volume_imported`, naming the volume and the option keys, and never an option value, a label value, a path or file content ([Activity](Administration-Activity#volume-import-rows)) |
 
 ## Stack builds
 

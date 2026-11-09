@@ -48,8 +48,8 @@ class SkippedMember:
     kind: str
 
 
-class _Source:
-    """A blocking reader over the Engine's chunks; `pull` returns the next chunk or None."""
+class ChunkSource:
+    """A blocking reader over a stream of chunks; `pull` returns the next chunk or None."""
 
     def __init__(self, pull: Callable[[], bytes | None]) -> None:
         self._pull = pull
@@ -96,10 +96,10 @@ class _Source:
             raise StreamMalformed("the archive has no end marker")
 
 
-class _Body:
+class EntryBody:
     """The data of one member, readable once and consumed to its padding before the next."""
 
-    def __init__(self, source: _Source, size: int) -> None:
+    def __init__(self, source: ChunkSource, size: int) -> None:
         self._source = source
         self.left = size
         self._padding = -size % BLOCK
@@ -119,19 +119,21 @@ class _Body:
 
 
 @dataclass(slots=True)
-class _Entry:
+class ReadEntry:
+    """One member header and the body it announces."""
+
     info: tarfile.TarInfo
-    body: _Body
+    body: EntryBody
 
 
-class _Reader:
+class TarReader:
     """Reads tar members one at a time, holding at most `EXTENSION_MAX_BYTES` for any header."""
 
-    def __init__(self, source: _Source) -> None:
+    def __init__(self, source: ChunkSource) -> None:
         self._source = source
-        self._current: _Body | None = None
+        self._current: EntryBody | None = None
 
-    def next(self) -> _Entry | None:
+    def next(self) -> ReadEntry | None:
         """Return the next member, or None after the end-of-archive marker."""
         if self._current is not None:
             self._current.drain()
@@ -177,7 +179,7 @@ class _Reader:
         long_name: str | None,
         long_link: str | None,
         records: dict[str, str],
-    ) -> _Entry:
+    ) -> ReadEntry:
         if long_name is not None:
             info.name = long_name
         if long_link is not None:
@@ -187,9 +189,9 @@ class _Reader:
         carries_data = (
             info.type in tarfile.REGULAR_TYPES or info.type not in tarfile.SUPPORTED_TYPES
         )
-        body = _Body(self._source, info.size if carries_data else 0)
+        body = EntryBody(self._source, info.size if carries_data else 0)
         self._current = body
-        return _Entry(info, body)
+        return ReadEntry(info, body)
 
 
 def _pax_records(data: bytes) -> dict[str, str]:
@@ -368,7 +370,7 @@ class RewriteStream:
             return None
 
     def _rewrite(self) -> None:
-        source = _Source(lambda: self._call(self._next_chunk()))
+        source = ChunkSource(lambda: self._call(self._next_chunk()))
         sink = _Sink(lambda chunk: self._call(self._output.put(chunk)))
         with (
             gzip.GzipFile(fileobj=sink, mode="wb", compresslevel=GZIP_LEVEL, mtime=0) as compressed,
@@ -381,7 +383,7 @@ class RewriteStream:
         ):
             try:
                 self._add_document(out, MANIFEST_NAME, self._manifest)
-                self._copy(_Reader(source), out)
+                self._copy(TarReader(source), out)
                 source.finish()
                 self._add_document(out, SKIPPED_NAME, self._skipped_document())
             except BaseException:
@@ -389,7 +391,7 @@ class RewriteStream:
                 raise
         sink.finish()
 
-    def _copy(self, reader: _Reader, out: tarfile.TarFile) -> None:
+    def _copy(self, reader: TarReader, out: tarfile.TarFile) -> None:
         first = reader.next()
         if first is None or first.info.name != self._root or not first.info.isdir():
             raise StreamMalformed("the archive does not start with the directory that was read")
@@ -406,7 +408,7 @@ class RewriteStream:
         return relative
 
     def _copy_entry(
-        self, out: tarfile.TarFile, entry: _Entry, target: str, relative: str = ""
+        self, out: tarfile.TarFile, entry: ReadEntry, target: str, relative: str = ""
     ) -> None:
         info = entry.info
         if info.type in _SKIPPED_TYPES or info.type not in _COPIED_TYPES:
