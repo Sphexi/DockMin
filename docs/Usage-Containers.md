@@ -16,6 +16,7 @@ Containers are listed and managed per environment. The list, the detail page and
 | Duplicate form (GET) | `/environments/{id}/containers/new?from={container_id}` | Yes | As the create form, and read access to the source |
 | Create (POST) | `/environments/{id}/containers` | Yes | As the create form |
 | Recreate confirmation (GET) and recreate (POST) | `/environments/{id}/containers/{container_id}/recreate` | Yes | Write access only |
+| Export confirmation (GET) and export download (POST) | `/environments/{id}/containers/{container_id}/export` | Yes | `404` |
 | Live stats | `/environments/{id}/containers/{container_id}/stats/stream` | Yes | Read access |
 | Log stream (server-sent events) | `/environments/{id}/containers/{container_id}/logs/stream` | Yes | Read access |
 | Log download | `/environments/{id}/containers/{container_id}/logs/download` | Yes | Read access |
@@ -229,6 +230,7 @@ The summary above the tabs shows the state, image, short id, environment, and th
 |---|---|
 | Open terminal | The container is running and the user may [open a terminal](#terminal) |
 | Attach | As `Open terminal`, and the container [can be attached to](#attach) |
+| Export | The user is an administrator and the container is not the one dockmin runs in ([Export](#export)) |
 
 When a standard user is refused a terminal because the container uses administrator-only options, the summary shows the reason in place of the buttons.
 
@@ -674,6 +676,7 @@ dockmin finds the container it runs in at start ([Instance](Administration-Insta
 | Batch | The container is listed as `protected: this dockmin instance, not changed`, left out of the posted selection, and reported `Protected` if a batch reaches it. `Protected` counts as failed |
 | Detach from a network | Refused ([Networks](Usage-Networks#detach)) |
 | Terminal, attach | Refused ([Terminal](#terminal)) |
+| Export | Refused for every role, on the confirmation and on the download: `409`, the page `Protected`. The `Export` button is not shown ([Export refusals](#export-refusals)) |
 | Create or recreate a container that joins its process, IPC or network namespace, takes its volumes, or mounts a named volume it has mounted | Refused for every role: `409`. The message names the volume when a volume is the cause |
 | JSON `stop`, `restart`, `recreate` | `409` with `"reason": "self_protected"` in the error body |
 
@@ -1478,6 +1481,187 @@ A create, duplicate or recreate that pulls an image runs as a job. One that does
 | Other paths | A job id of another environment, or of an image pull or push, answers `404` on these routes. A container job id answers `404` on the image routes |
 | Retention | As for [pull and push jobs](Usage-Images#pull-and-push-jobs): finished jobs for 15 minutes, at most 64, held in memory. A restart loses them, and the page then answers `404` |
 
+## Export
+
+Export downloads one container's configuration as a gzip archive: the state of the create form, the networks it uses and the data of the named volumes chosen. Administrators only. Environment variables the administrator marks secret are sealed under a passphrase or left out. Every other value is written as plain text.
+
+1. Open `Export` on the container page.
+2. Read the confirmation.
+3. Tick the environment variables that hold credentials, choose to seal them or leave them out, enter the passphrase twice when sealing, and tick the named volumes whose data goes into the archive.
+4. Choose `Download archive`. The browser saves `container-{name}-{YYYYMMDDTHHMMSSZ}.tar.gz`. Characters of the name other than letters, digits, `_`, `.` and `-` are written `_`.
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on both routes and nothing is recorded |
+| Container | Any container the administrator can see, in any state, except the one dockmin runs in ([dockmin's own container](#dockmins-own-container)) |
+| Content | The state of the create form as [Duplicate](#duplicate) reads it for an administrator, the environment variables, the user-defined networks the container is attached to, and the image reference with its digest |
+| Environment values | Marked secret: sealed or left out. Not marked: written as they are |
+| Volumes | Named volumes the container mounts, chosen one by one. Driver `local` only ([Export volumes](#export-volumes)) |
+| Bind mounts | Listed and written as they are. Their contents are not read |
+| Running container | Nothing is stopped or started. The confirmation states that volume data can be inconsistent |
+| Writes | Nothing on the host except one helper container for each chosen volume, created and removed. Nothing on dockmin's disk: the archive is produced while it is sent |
+| Output | `application/gzip`, `Content-Disposition: attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` |
+| Lock | Each chosen volume, from the confirmed download until it ends. The container is not locked ([Busy](#busy)) |
+| Concurrency | One export at a time on an environment, two in all, shared with volume and stack exports ([Export limits](Usage-Stacks#export-limits)) |
+| Import | Not available |
+| Recorded | `container_exported` ([Export rows](#export-rows)) |
+
+### Export confirmation
+
+`GET /environments/{id}/containers/{container_id}/export`. Nothing is created, locked or recorded.
+
+| Element | Text |
+|---|---|
+| Heading | `Export container {name}?` |
+| Subtitle | `Review what the archive holds and leaves out. Nothing is read until you confirm.` |
+| Facts | `Environment`, `State`, `Image`, `Tag` (`none` when the reference has none), `Digest on this host` (`none` when the host holds none) |
+| `What the archive holds` | `manifest.json: the state of the container create form with {groups}.` where `{groups}` counts the form's rows, such as `port mappings (2), mounts (1)`. `The image reference, its tag and the digest this host holds for it.` `{N} user-defined networks by name with the create options, without credentials in driver options.` `The volume data you choose below, under volumes/.`, shown when the container mounts a named volume |
+| Alert `Everything except the secret values is written as plain text` | `The command, entrypoint, labels, healthcheck command, log options and every environment variable value not marked secret below are written to the archive as they are. Values marked secret are sealed under the passphrase or left out. The volume data is never encrypted.` |
+| Fieldset `Environment variables marked secret` | One checkbox for each variable name. `Only the names are shown. Mark every variable that holds a credential.` No value is shown |
+| Fieldset `Secret values` | Radio `Seal under a passphrase` (selected): `Argon2id derives the key and AES-256-GCM seals each value. The passphrase is never stored or logged; a lost passphrase loses the sealed values and the rest of the archive still imports.` Radio `Leave the values out`: `The archive records the names only and the values are entered again on import.` Fields `Passphrase` (help `12 to 1024 characters. Used only when the values are sealed.`) and `Repeat the passphrase`, both `autocomplete="new-password"` |
+| Line when no variable | `The container has no environment variables.` |
+| `Volume data` | [Export volumes](#export-volumes) |
+| `Host paths` | `Bind mounts are written as they are, and the path may not exist on the host that imports the archive. Their contents are not exported.` One line for each bind, `{source} at {target}`, with `, read-only` when it is. Shown when the container has a bind mount |
+| `Networks` | One line for each user-defined network: `{name}, driver {driver}`, then `internal`, `attachable`, `IPv6` and `{N} address pools` as they apply, and `Credentials left out of the options: {keys}` when any were removed. Shown when the container is on one |
+| `What is left out` | [What is left out](#export-what-is-left-out) |
+| Buttons | `Download archive` (a form that posts the CSRF token, the review digest, the marked names, the secret choice, the passphrase and the chosen volumes), `Cancel` |
+
+- The passphrase is never put back into a page.
+- Sealing with no variable marked uses no passphrase and does not check it.
+- The download is a plain form `POST`. It works without script.
+
+### Export archive
+
+A tar archive compressed with gzip, written as a [volume export](Usage-Volumes#archive) is. Members in this order:
+
+| Member | Content |
+|---|---|
+| `manifest.json` | JSON, keys sorted, indented two spaces ([Export manifest](#export-manifest)) |
+| `volumes/{index}/manifest.json` | The manifest of a chosen volume, as in [Manifest](Usage-Volumes#manifest) |
+| `volumes/{index}/data/...` | The volume's files, as in [Archive](Usage-Volumes#archive) |
+| `volumes/{index}/skipped.json` | Entries left out of the volume, as in [skipped.json](Usage-Volumes#skippedjson) |
+
+- `{index}` counts from 0, in the order the volumes were chosen on the form. A container with no volume chosen has no `volumes/` member.
+- A volume's data is streamed from the host as the archive is written and is never held.
+- A failed export ends the response without the gzip trailer, so the file does not decompress cleanly.
+
+#### Export manifest
+
+| Field | Type | Value |
+|---|---|---|
+| `format_version` | integer | `1` |
+| `kind` | string | `container` |
+| `archive_id` | string | 32 lowercase hexadecimal characters, new for each export |
+| `exported_at` | string | UTC time of the export, ISO 8601 |
+| `instance_version` | string | The dockmin version that wrote the archive |
+| `name` | string | The container's name |
+| `description` | string | `Container {name}` |
+| `secrets` | string | `none` (no variable marked), `sealed` or `omitted` ([Export secret values](#export-secret-values)) |
+| `sealed` | object | Present when `secrets` is `sealed`: `cipher`, `kdf` and `records` ([Export sealing](Reference-Security#export-sealing)) |
+| `container` | object | `form`, `environment`, `networks` |
+| `images` | array | One entry: `reference`, `tag`, `digest`, `used_by` (the container's name) |
+| `volumes` | array | One entry for each chosen volume: `prefix` (`volumes/{index}`) and `manifest`, the volume's manifest |
+| `not_exported` | array of strings | The fixed list in [What is left out](#export-what-is-left-out) |
+| `not_exported_fields` | array | Objects with `reason` and `items`: the settings of the container the form cannot carry |
+
+| Entry | Fields |
+|---|---|
+| `container.form` | Strings keyed by the create form's field names. A scalar field is keyed by its name, such as `image`, `pull`, `command`, `entrypoint`, `working_dir`, `user`, `network_mode`, `restart_policy`, `memory`, `log_driver` and `start`. A repeated row is keyed `{prefix}-{index}-{column}`, the prefix being `label`, `port`, `mount`, `network`, `device`, `host` or `logopt`. An empty value is absent. `name` is left as a duplicate leaves it, blank. The environment rows are not in `form` |
+| `container.environment` | In form order. `name`, `secret`, and for a variable not marked secret `value`. A secret entry has no `value` |
+| `container.networks` | `name`, `driver`, `internal`, `attachable`, `enable_ipv6`, `ipam_driver`, `pools` (`subnet`, `gateway`, `ip_range`), `labels`, `options`, `removed_option_keys` |
+| `images` | `reference` as the form holds it, `tag`, `digest` (the `sha256:` digest the host holds for the repository, or the digest the reference pins; none when there is none), `used_by` |
+| `not_exported_fields` | `reason` is one of `not_copied`, `dropped_invalid`, `labels_dropped`, `anonymous_volumes`, `converted`. `items` names the settings or keys |
+
+- A field not listed is refused by a reader.
+- The command, entrypoint, label values, healthcheck command and log options are in `form` as written, whatever their content.
+- A network is user-defined when its name is not `bridge`, `host` or `none`. Its driver options are filtered as in [Credentials in driver options](Usage-Volumes#credentials-in-driver-options), and its labels as the volume labels of [Manifest](Usage-Volumes#manifest).
+- An environment variable that appears more than once is one entry for each row. The mark applies to every row of the name.
+
+#### Export secret values
+
+| Choice | `secrets` | The archive holds |
+|---|---|---|
+| Variables marked, `Seal under a passphrase` | `sealed` | Each marked value encrypted, as `sealed.records`, named `environment:{position}`, `{position}` counting from 0 in `container.environment`. The names are in `container.environment` |
+| Variables marked, `Leave the values out` | `omitted` | The name of each marked variable. No value and no `sealed` section |
+| No variable marked | `none` | Every value as plain text |
+
+| Item | Value |
+|---|---|
+| Passphrase | 12 to 1024 characters after Unicode NFKC normalisation, entered twice |
+| Storage | The passphrase is not stored, logged or recorded, and no page shows it again |
+| Lost passphrase | The sealed values cannot be recovered. The rest of the archive is readable and importable without it |
+| A name that is not a variable | A marked name the container does not have is refused |
+| Not marked | Written as plain text, whatever the name suggests |
+
+The algorithm and its parameters: [Export sealing](Reference-Security#export-sealing).
+
+#### Export volumes
+
+| Item | Value |
+|---|---|
+| Offered | Each named volume that a `volume` mount of the container uses. An anonymous volume is not offered and is listed under `anonymous_volumes` |
+| Listed | `{name}`, with `Mounted at {targets}.` and `{N} running containers mount it.` when any running container, this one included, mounts it |
+| Not selectable | The checkbox is disabled and the reason shown. A driver other than `local`: `Only volumes of the local driver can be exported. A plugin driver can run code on the host when its volume is mounted.` A volume mounted in the container dockmin runs in, or whose `device` path it mounts: `The volume {name} is mounted in the container dockmin runs in. It cannot be exported from dockmin.` A volume that no longer exists: `The volume no longer exists.` |
+| Text | `Choose the named volumes whose files go into the archive. A volume left unchosen is recorded by its mount only.` |
+| No volume | `The container mounts no named volumes.` |
+| Size | Not known until a volume is read. The archive is as large as the chosen volumes |
+| Alert `Volume data can be inconsistent` | Shown when the container is running, paused or restarting, or a running container mounts a listed volume: `This container is {state}. If a running container writes to a chosen volume while the archive is read, the volume data can be inconsistent. A database's files are the usual case. Nothing is stopped.` The first sentence appears only when the container itself is running |
+| Helper | One container for each chosen volume, as in [The helper container](Usage-Volumes#the-helper-container), created when that volume's turn comes and removed when that volume has been read, however that ends |
+| Helper text | `For each chosen volume dockmin creates a container named dockmin-read- followed by twelve characters from the image {first 12 digits of the image id}, which is already on the host. It is never started, mounts the volume read-only, has no network and no capabilities, and is removed when its volume has been read, however that ends.` |
+| No image on the host | The alert `The host has no image to use`: `The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then review the export again to include volume data.` No volume can be ticked |
+| Credentials in driver options | Removed from each volume's manifest and listed by key ([Credentials in driver options](Usage-Volumes#credentials-in-driver-options)) |
+
+#### Export what is left out
+
+| Left out | Note |
+|---|---|
+| Settings the create form cannot carry | Listed on the confirmation, one sentence for each group, and in `not_exported_fields` |
+| Resource controls and team grants | Not exported |
+| Automation rules and webhooks | Not exported |
+| Image bindings and credential sets | Not exported. The archive records the image reference and digest only |
+| Activity rows | Not exported |
+| Dismissals | Not exported |
+| The image | Not included. Nothing is pulled |
+| Data of volumes that are not chosen | Not read |
+| Data of anonymous volumes and of bind mounts | Not read |
+
+The confirmation lists the sentences for the groups of `not_exported_fields` that apply, then the five entries of `not_exported` each ending with a full stop.
+
+### Export refusals
+
+A refusal before the download starts renders a page at the real status code, with a `Review again` link for `409` and `503`. Nothing is read from a volume and no helper container exists, except where the table says otherwise.
+
+| Condition | Status | Page | Message | Reason |
+|---|---|---|---|---|
+| Not an administrator, an id that is not a full container id, a container that does not exist or is not visible, a container removed after the review | 404 | | Not found | No row |
+| The container is the one dockmin runs in | 409 | `Protected` | `This is the container dockmin runs in. It cannot be exported from dockmin.` | `self_protected` |
+| dockmin's own mounts on the host are not known | 409 | `Protected` | `dockmin cannot establish which volumes its own container mounts on this host, so no container here can be exported until it can.` | `self_protected` |
+| `Seal under a passphrase` is chosen and the passphrases differ | 400 | `Check the request` | `The two passphrases do not match.` | No row |
+| The secret choice is neither `Seal under a passphrase` nor `Leave the values out` | 400 | `Check the request` | `Choose how secret values are handled.` | No row |
+| Values are marked, sealing is chosen and the passphrase is shorter than 12 or longer than 1024 characters | 400 | `Check the request` | `The passphrase must be 12 to 1024 characters.` | `ValidationFailed` |
+| A marked name is not one of the container's variables | 400 | `Check the request` | `A variable marked secret is not one of the container's variables.` | `ValidationFailed` |
+| A chosen volume is not one the container mounts | 400 | `Check the request` | `A chosen volume is not one this container mounts.` | `ValidationFailed` |
+| An export already runs on the environment, or two run in the instance | 429, `Retry-After: 5` | `The export was not started` | `Another export is running, or the instance is at its export limit. Try again when one has finished.` | `export_busy` |
+| Another action holds a chosen volume | 409 | `A volume is busy` | `{Who} started a {action} on it {N} seconds ago and it has not finished. Wait for it to complete, then try again.` | `object_busy` |
+| The form, environment, networks, image or volumes differ from the confirmation, or the dockmin process restarted since it | 409 | `The container changed` | `This container changed since you reviewed it; nothing was exported.` | `changed_since_review` |
+| A chosen volume's driver is not `local` | 409 | `The container cannot be exported` | `Only volumes of the local driver can be exported. A plugin driver can run code on the host when its volume is mounted.` | `plugin_driver` |
+| A chosen volume no longer exists | 409 | `The container cannot be exported` | `The volume no longer exists.` | `volume_gone` |
+| A chosen volume is mounted in the container dockmin runs in | 409 | `Protected` | `The volume {name} is mounted in the container dockmin runs in. It cannot be exported from dockmin.` | `self_protected` |
+| Volumes are chosen and the host has no image | 409 | `The container cannot be exported` | `The host has no image to create the helper container from. Pull or load an image on the host, then try again.` | `helper_image_missing` |
+| A user-defined network the container is attached to cannot be read | 409 | `The container cannot be exported` | `A network the container is attached to could not be read.` | `network_unreadable` |
+| The configuration exceeds a limit of the manifest: 16 user-defined networks, 65,536 characters in one environment value | 409 | `The container cannot be exported` | `This container's configuration cannot be written to an export archive.` | `not_representable` |
+| The host is unreachable, answers unexpectedly, or reports more data than dockmin reads | 503 | The host message | [Host failures](#host-failures) | The host failure reason, or `too_large`. No row when the failure is met on the first read of the container |
+
+- The action in the busy message is `export`. `{Who}` is `You`, `Another user` or, for administrators, the holder's name.
+- The confirmation applies the checks for dockmin's own container and mounts, and for the host. It does not check the review digest, the locks or the limits.
+- The review digest is a keyed hash of the container's form values, including environment values, the user-defined networks, the image reference and the volumes' drivers. The key is held in memory by the dockmin process and the hash reveals no value.
+- A request refused by the page's own checks, before it reaches the service, writes no row.
+- An export that fails after the download started ends the response without the gzip trailer. `container_exported` records `completed` `false` and the reason ([Export rows](#export-rows)).
+
+### Export limits and format version
+
+[Export limits](Usage-Stacks#export-limits) and [Export format version](Usage-Stacks#export-format-version) apply to a container export.
+
 ## Terminal
 
 1. Open a running container's page and select `Open terminal`.
@@ -1835,6 +2019,22 @@ Failure reasons: `verification_failed` (written by `container-updater`), `cancel
 | `rule_id`, `rule_name` | The automation that fired |
 
 No row is written when the original could not be restored (`rollback_failed` on the `container_recreated` row).
+
+### Export rows
+
+| Action | Target | Written |
+|---|---|---|
+| `container_exported` | The container's full id | When the download ends, by completion, failure or client disconnect, and as a failure when the export is refused after the request reached the service. No row is written when the export starts |
+
+| Detail key | Present when |
+|---|---|
+| `format_version` | Every row |
+| `environment`, `secret_values`, `secrets`, `networks`, `bind_mounts`, `volumes`, `not_exported_groups`, `running` | Once the export was checked: counts, the secret mode (`none`, `sealed` or `omitted`) and whether the container is running, paused or restarting |
+| `bytes`, `skipped`, `volumes_copied`, `completed` | The download ended |
+| `holder_action` | Failure row for a busy volume |
+| `reason`, `message` | Failure rows |
+
+The row holds counts and the secret mode, never a variable name, a value, a path or a passphrase. The keys and reasons: [Activity](Administration-Activity#container-export-rows).
 
 ### Terminal and attach
 

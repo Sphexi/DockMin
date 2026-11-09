@@ -175,6 +175,14 @@ class SelfProtected(ProductError):
         )
 
     @classmethod
+    def export_stack(cls, name: str) -> Self:
+        """Return the refusal for exporting a stack that contains the container dockmin runs in."""
+        return cls(
+            f"The stack {name} contains the container dockmin runs in. "
+            "It cannot be exported from dockmin."
+        )
+
+    @classmethod
     def service(cls) -> Self:
         """Return the refusal for a Swarm service that runs the container dockmin runs in."""
         return cls(

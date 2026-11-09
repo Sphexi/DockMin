@@ -7,7 +7,7 @@ dockmin manages the services, tasks, nodes, configs and secrets of a Docker Swar
 | Environment type | `swarm`, recorded by the connection test and the status refresh ([Recorded values](Usage-Environments#recorded-values)) |
 | Objects | Services, tasks, nodes, configs, secrets, and the stack namespaces that group them |
 | Managed here | Create, edit, scale, force update, roll back and remove services; change node availability; create and remove configs and secrets |
-| Managed on the stack pages | Create, deploy, redeploy, remove, forget and adopt Swarm stacks ([Stacks](Usage-Stacks#swarm-stacks)) |
+| Managed on the stack pages | Create, deploy, redeploy, remove, forget and adopt Swarm stacks ([Stacks](Usage-Stacks#swarm-stacks)). Export is described here ([Export (Swarm stacks)](#export-swarm-stacks)) |
 | Read only | Tasks, stack namespaces that are not managed, cluster facts |
 | Not managed | Creating, joining, leaving or unlocking a swarm; promoting, demoting, labelling or removing nodes; secret drivers; config templating; label edits on configs and secrets; removal of volumes |
 | JSON API | None. Swarm pages are HTML only, Swarm stacks included |
@@ -62,6 +62,8 @@ All paths are under `/environments/{id}/swarm`. The sidebar's `Swarm` section li
 | Stack list | `/stacks` | `GET` |
 | Stack | `/stacks/{namespace}?tab={tab}` | `GET` |
 | Stack access control | `/stacks/{namespace}/access`, `/stacks/{namespace}/access/delete` | `POST` |
+| Stack export confirmation | `/stacks/{namespace}/export` | `GET` |
+| Stack export download | `/stacks/{namespace}/export` | `POST` |
 | Stack create, check, edit, files, redeploy, remove, forget, adopt, progress, dismiss and restore, and reveal of a secret variable | `/stacks/-/…` and `/stacks/{namespace}/…` | [Swarm stack pages and routes](Usage-Stacks#swarm-stack-pages-and-routes) |
 
 - `{service_id}`, `{task_id}`, `{node_id}` and `{object_id}` are 25 lower-case letters and digits. Any other form of at most 128 characters, including a name, answers `404` for every role, before any call to the host. A longer segment answers `422`.
@@ -69,7 +71,7 @@ All paths are under `/environments/{id}/swarm`. The sidebar's `Swarm` section li
 - `{tab}` of a service is `overview` (default), `configuration`, `tasks`, `logs`, `automation` or `access`. `{tab}` of a config, a secret or a namespace that is not managed is `overview` or `access`; `{tab}` of a managed stack is `overview`, `file`, `variables`, `files`, `logs`, `automation` or `access`. Any other value answers `404`. `access` answers `403` to standard users.
 - Every `POST` carries the CSRF token. A form larger than 256 KiB in total answers `413`.
 - Every Swarm page and redirect is sent with `Cache-Control: no-store`.
-- A `POST` redirects (`303`) on success, with a notice: to the service after create, edit, scale, force update and roll back; to the list after a remove; to the node after an availability change; to the new object after a config or secret create. A refusal renders a page at the real status code, with a `Review again` link for `409`, `502` and `503`.
+- A `POST` except the Swarm stack export download redirects (`303`) on success, with a notice. The download answers `200` with the archive. The redirects go: to the service after create, edit, scale, force update and roll back; to the list after a remove; to the node after an availability change; to the new object after a config or secret create. A refusal renders a page at the real status code, with a `Review again` link for `409`, `502` and `503`.
 - Every confirmation lists its targets by name with a count: service remove, scale, roll back and force update; config and secret remove; node availability; Swarm stack forget, remove and redeploy ([Confirmations](Contributing-Frontend-Conventions#confirmations)).
 - Below 40rem these list columns are hidden: services `Mode`, `Image`, `Stack`, `Ports`, `Updated`; configs and secrets `Stack`, `Created`; Swarm stacks `Last operation`, `Services`, `Configs`, `Secrets`, `Networks`.
 - Swarm routes have no JSON form.
@@ -557,6 +559,7 @@ When dockmin runs as a Swarm service, the service that runs its container, the S
 |---|---|
 | Edit (apply), scale, force update, roll back, remove, image update and credential renewal of the service | Refused for every role at the action: `409`, the page `Protected`: `This service runs the container dockmin runs in. It cannot be changed or removed from dockmin; restart dockmin from Administration > Instance.` Recorded as a failure with reason `self_protected`. The confirmations open |
 | Swarm stack remove, deploy, redeploy that would change the service | Refused at the action for every role. `The stack {name} contains the container dockmin runs in. It cannot be stopped, removed or redeployed from dockmin; restart dockmin from Administration > Instance.` A line that keeps the service as it is does not refuse |
+| Swarm stack export | Refused for every role, on the confirmation and on the download, when a service of the namespace is the one that runs the container: `The stack {name} contains the container dockmin runs in. It cannot be exported from dockmin.` Recorded as a failure with reason `self_protected` |
 | Availability change to `drain` on the node that runs the container | Refused: `This node runs the container dockmin runs in. It cannot be drained from dockmin, because the container would be stopped; restart dockmin from Administration > Instance after moving it.` `pause` and `active` are allowed |
 | Automations | Skipped with the reason `self_protected` ([Self-protection](Operations-Automation#self-protection)) |
 
@@ -818,6 +821,64 @@ The result page shows the reason and the path. The paste form stays available.
 
 - An environment entry with no value, or a name set twice, is `no_translator_row`.
 
+## Export (Swarm stacks)
+
+Export downloads a managed Swarm stack as one gzip archive of its file, variables, companion files, build contexts and the data of the volumes chosen on the manager. Administrators only. Secret values are sealed under a passphrase or left out. Everything else in the archive is plain text.
+
+1. Open `Export` on the stack page.
+2. Read the confirmation.
+3. Choose to seal the secret values or leave them out, enter the passphrase twice when sealing, and tick the volumes whose data goes into the archive.
+4. Choose `Download archive`. The browser saves `stack-{namespace}-{YYYYMMDDTHHMMSSZ}.tar.gz`.
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on both routes and nothing is recorded |
+| Environment | A Swarm manager ([Environments](#environments)). Any other environment answers `404` |
+| Stack | A managed Swarm stack. A name that folds to its name reaches it. A namespace that is not managed answers `404`; [adopt](Usage-Stacks#adopt-a-swarm-stack) it first. dockmin's own stack is refused |
+| Archive | The layout, manifest, limits and format version of [Export](Usage-Stacks#export-archive), with `kind` `swarm_stack`, `stack.stack_kind` `swarm` and `description` `Swarm stack {name}` |
+| Secret values | The secret variables and secret companion files that dockmin stores, sealed or left out ([Export secret values](Usage-Stacks#export-secret-values)). The cluster's configs and secrets are not read, and Swarm secret values that exist only in the cluster are not exported |
+| Build contexts | Included when the stack's record holds any ([Export archive](Usage-Stacks#export-archive)) |
+| Volumes | Chosen one by one. Only volumes visible on the manager are offered ([Volumes](#export-volumes)) |
+| Running tasks | Nothing is stopped. The confirmation names the running containers visible on the manager and states that volume data can be inconsistent |
+| Writes | Nothing on the cluster. One helper container on the manager for each chosen volume, created and removed. Nothing on dockmin's disk |
+| Output | `application/gzip`, `Content-Disposition: attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` |
+| Lock | The stack by its folded name and each chosen volume, from the confirmed download until it ends ([Locks and busy](#locks-and-busy)) |
+| Concurrency | One export at a time on an environment, two in all, shared with volume, Compose stack and container exports ([Export limits](Usage-Stacks#export-limits)) |
+| Import | Not available |
+| Recorded | `stack_export_started` and `stack_exported`, with `stack_kind` `swarm` ([Activity](Administration-Activity#stack-export-rows)) |
+
+### Export confirmation (Swarm stacks)
+
+`GET /environments/{id}/swarm/stacks/{namespace}/export`. Nothing is created, locked or recorded. The elements are those of the [Compose confirmation](Usage-Stacks#export-confirmation), with these differences:
+
+| Element | Text |
+|---|---|
+| Heading | `Export swarm stack {name} on {environment}?` |
+| `Left out` | The Compose list, and `The values of Swarm secrets that exist only in the cluster: Docker does not return them, so only secret variables and secret files that dockmin stores can travel` |
+| Alert `The stack is running` | The Compose text, ending `Nothing is stopped. Only the tasks on this manager node are visible here.` |
+| Line when none runs | `No running container of this stack is visible. Tasks on other nodes cannot be seen from the manager.` |
+| No volume | `No volume of this stack is visible on the host. A Swarm stack's volumes are created on the nodes that run its tasks; only the manager's are visible here.` |
+
+#### Export volumes
+
+| Item | Value |
+|---|---|
+| Offered | Volumes on the manager that carry the stack's namespace label, and named volumes mounted by the stack's task containers that are visible on the manager. At most 64; more are counted and cannot be chosen |
+| Other nodes | A volume that exists only on another node is not offered and is not exported |
+| Not selectable, helper, size, consistency | As [Export volumes](Usage-Stacks#export-volumes) |
+| Running containers | The stack's containers visible on the manager, in state `running`, `paused` or `restarting` |
+
+### Export refusals (Swarm stacks)
+
+The refusals, statuses, titles and messages are those of [Export refusals](Usage-Stacks#export-refusals), with these differences:
+
+| Condition | Status | Message | Reason |
+|---|---|---|---|
+| The environment is not a Swarm manager the user can see | 404 | Not found | No row |
+| A service of the namespace is the one that runs the container dockmin runs in | 409, page `Protected` | `The stack {name} contains the container dockmin runs in. It cannot be exported from dockmin.` | `self_protected` |
+| Another action holds the stack, by its folded name, or a chosen volume | 409, page `This stack is busy` | `{Who} started a {action} on it {N} seconds ago and it has not finished. Wait for it to complete, then try again.` The action is `export` | `object_busy` |
+| The manager is no longer an active Swarm manager, or its swarm is locked | 503 | `This environment is not an active Swarm manager, or its swarm is locked.` | The host failure reason |
+
 ## Locks and busy
 
 One action runs on an object at a time. A second is refused at once; it does not wait.
@@ -829,6 +890,7 @@ One action runs on an object at a time. A second is refused at once; it does not
 | Availability change | The node |
 | Create | Nothing. Docker answers a duplicate name with a conflict (`409`, reason `name_in_use`) |
 | Create, save, deploy, redeploy, remove, forget, adopt and reconstruct of a Swarm stack | The stack, and for deploy, redeploy and remove each existing service, config and secret they touch ([Swarm stack locks](Usage-Stacks#swarm-stack-locks)) |
+| Export of a Swarm stack | The stack, and each volume chosen ([Swarm stack locks](Usage-Stacks#swarm-stack-locks)) |
 | Review, confirmations, reads | Nothing |
 
 Message: `{Who} started a {action} on it {N} seconds ago and it has not finished. Wait for it to complete, then try again.` (`409`, title `This object is busy`, reason `object_busy`). `{Who}` is `You`, `Another user` or, for administrators, the holder's name. The action is `update`, `scale`, `force_update`, `rollback`, `remove`, `availability`, or, for `container-updater`, `update_image` or `refresh_credentials`. The holders follow the table in [Busy](Usage-Containers#busy).

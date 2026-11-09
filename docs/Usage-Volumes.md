@@ -292,7 +292,7 @@ Export downloads one volume as a gzip archive holding its files and a manifest. 
 | Writes | Nothing on the host is changed except the helper container, which is created and removed |
 | Disk | Nothing is written to dockmin's disk. The archive is produced while the data is read |
 | Lock | The volume is held until the download ends ([Busy](#busy)) |
-| Concurrency | One export at a time on an environment, two in all ([Limits](#limits)) |
+| Concurrency | One export at a time on an environment, two in all, shared with stack and container exports ([Limits](#limits)) |
 | Import | An export archive is imported as a new volume ([Import](#import)) |
 
 ### Confirmation
@@ -402,6 +402,7 @@ A refusal before the download starts renders a page at the real status code. Not
 - `unreadable` is known only after the helper exists. The helper is removed before the page is returned.
 - The confirmation applies the same checks for dockmin's own volumes, mounts and plugin drivers. It does not check the creation time, the lock or the limits.
 - A volume with driver options (NFS, CIFS) is not refused. The Docker host mounts the storage when the volume is read.
+- A running stack or container export counts against the limits, so a volume export can answer `A volume export is already running on this environment. Try again when it has finished.` while one runs.
 
 ### What is left out
 
@@ -436,7 +437,7 @@ A refusal before the download starts renders a page at the real status code. Not
 | Size | None |
 | Total time | None. The download lasts as long as data flows |
 | Stall | The export fails when the host sends no byte for 60 seconds |
-| Concurrent exports | 1 for each environment, 2 in the instance, counted in the process |
+| Concurrent exports | 1 for each environment, 2 in the instance, counted in the process. Stack and container exports draw from the same limits ([Stacks](Usage-Stacks#export), [Containers](Usage-Containers#export)) |
 | Memory | Bounded: at most four 64 KiB output chunks are queued, and no tar member is held whole |
 | Directory entries | `skipped.json` lists at most 10,000 |
 
@@ -947,6 +948,7 @@ One action runs on a volume at a time. A second is refused at once; it does not 
 | Remove | The volume |
 | Remove with containers | Each container in turn, then the volume |
 | Export | The volume, from the start of the download until it ends |
+| Stack export, container export | Each volume chosen, from the start of the download until it ends |
 | Import | The new volume's name, from the absence check until the owner is saved |
 | Stack deploy, redeploy | The name of each volume the stack's file creates |
 | Stack remove with volumes | Each volume the remove deletes |

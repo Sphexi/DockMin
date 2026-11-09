@@ -60,6 +60,8 @@ All paths are under `/environments/{id}/stacks`.
 | Remove confirmation with volumes | `/{name}/remove?volumes=1` | `GET` |
 | Force remove confirmation (also removes containers) | `/{name}/remove?orphans=1`, and `/{name}/remove?volumes=1&orphans=1` | `GET` |
 | Forget confirmation, forget | `/{name}/forget` | `GET`, `POST` |
+| Export confirmation | `/{name}/export` | `GET` |
+| Export download | `/{name}/export` | `POST` |
 | Access control | `/{name}/access`, `/{name}/access/delete` | `POST` |
 | Reveal a secret variable | `/{name}/variables/{variable_id}/reveal` | `POST` |
 | Masked row of a secret variable | `/{name}/variables/{variable_id}` | `GET` |
@@ -75,7 +77,7 @@ All paths are under `/environments/{id}/stacks`.
 - Paths under `/-/` cannot collide with a stack, because a name cannot start with `-`.
 - A form larger than 256 KiB in total answers `413`. The build context upload is the exception ([Build contexts](#build-contexts)).
 - `/-/adopt/{project}/read` and `/-/adopt/{project}/as-is` answer `404` to standard users, before any read. `/-/adopt/{project}/as-is` takes the hidden field `read_token`. `/-/adopt/{project}?read={token}` fills the paste form from a held [result](#the-result-page); `{token}` is 22 characters from `A-Za-z0-9_-`, and any other form answers `422`.
-- Every `POST` redirects (`303`) on success: to the progress page for create, redeploy, restart, start, stop, remove and adopt with deploy; to the stack for save, adopt and adopt as is; to the Files tab for adding, editing and removing a file; to the list for forget. A refusal renders a page at the real status code.
+- Every `POST` except the export download redirects (`303`) on success. The export download answers `200` with the archive ([Export](#export)). The redirects go: to the progress page for create, redeploy, restart, start, stop, remove and adopt with deploy; to the stack for save, adopt and adopt as is; to the Files tab for adding, editing and removing a file; to the list for forget. A refusal renders a page at the real status code.
 - `/-/validate`, `/-/adopt/{project}/validate` and `/{name}/validate` return a fragment for htmx requests and the whole form otherwise.
 
 | Tab | `tab` | Content |
@@ -95,6 +97,7 @@ All paths are under `/environments/{id}/stacks`.
 | `Stop` | Write access, and the status is not `unknown` and not `Stopped` |
 | `Restart` | Write access, the status is `Running` or `Partly running`, and the stack is not [dockmin's own](#dockmins-own-stack) |
 | `Forget` | Administrators |
+| `Export` | Administrators, and the stack is not [dockmin's own](#dockmins-own-stack) by name |
 
 - The status badge, `Changed since the last deploy` and the origin (`Created here` or `Adopted`) sit beside the buttons.
 - Administrators see an activity panel on three tabs ([Activity panel](#activity-panel)).
@@ -1478,6 +1481,7 @@ A Compose project that contains the container dockmin runs in ([Containers](Usag
 |---|---|
 | Deploy, redeploy, stop, restart, remove | Refused for every role: `The stack {name} contains the container dockmin runs in. It cannot be stopped, removed or redeployed from dockmin; restart dockmin from Administration > Instance.` Recorded as a failure with reason `self_protected`. An operation that runs as a job ends `failed` on its progress page with that text, reason `self_protected` |
 | Redeploy, restart and remove confirmations | Refused before they name anything (`409`, titled `Protected`) |
+| Export | Refused for every role, on the confirmation and on the download: `The stack {name} contains the container dockmin runs in. It cannot be exported from dockmin.` Recorded as a failure with reason `self_protected`. The `Export` button is not shown when the stack's name is dockmin's own |
 | Start | Allowed |
 | Save, adding, editing or removing a file, forget | Allowed. None changes the host |
 | Remove with volumes, a volume the container has mounted | Kept. On the volumes confirmation an administrator reads `The container dockmin runs in has it mounted.`; a standard user reads `A container outside this stack uses it.` |
@@ -1558,6 +1562,214 @@ Forget deletes dockmin's record of a stack and leaves the host unchanged. Admini
 | Result | The list with `Stack forgotten. Its containers are still on the host.` |
 | Use | For a host that is gone or cannot be reached |
 | Recorded | `stack_forgotten` ([Recorded actions](#recorded-actions)) |
+
+## Export
+
+Export downloads a managed Compose stack as one gzip archive. Administrators only. The archive holds the stack file, the variables, the companion files, the build contexts and the data of the volumes chosen. Secret values are sealed under a passphrase or left out. Everything else in the archive is plain text.
+
+1. Open `Export` on the stack page.
+2. Read the confirmation.
+3. Choose to seal the secret values or leave them out, enter the passphrase twice when sealing, and tick the volumes whose data goes into the archive.
+4. Choose `Download archive`. The browser saves `stack-{name}-{YYYYMMDDTHHMMSSZ}.tar.gz`.
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on both routes and nothing is recorded |
+| Stack | A managed Compose stack. A project that is not managed answers `404`; [adopt](#adopt) it first. dockmin's own stack is refused |
+| Read | The stored file, variables, files and build contexts. The host's containers, images and volumes are listed |
+| Compose CLI | Not run |
+| Secret values | Sealed under a passphrase, or left out ([Export secret values](#export-secret-values)) |
+| Volumes | Chosen one by one on the confirmation. Driver `local` only ([Export volumes](#export-volumes)) |
+| Host paths | Bind sources in the file are listed and written as they are. Their contents are not read |
+| Running containers | Nothing is stopped or started. The confirmation names the running containers and states that volume data can be inconsistent |
+| Writes | Nothing on the host except one helper container for each chosen volume, created and removed. Nothing on dockmin's disk: the archive is produced while it is sent |
+| Output | `application/gzip`, `Content-Disposition: attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` |
+| Lock | The stack and each chosen volume, from the confirmed download until it ends ([Locks and busy](#locks-and-busy)) |
+| Concurrency | One export at a time on an environment, two in all, shared with volume and container exports ([Export limits](#export-limits)) |
+| Swarm stacks | [Export (Swarm stacks)](Usage-Swarm#export-swarm-stacks) |
+| Import | Not available |
+| Recorded | `stack_export_started` and `stack_exported` ([Recorded actions](#recorded-actions)) |
+
+### Export confirmation
+
+`GET /environments/{id}/stacks/{name}/export`. Nothing is created, locked or recorded.
+
+| Element | Text |
+|---|---|
+| Heading | `Export compose stack {name} on {environment}?` |
+| Subtitle | `Review the archive below. Nothing is read until you confirm.` |
+| `What the archive holds` | `manifest.json: the stack's name and kind, this version of dockmin, the file's digest, and every name listed below.` `stack/compose.yaml: the stack file, {N} bytes.` |
+| `Variables` | A table of `Name` and `In the archive`: `The value, as it is` for a plain variable, `Secret: the value is sealed or left out, as you choose below` for a secret one. `The stack has no variables.` when there are none |
+| `Files` | A table of `Name`, `Size` and `In the archive`: the member path for a plain file, `Secret: the content is sealed or left out, as you choose below` for a secret one. `The stack has no companion files.` when there are none |
+| `Build contexts` | A table of `Name`, `Size` and `In the archive`, the member `stack/contexts/{index}`. `The stack has no build contexts.` when there are none |
+| `Images` | A table of `Reference`, `Used by` and `Digest on this host` (`none` when the host holds no image for the reference). `The archive records each reference and digest. Images are not included, and nothing is pulled.` `The stack file names no image.` when it names none |
+| `Host paths` | `The stack file binds these host paths. They are exported as written, and each has to exist on the host the stack is imported into.` The paths follow, at most 200 and a count of the rest. `The stack file binds no host path.` when there is none |
+| `Left out` | [What is left out](#export-what-is-left-out) |
+| Alert `Plain values are written as they are` | `Plain variable values, plain files and the stack file go into the archive in clear text, and so does the data of each volume you choose. Anyone who holds the file can read them.` |
+| Alert `The stack is running` | `{N} running containers belong to this stack. If they write to a volume while the archive is read, the volume data can be inconsistent. A database's files are the usual case. Nothing is stopped.` One container: `1 running container belongs to this stack. If it writes ...`. The containers are named, up to 25, and the rest counted |
+| Line when none runs | `No running container of this stack is visible.` |
+| Fieldset `The {N} secret values` | Shown when the stack has a secret variable or file. Radio `Seal them under a passphrase` (selected) with `The archive holds each value encrypted. The passphrase is not stored anywhere; without it those values cannot be recovered, and the rest of the archive still imports.` Radio `Leave them out` with `The archive lists each secret by name only. The values are entered again when the archive is imported.` Fields `Passphrase` (help `Needed only when sealing. 12 to 1024 characters.`) and `Confirm the passphrase`, both `autocomplete="new-password"` |
+| Line when no secret | `The stack has no secret variables or files.` |
+| `Volumes` | [Export volumes](#export-volumes) |
+| Buttons | `Download archive` (a form that posts the CSRF token, the review digest, the secret choice, the passphrase and the chosen volumes), `Cancel` |
+
+- A running container is one in state `running`, `paused` or `restarting`.
+- A host path is the source of a bind in a service's `volumes`, in short or long syntax, that starts with `/`, `./`, `../` or `~`, or is `.`, `..` or `~`.
+- An image's digest is the `sha256:` digest of the local image whose tag matches the reference, or the digest the reference pins. A reference that contains `$` has no tag and no digest.
+- The download is a plain form `POST`. It works without script.
+- The passphrase is never put back into a page.
+
+### Export archive
+
+A tar archive compressed with gzip, written as a [volume export](Usage-Volumes#archive) is. Members in this order:
+
+| Member | Content |
+|---|---|
+| `manifest.json` | JSON, keys sorted, indented two spaces ([Export manifest](#export-manifest)) |
+| `stack/compose.yaml` | The stack file as stored |
+| `stack/files/{name}` | Each plain companion file, by name. A secret file has no member |
+| `stack/contexts/{index}` | Each build context archive exactly as uploaded, `{index}` counting from 0 in the order of `stack.contexts` in the manifest |
+| `volumes/{index}/manifest.json` | The manifest of the volume, as in [Manifest](Usage-Volumes#manifest) |
+| `volumes/{index}/data/...` | The volume's files, as in [Archive](Usage-Volumes#archive) |
+| `volumes/{index}/skipped.json` | Entries left out of the volume, as in [skipped.json](Usage-Volumes#skippedjson) |
+
+- `{index}` of a volume counts from 0, in the order of the volumes' names. A stack with no volume chosen has no `volumes/` member.
+- Every member of `stack/` is declared in the manifest with its byte size and SHA-256.
+- A volume's data is streamed from the host as the archive is written and is never held. The manifest, the stack file, the files and the build contexts are held in memory while the archive is written.
+- A failed export ends the response without the gzip trailer, so the file does not decompress cleanly.
+
+#### Export manifest
+
+| Field | Type | Value |
+|---|---|---|
+| `format_version` | integer | `1` |
+| `kind` | string | `compose_stack` |
+| `archive_id` | string | 32 lowercase hexadecimal characters, new for each export |
+| `exported_at` | string | UTC time of the export, ISO 8601 |
+| `instance_version` | string | The dockmin version that wrote the archive |
+| `name` | string | The stack's name |
+| `description` | string | `Compose stack {name}` |
+| `secrets` | string | `none`, `sealed` or `omitted` ([Export secret values](#export-secret-values)) |
+| `sealed` | object | Present when `secrets` is `sealed`: `cipher`, `kdf` and `records` ([Export sealing](Reference-Security#export-sealing)) |
+| `stack` | object | `stack_kind` (`compose`), `compose_file`, `variables`, `files`, `contexts` |
+| `images` | array | One entry for each image the file names |
+| `volumes` | array | One entry for each chosen volume: `prefix` (`volumes/{index}`) and `manifest`, the volume's manifest |
+| `not_exported` | array of strings | The fixed list in [What is left out](#export-what-is-left-out) |
+| `not_exported_fields` | array | Empty for a stack |
+
+| Entry | Fields |
+|---|---|
+| `stack.compose_file` | `member` (`stack/compose.yaml`), `size`, `sha256` |
+| `stack.variables` | Sorted by name. `name`, `secret`, and for a plain variable `value`. A secret variable has no `value` |
+| `stack.files` | Sorted by name. `name`, `secret`, `size`, and for a plain file `member` and `sha256`. A secret file has neither |
+| `stack.contexts` | `name`, `member`, `compressed`, `member_count`, `extracted_size`, `size`, `sha256` |
+| `images` | `reference` as written in the file, `tag`, `digest` (the `sha256:` digest present on the host at export, or none), `used_by` (service names) |
+
+- A field not listed is refused by a reader.
+- A plain variable's value is in the manifest in clear text.
+
+#### Export secret values
+
+| Choice | `secrets` | The archive holds |
+|---|---|---|
+| `Seal them under a passphrase` | `sealed` | Each secret variable and each secret file encrypted, as `sealed.records`, named `variable:{NAME}` and `file:{name}`. The names are in `stack.variables` and `stack.files` |
+| `Leave them out` | `omitted` | The name of each secret variable, and the name and stored size of each secret file. No value and no `sealed` section |
+| The stack has no secret variable or file | `none` | No secret entry. The form shows no choice |
+
+| Item | Value |
+|---|---|
+| Passphrase | 12 to 1024 characters after Unicode NFKC normalisation, entered twice. A shorter, longer or mismatched passphrase is refused ([Export refusals](#export-refusals)) |
+| Storage | The passphrase is not stored, logged or recorded, and no page shows it again |
+| Lost passphrase | The sealed values cannot be recovered. The rest of the archive is readable and importable without it |
+| Another passphrase | Opens nothing. A sealed value that was altered, or moved to another name or archive, is refused |
+| When values are opened | Only when sealing. Secret values are decrypted in a worker thread, sealed in the same call and never logged or recorded. Leaving them out never decrypts them |
+| Unreadable secret | A stored secret that cannot be decrypted with this server's key refuses the export (`secrets_unreadable`) |
+
+The algorithm and its parameters: [Export sealing](Reference-Security#export-sealing).
+
+#### Export volumes
+
+| Item | Value |
+|---|---|
+| Offered | Volumes that carry the project's Compose label, and named volumes that a container of the project mounts in any state. At most 64; more are counted and cannot be chosen |
+| Chosen | Ticked on the confirmation. A volume that is not chosen is not read and is not named in the archive |
+| Not selectable | Listed under `Volumes that cannot be exported` with the reason. A driver other than `local`: `Only volumes of the local driver can be exported. A plugin driver can run code on the host when its volume is mounted.` A volume that the container dockmin runs in has mounted, by name or by a `device` path: `The container dockmin runs in has this volume mounted.` A volume whose description is too large to read: `Docker's description of the volume is too large to read.` |
+| Size | Not known until a volume is read. The archive is as large as the chosen volumes |
+| Text | `Choose the volumes whose data goes into the archive. A volume that is not chosen is not read and is not named in the archive. The size of each is not known until it is read, and the archive is as large as the chosen volumes.` |
+| No volume | `No volume of this stack is visible on the host.` |
+| Helper | One container for each chosen volume, as in [The helper container](Usage-Volumes#the-helper-container). It is created when that volume's turn comes and removed when that volume has been read, however that ends |
+| Helper text | `For each chosen volume dockmin creates a container named dockmin-read- followed by twelve characters from the image {first 12 digits of the image id}, which is already on the host. The container is never started. It mounts the volume read-only, has no network and no capabilities, and appears in the container list until that volume has been read. It is removed when the export ends, however it ends.` |
+| No image on the host | The alert `The host has no image to use`: `The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then review the export again to include volumes.` No volume can be ticked |
+| Consistency | Volume data is read as it is on the host at that moment. A running container that writes during the read can leave the data inconsistent |
+| Credentials in driver options | Removed from each volume's manifest and listed by key ([Credentials in driver options](Usage-Volumes#credentials-in-driver-options)) |
+
+#### Export what is left out
+
+| Left out | Note |
+|---|---|
+| Resource controls and team grants | Not exported |
+| Automation rules and webhooks | Not exported |
+| Image bindings and credential sets | Not exported. The archive records image references and digests only |
+| Activity rows | Not exported |
+| Dismissals | Not exported |
+| Images | Not included. Nothing is pulled |
+| Container state | Containers are not exported |
+| Data of volumes that are not chosen | Not read |
+| The stack's origin and project directory | Not recorded |
+| Volume labels `com.docker.compose.*`, `com.docker.stack.namespace`, `dockmin.*` | Not recorded ([Manifest](Usage-Volumes#manifest)) |
+
+The confirmation lists the five entries of `not_exported` and the line `Images, container state and the data of every volume you do not choose below`.
+
+### Export refusals
+
+A refusal before the download starts renders a page at the real status code, with a `Review again` link for `409` and `503`. Nothing is read from a volume and no helper container exists, except where the table says otherwise.
+
+| Condition | Status | Page | Message | Reason |
+|---|---|---|---|---|
+| Not an administrator, a name that is not a stack name, a stack that does not exist, is not managed or is a Swarm stack | 404 | | Not found | No row |
+| The stack is dockmin's own: `protects_stack` names it, or a container of the project is the one dockmin runs in | 409 | `Protected` | `The stack {name} contains the container dockmin runs in. It cannot be exported from dockmin.` | `self_protected` |
+| dockmin's own mounts on the host are not known | 409 | `Protected` | `dockmin cannot establish which volumes its own container mounts on this host, so no volume here can be exported until it can.` | `self_protected` |
+| The secret choice is not `sealed` or `omitted` | 400 | `Check the request` | `Choose to seal the secrets or to leave them out.` | No row |
+| The two passphrases differ | 400 | `Check the request` | `The two passphrases do not match.` | No row |
+| The passphrase is shorter than 12 or longer than 1024 characters | 400 | `Check the request` | `The passphrase must be 12 to 1024 characters.` | No row from the page; `invalid_passphrase` when the service refuses it |
+| A chosen volume is not one the stack offers | 400 | `Check the request` | `A chosen volume is no longer one of this stack's volumes.` | `volume_not_offered` |
+| 65 volumes are chosen. The form takes at most 65 `volume` values; more answer `422` | 400 | `Check the request` | `Choose at most 64 volumes.` | `too_many_volumes` |
+| An export already runs on the environment, or two run in the instance | 429, `Retry-After: 5` | `The export was not started` | `An export is already running on this environment, or too many are running on this instance. Try again when one has finished.` | `export_busy` |
+| Another action holds the stack or a chosen volume | 409 | `This stack is busy` | `{Who} started a {action} on it {N} seconds ago and it has not finished. Wait for it to complete, then try again.` | `object_busy` |
+| The stack's file, variables, files or build contexts differ from the confirmation | 409 | `The stack changed` | `The stack changed after you reviewed it. Review it again.` | `changed_since_review` |
+| A chosen volume was removed after the review | 409 | `The stack cannot be exported` | `The volume {name} no longer exists.` | `volume_gone` |
+| A chosen volume's driver is not `local` | 409 | `The stack cannot be exported` | `Only volumes of the local driver can be exported. A plugin driver can run code on the host when its volume is mounted.` | `plugin_driver` |
+| A chosen volume is mounted in the container dockmin runs in | 409 | `Protected` | `The volume {name} is mounted in the container dockmin runs in. It cannot be exported from dockmin.` | `self_protected` |
+| Volumes are chosen and the host has no image | 409 | `The stack cannot be exported` | `The host has no image to create the helper container from. Pull or load an image on the host, then try again.` | `helper_image_missing` |
+| Sealing is chosen and a stored secret cannot be decrypted | 409 | `The stack cannot be exported` | `A stored secret cannot be read with this server's key.` | `secrets_unreadable` |
+| The host is unreachable, answers unexpectedly, or reports more data than dockmin reads | 503 | The host message | [Host failures](Usage-Containers#host-failures) | The host failure reason, or `too_large` |
+
+- The action in the busy message is `export`. `{Who}` is `You`, `Another user` or, for administrators, the holder's name.
+- The confirmation applies the checks for dockmin's own stack and mounts, and for the host. It does not check the review digest, the lock or the limits.
+- A request refused by the page's own checks, before it reaches the service, writes no row.
+- An export that fails after the download started ends the response without the gzip trailer. `stack_exported` records `completed` `false` and the reason ([Recorded actions](#recorded-actions)).
+
+### Export limits
+
+| Limit | Value |
+|---|---|
+| Archive size | None |
+| Total time | None. The download lasts as long as data flows |
+| Stall | A volume read fails when the host sends no byte for 60 seconds |
+| Concurrent exports | 1 for each environment, 2 in the instance, counted in the process. Volume, stack and container exports draw from the same limits |
+| Volumes | At most 64 chosen |
+| Stack file | At most 128 KiB |
+| Companion files | At most 20, each at most 64 KiB |
+| Build contexts | At most 32, each at most 16 MiB, at most 64 MiB in all |
+| Memory | Volume data is never held: at most four 64 KiB output chunks are queued. The manifest, the stack file, the files and the build contexts are held while the archive is written |
+
+### Export format version
+
+| Item | Value |
+|---|---|
+| Written | `format_version` `1`, in the manifest and in the manifest of each volume |
+| Reading | A later release reads every earlier `format_version` |
+| Newer archive | An archive whose `format_version`, or the `format_version` of a volume in it, is above the version the release knows is refused, with the version named |
 
 ## Adopt
 
@@ -1982,9 +2194,10 @@ One operation runs on a stack at a time. A second is refused at once; it does no
 
 | Held by | Key |
 |---|---|
-| Create, save, add, edit or remove a file, add, replace or remove a build context, deploy, redeploy, start, stop, restart, remove, forget, adopt, read from host | The stack in its environment |
+| Create, save, add, edit or remove a file, add, replace or remove a build context, deploy, redeploy, start, stop, restart, remove, forget, adopt, read from host, export | The stack in its environment |
 | Deploy, redeploy | Also each project volume name |
 | Remove with volumes | Also each volume to be deleted |
+| Export | Also each chosen volume |
 
 - Checking a file takes no lock.
 - Swarm stacks hold the same stack key and also the locks of the objects they touch ([Swarm stack locks](#swarm-stack-locks)).
@@ -1997,7 +2210,7 @@ One operation runs on a stack at a time. A second is refused at once; it does no
 | Stack operations | Redeploy, start, stop, restart and remove are busy while an action runs on any container of the project |
 | Volumes | Volume create and remove on a name held by a deploy or remove are busy |
 
-Message: `{Who} started a {action} on this stack {N} seconds ago and it has not finished. Wait for it to complete, then try again.` (`409`, reason `object_busy`). `{Who}` is `You`, `Another user` or, for administrators, the holder's name. The action is `create`, `update`, `deploy`, `redeploy`, `start`, `stop`, `restart`, `remove`, `forget`, `adopt` or `read`. The holders follow the table in [Containers](Usage-Containers).
+Message: `{Who} started a {action} on this stack {N} seconds ago and it has not finished. Wait for it to complete, then try again.` (`409`, reason `object_busy`). `{Who}` is `You`, `Another user` or, for administrators, the holder's name. The action is `create`, `update`, `deploy`, `redeploy`, `start`, `stop`, `restart`, `remove`, `forget`, `adopt`, `read` or `export`. The holders follow the table in [Containers](Usage-Containers).
 
 ## Statuses
 
@@ -2164,12 +2377,13 @@ Every operation records one activity row, for success and for failure, with the 
 | `stack_forgotten` | Forget |
 | `stack_adopted` | Adopt, from a pasted file or from a read |
 | `stack_files_read` | Read from host: one row for each read, whatever its result ([Read from host](#read-from-host)) |
+| `stack_export_started`, `stack_exported` | Export of a Compose or a Swarm stack ([Export](#export)). Keys: [Activity](Administration-Activity#stack-export-rows) |
 | `stack_variable_revealed` | Reveal of a secret variable, of a Compose or a Swarm stack ([Reveal a secret variable](#reveal-a-secret-variable)). Keys: [Activity](Administration-Activity) |
 | `stack_dismissed`, `stack_dismissal_cleared` | Dismiss and restore of a project or namespace that is not managed here ([Dismiss](#dismiss)). Keys: [Activity](Administration-Activity) |
 
 | Detail key | Present on |
 |---|---|
-| `stack_id` | All except `stack_files_read`, `stack_variable_revealed`, `stack_dismissed` and `stack_dismissal_cleared` |
+| `stack_id` | All except `stack_files_read`, `stack_variable_revealed`, `stack_dismissed`, `stack_dismissal_cleared`, `stack_export_started` and `stack_exported` |
 | `origin` | `stack_created` (`created`) |
 | `compose_digest` | `stack_created`, `stack_updated`, `stack_deployed`, `stack_redeployed`, `stack_adopted`: SHA-256 of the file |
 | `resolved_digest` | `stack_deployed`, `stack_redeployed`: SHA-256 of the resolved configuration with secret values masked |
@@ -2222,6 +2436,7 @@ Every operation records one activity row, for success and for failure, with the 
 - A refusal on access leaves no row: a stack the user may not see, a user who lacks the access level, a malformed name, a non-administrator on forget, adopt or read, and a standard user's request whose access could not be decided because the host could not be read. Every other failure leaves a row.
 - A row never holds a variable value, the content of a file, Compose output, Docker's text, a path beneath the data directory or a certificate.
 - `stack_variable_revealed`, `stack_dismissed` and `stack_dismissal_cleared` do not start a refresh of the environment's counts ([Environments](Usage-Environments)).
+- `stack_export_started` and `stack_exported` hold counts and the secret mode, never a variable name, a value, a file name or a passphrase.
 - The failure reasons are those of [Errors](#errors), and `interrupted`.
 
 ## JSON API
@@ -2472,6 +2687,8 @@ All paths are under `/environments/{id}/swarm/stacks`.
 | Redeploy | `/{namespace}/redeploy` | `POST` |
 | Remove confirmation, remove | `/{namespace}/remove` | `GET`, `POST` |
 | Forget confirmation, forget | `/{namespace}/forget` | `GET`, `POST` |
+| Export confirmation | `/{namespace}/export` | `GET` |
+| Export download | `/{namespace}/export` | `POST` |
 | Access control | `/{namespace}/access`, `/{namespace}/access/delete` | `POST` |
 | Reveal a secret variable | `/{namespace}/variables/{variable_id}/reveal` | `POST` |
 | Masked row of a secret variable | `/{namespace}/variables/{variable_id}` | `GET` |
@@ -2485,7 +2702,7 @@ All paths are under `/environments/{id}/swarm/stacks`.
 - `{tab}` of a managed stack is `overview` (default), `file`, `variables`, `files`, `logs`, `automation` or `access`, labelled `Overview`, `Compose file`, `Variables`, `Files`, `Logs`, `Automation` and `Access`. `{tab}` of a namespace that is not managed is `overview`, `logs` or `access`. Any other value answers `404`. `access` answers `403` to standard users.
 - A name that folds to a managed stack's name reaches that stack, whatever its spelling.
 - A form larger than 256 KiB in total answers `413`. Every form, confirmation and job page is sent with `Cache-Control: no-store`.
-- Every `POST` redirects (`303`) on success: to the progress page for create, redeploy and remove; to the stack with a notice for save and adopt; to the Files tab with a notice for adding, editing and removing a file; to the redeploy confirmation for `Save and review redeploy`; to the list for forget. A refusal renders a page at the real status code.
+- Every `POST` except the export download redirects (`303`) on success. The export download answers `200` with the archive ([Export (Swarm stacks)](Usage-Swarm#export-swarm-stacks)). The redirects go: to the progress page for create, redeploy and remove; to the stack with a notice for save and adopt; to the Files tab with a notice for adding, editing and removing a file; to the redeploy confirmation for `Save and review redeploy`; to the list for forget. A refusal renders a page at the real status code.
 - `/-/validate`, `/-/adopt/{namespace}/validate` and `/{namespace}/validate` return a fragment for htmx requests and the whole form otherwise.
 - `/-/adopt/{namespace}/read` and `/-/adopt/{namespace}/as-is` answer `404` to standard users, before any read. `/-/adopt/{namespace}/as-is` takes the hidden field `read_token`. `/-/adopt/{namespace}?read={token}` fills the paste form from a held result; `{token}` is 22 characters from `A-Za-z0-9_-`, and any other form answers `422`.
 
@@ -3180,12 +3397,12 @@ One operation runs on a stack at a time. A second is refused at once.
 
 | Held by | Key |
 |---|---|
-| Create, save, deploy, redeploy, remove, forget, adopt, reconstruct from the cluster | The stack, by its folded name |
+| Create, save, deploy, redeploy, remove, forget, adopt, reconstruct from the cluster, export | The stack, by its folded name |
 | Deploy, redeploy, remove | Also each existing service, config and secret the plan touches |
 
 - The service, config and secret pages report those objects busy, and the stack reports busy when one of those pages holds a member.
 - Objects the sequence creates were not held by anyone when they were created.
-- The message and reason are those of [Locks and busy](#locks-and-busy). The action is `create`, `update`, `deploy`, `redeploy`, `remove`, `forget`, `adopt` or `read`.
+- The message and reason are those of [Locks and busy](#locks-and-busy). The action is `create`, `update`, `deploy`, `redeploy`, `remove`, `forget`, `adopt`, `read` or `export`. An export also holds each chosen volume.
 
 ### Swarm stack statuses
 
@@ -3245,6 +3462,7 @@ Swarm stack operations use the `stack_*` actions with `kind` set to `swarm`. Cat
 | `stack_forgotten` | Forget |
 | `stack_adopted` | Adopt, from a pasted file or from a reconstruction |
 | `stack_files_read` | Reconstruct from the cluster: one row for each reconstruction, whatever its result |
+| `stack_export_started`, `stack_exported` | Export ([Export (Swarm stacks)](Usage-Swarm#export-swarm-stacks)). Keys: [Activity](Administration-Activity#stack-export-rows) |
 | `stack_variable_revealed` | Reveal of a secret variable of a Swarm stack ([Reveal a secret variable](#reveal-a-secret-variable)) |
 | `stack_dismissed`, `stack_dismissal_cleared` | Dismiss and restore of a namespace that is not managed here ([Swarm stack list and page](#swarm-stack-list-and-page)) |
 

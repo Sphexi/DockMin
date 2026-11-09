@@ -146,6 +146,7 @@ dockmin finds the container it runs in at start ([Instance](Administration-Insta
 | Create, duplicate or recreate a container with `PidMode`, `IpcMode` or `NetworkMode` of the form `container:{name or id}` naming it, `VolumesFrom` naming it, or a named volume it has mounted | Refused, in every environment that reports the container |
 | Remove a volume it has mounted: single, with containers, bulk, prune, stack removal with volumes | Refused, or the volume is kept |
 | Export a volume it has mounted, or a `local` volume bound to a path it mounts | Refused. While its mounts on the host are unknown, every volume of that host is refused |
+| Export a Compose or Swarm stack that holds it, or the container itself | Refused. While its mounts on the host are unknown, every stack and container export on that host is refused |
 | Import into a `local` volume whose `device` option names a path it mounts | Refused. While its mounts on the host are unknown, every `device` path is refused |
 | Deploy, redeploy, stop, restart or remove its Compose project | Refused |
 | Change or remove its Swarm service; change the Swarm stack that holds it; drain its node | Refused |
@@ -215,6 +216,69 @@ An administrator can create a volume from an export archive ([Volumes](Usage-Vol
 | Failure | The volume the import created is removed. A volume that existed before is never removed |
 | Contents | Not scanned. A container that mounts the volume runs with whatever the files contain, including executables |
 | Recorded | `volume_imported`, naming the volume and the option keys, and never an option value, a label value, a path or file content ([Activity](Administration-Activity#volume-import-rows)) |
+
+## Stack and container export
+
+An administrator can download a managed stack or a container as one archive ([Stacks](Usage-Stacks#export), [Swarm stacks](Usage-Swarm#export-swarm-stacks), [Containers](Usage-Containers#export)).
+
+| Item | Value |
+|---|---|
+| Who | Administrators only. Any other user receives `404` on the confirmation and on the download, and nothing is recorded |
+| Where the archive goes | The response to the administrator's browser. dockmin writes nothing to its own disk |
+| dockmin's own objects | Refused: a stack that holds the container dockmin runs in, that container, and a volume it has mounted or whose `device` path it mounts. While dockmin's mounts on a host are unknown, every stack and container export on that host is refused |
+| Not in the archive | dockmin's encryption key, registry credential sets, image bindings, resource controls, automation rules and webhooks, activity rows, dismissals, and images |
+| Secret values | Sealed under a passphrase, or left out ([Export sealing](#export-sealing)). A value that is left out is never decrypted |
+| Integrity | The manifest records the size and SHA-256 of the stack file, each plain companion file and each build context. Volume data has no digest. The manifest is not signed, so the digests detect damage and do not detect tampering. Each sealed value is authenticated ([Export sealing](#export-sealing)) |
+| Volumes | Only `local` volumes, each chosen by the administrator, read through a helper container as for a [volume export](#volume-export). A driver option that holds a credential is removed and listed by key |
+| Bind mounts | A bind source is written as it is. The directory's contents are not read |
+| Network options | A user-defined network's driver options that name a credential, and credential entries inside option values, are removed and listed by key. Labels `com.docker.compose.*`, `com.docker.stack.namespace` and `dockmin.*` are not written |
+| Recorded | `stack_export_started`, `stack_exported` and `container_exported`, with counts and the secret mode, and never a name, a value, a path or a passphrase ([Activity](Administration-Activity#stack-export-rows)) |
+
+| Plain part of the archive | Content |
+|---|---|
+| `manifest.json` | The object's name, the names of its secret variables, files and environment variables, the size of each secret file, the values of every variable that is not secret, the container's create form (command, entrypoint, labels, healthcheck command, log options), network options, image references and digests, and each volume's name, driver, labels and options |
+| `stack/compose.yaml` | The stack file as stored |
+| `stack/files/{name}` | Each plain companion file |
+| `stack/contexts/{index}` | Each build context archive as uploaded |
+| `volumes/{index}/data/...` | The files of each chosen volume, including files whose mode allows the owner only |
+| Container environment values | Every value not marked secret on the confirmation |
+
+- A container's environment has no secret marking of its own. A value the administrator does not mark is written as plain text.
+- A credential in a container's command, entrypoint, label value, healthcheck command or log option is written as it is.
+- A stack's secret variables and secret companion files are the only stack values the archive seals.
+- The confirmation states which values are written as plain text, and names every variable and file by name, before anything is read.
+- Build contexts are stored unencrypted ([Stack builds](#stack-builds)), and are exported as stored.
+
+## Export sealing
+
+Secret values of a stack export and the environment values marked secret in a container export are encrypted with AES-256-GCM under a key derived from a passphrase the administrator enters.
+
+| Item | Value |
+|---|---|
+| Passphrase | 12 to 1024 characters after Unicode NFKC normalisation, entered twice. It is held in memory for the request. It is not stored, logged, recorded or put back into a page |
+| Key derivation | Argon2id, version 19, 64 MiB of memory, 3 iterations, 4 lanes, a 32-byte key |
+| Salt | 16 random bytes for each archive |
+| Cipher | AES-256-GCM, a random 12-byte nonce for each value |
+| Bound to | The archive's id and the value's name. A value moved to another name, a record taken from another archive, and an altered nonce, ciphertext or salt are refused |
+| Names | `variable:{NAME}`, `file:{name}` and `environment:{position}` |
+| Recorded in the manifest | `sealed.cipher`, `sealed.kdf` (`algorithm`, `version`, `memory_kib`, `iterations`, `lanes`, `salt`) and `sealed.records` (`name`, `nonce`, `ciphertext`), sorted by name |
+| Accepted when reading | 8192 to 1048576 KiB of memory, 1 to 16 iterations, 1 to 16 lanes. Anything else is refused, so a damaged manifest cannot ask for more |
+| Failure | A wrong passphrase, an altered value, and a name that is not sealed give one message, `The sealed values could not be opened.`, and name neither the value nor the cause |
+| Lost passphrase | The sealed values cannot be recovered by any other means. The rest of the archive is readable and importable without it |
+| Secret values in memory | Decrypted in a worker thread and sealed in the same call, then discarded. They are never logged or recorded |
+| Passphrase with no secrets | An object with no secret entries seals nothing. The passphrase is not used |
+
+| What a holder of the archive can read without the passphrase | Detail |
+|---|---|
+| Names | Every secret variable, file and environment variable by name |
+| Sizes | The stored size of each secret file |
+| Counts | The number of sealed values |
+
+| Residual | Detail |
+|---|---|
+| A weak passphrase | Anyone who holds the archive can try passphrases offline. Each try costs one Argon2id derivation at the recorded parameters |
+| A passphrase kept beside the archive | Opens every sealed value |
+| Plain values | Not sealed. They are readable by anyone who holds the archive ([Stack and container export](#stack-and-container-export)) |
 
 ## Stack builds
 

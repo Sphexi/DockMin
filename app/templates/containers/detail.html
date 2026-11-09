@@ -15,6 +15,9 @@
 {% elif detail.can_write %}
 <a class="btn" href="{{ route_path('environment_container_recreate_confirm', environment_id=detail.environment_id, container_id=detail.id) }}">Recreate</a>
 {% endif %}
+{% if detail.admin and not detail.is_self %}
+<a class="btn" href="{{ route_path('environment_container_export_confirm', environment_id=detail.environment_id, container_id=detail.id) }}">Export</a>
+{% endif %}
 {% if terminal and not terminal.refusal %}
 <a class="btn" href="{{ route_path('environment_container_terminal', environment_id=detail.environment_id, container_id=detail.id) }}?mode=exec">Open terminal</a>
 {% if terminal.attach_available %}

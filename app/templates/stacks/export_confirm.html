@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/object_users.html" import object_users %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/radio_field.html" import radio_field %}
+{% from "volumes/_parts.html" import container_base with context %}
+{% block title %}Export stack {{ confirmation.name }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Export" %}
+{% block content %}
+{% set review = confirmation %}
+{% call page_header("Export stack", "Review the archive below. Nothing is read until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the stack</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="export-heading">
+  <h2 id="export-heading">Export {{ kind_label|lower }} <span class="mono cell-wrap">{{ review.name }}</span> on {{ review.environment_name }}?</h2>
+  {{ confirm_targets([{"name": review.name, "detail": "on " ~ review.environment_name}], "stack") }}
+
+  <h3 class="confirm__subheading">What the archive holds</h3>
+  <ul>
+    <li><span class="mono">manifest.json</span>: the stack's name and kind, this version of dockmin, the file's digest, and every name listed below.</li>
+    <li><span class="mono">stack/compose.yaml</span>: the stack file, {{ review.compose_bytes }} {{ "byte" if review.compose_bytes == 1 else "bytes" }}.</li>
+  </ul>
+
+  <h3 class="confirm__subheading">Variables</h3>
+  {% if review.variables %}
+  <div class="data-table__scroll" role="region" aria-label="Variables of the stack" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">The variables of the stack and what the archive holds of each</caption>
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">In the archive</th></tr>
+      </thead>
+      <tbody>
+        {% for variable in review.variables %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ variable.name }}</th>
+          <td>{{ "Secret: the value is sealed or left out, as you choose below" if variable.secret else "The value, as it is" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>The stack has no variables.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Files</h3>
+  {% if review.files %}
+  <div class="data-table__scroll" role="region" aria-label="Files of the stack" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">The companion files of the stack and what the archive holds of each</caption>
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">Size</th><th scope="col">In the archive</th></tr>
+      </thead>
+      <tbody>
+        {% for file in review.files %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ file.name }}</th>
+          <td>{{ file.size }} {{ "byte" if file.size == 1 else "bytes" }}</td>
+          <td>{% if file.secret %}Secret: the content is sealed or left out, as you choose below{% else %}<span class="mono cell-wrap">{{ file.member }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>The stack has no companion files.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Build contexts</h3>
+  {% if review.contexts %}
+  <div class="data-table__scroll" role="region" aria-label="Build contexts of the stack" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">The build contexts of the stack, each held as uploaded</caption>
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">Size</th><th scope="col">In the archive</th></tr>
+      </thead>
+      <tbody>
+        {% for context in review.contexts %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ context.name }}</th>
+          <td>{{ context.size }} {{ "byte" if context.size == 1 else "bytes" }}</td>
+          <td class="mono cell-wrap">{{ context.member }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>The stack has no build contexts.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Images</h3>
+  {% if review.images %}
+  <div class="data-table__scroll" role="region" aria-label="Images the stack file names" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">The images the stack file names, with the digest present on this host</caption>
+      <thead>
+        <tr><th scope="col">Reference</th><th scope="col">Used by</th><th scope="col">Digest on this host</th></tr>
+      </thead>
+      <tbody>
+        {% for image in review.images %}
+        <tr>
+          <th scope="row" class="mono cell-wrap">{{ image.reference }}</th>
+          <td class="mono cell-wrap">{{ image.used_by|join(", ") }}</td>
+          <td class="mono cell-wrap">{{ image.digest or "none" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="field__help">The archive records each reference and digest. Images are not included, and nothing is pulled.</p>
+  {% else %}
+  <p>The stack file names no image.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Host paths</h3>
+  {% if review.host_paths %}
+  <p>The stack file binds these host paths. They are exported as written, and each has to exist on the host the stack is imported into.</p>
+  {{ confirm_targets(review.host_paths, "host path", review.host_paths_more) }}
+  {% else %}
+  <p>The stack file binds no host path.</p>
+  {% endif %}
+
+  <h3 class="confirm__subheading">Left out</h3>
+  <ul>
+    {% for item in review.not_exported %}
+    <li>{{ item|capitalize }}</li>
+    {% endfor %}
+    <li>Images, container state and the data of every volume you do not choose below</li>
+    {% if review.kind == "swarm" %}
+    <li>The values of Swarm secrets that exist only in the cluster: Docker does not return them, so only secret variables and secret files that dockmin stores can travel</li>
+    {% endif %}
+  </ul>
+
+  <div class="panel panel--alert" role="note">
+    <h3>Plain values are written as they are</h3>
+    <p>Plain variable values, plain files and the stack file go into the archive in clear text, and so does the data of each volume you choose. Anyone who holds the file can read them.</p>
+  </div>
+
+  {% if review.running %}
+  <div class="panel panel--alert" role="note">
+    <h3>The stack is running</h3>
+    <p>{{ review.running_total }} running {{ "container belongs" if review.running_total == 1 else "containers belong" }} to this stack. If {{ "it writes" if review.running_total == 1 else "they write" }} to a volume while the archive is read, the volume data can be inconsistent. A database's files are the usual case. Nothing is stopped.{% if review.kind == "swarm" %} Only the tasks on this manager node are visible here.{% endif %}</p>
+    {{ object_users(review.running, review.running_total - review.running|length, 0, review.running_total, container_base(review.environment_id)) }}
+  </div>
+  {% else %}
+  <p>No running container of this stack is visible.{% if review.kind == "swarm" %} Tasks on other nodes cannot be seen from the manager.{% endif %}</p>
+  {% endif %}
+
+  <form class="form" method="post" action="{{ run_href }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_digest" value="{{ review.expected_digest }}">
+
+    {% if review.secret_count %}
+    <fieldset class="choice-group">
+      <legend>The {{ review.secret_count }} secret {{ "value" if review.secret_count == 1 else "values" }}</legend>
+      {{ radio_field("secrets", "Seal them under a passphrase", "sealed", checked=true, help="The archive holds each value encrypted. The passphrase is not stored anywhere; without it those values cannot be recovered, and the rest of the archive still imports.") }}
+      {{ radio_field("secrets", "Leave them out", "omitted", help="The archive lists each secret by name only. The values are entered again when the archive is imported.") }}
+    </fieldset>
+    {{ form_field("passphrase", "Passphrase", type="password", autocomplete="new-password", help="Needed only when sealing. 12 to " ~ passphrase_max ~ " characters.") }}
+    {{ form_field("passphrase_confirm", "Confirm the passphrase", type="password", autocomplete="new-password") }}
+    {% else %}
+    <p>The stack has no secret variables or files.</p>
+    {% endif %}
+
+    <h3 class="confirm__subheading">Volumes</h3>
+    {% if review.volumes %}
+    {% set offered = review.volumes|selectattr("selectable")|list %}
+    {% set refused = review.volumes|rejectattr("selectable")|list %}
+    <p>Choose the volumes whose data goes into the archive. A volume that is not chosen is not read and is not named in the archive. The size of each is not known until it is read, and the archive is as large as the chosen volumes.</p>
+    {% if offered and review.can_export_volumes %}
+    <fieldset class="choice-group">
+      <legend>Volumes to include</legend>
+      {% for volume in offered %}
+      {{ checkbox_field("volume", volume.name ~ " (" ~ volume.driver ~ ")", value=volume.name, help=(volume.running ~ " running " ~ ("container mounts" if volume.running == 1 else "containers mount") ~ " it") if volume.running else none) }}
+      {% endfor %}
+    </fieldset>
+    <p>For each chosen volume dockmin creates a container named <span class="mono">{{ review.helper_name_prefix }}</span> followed by twelve characters from the image <span class="mono">{{ review.helper_image|replace("sha256:", "")|truncate(12, true, "") }}</span>, which is already on the host. The container is never started. It mounts the volume read-only, has no network and no capabilities, and appears in the container list until that volume has been read. It is removed when the export ends, however it ends.</p>
+    {% elif offered %}
+    <div class="panel panel--alert" role="note">
+      <h3>The host has no image to use</h3>
+      <p>The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then review the export again to include volumes.</p>
+    </div>
+    {% endif %}
+    {% if refused %}
+    <h4 class="confirm__subheading">Volumes that cannot be exported</h4>
+    <ul class="confirm-targets__list">
+      {% for volume in refused %}
+      <li><span class="mono">{{ volume.name }}</span> <span class="cell-note">{{ volume.refusal }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if review.volumes_more %}
+    <p class="field__help">{{ review.volumes_more }} more {{ "volume is" if review.volumes_more == 1 else "volumes are" }} not shown and cannot be chosen.</p>
+    {% endif %}
+    {% else %}
+    <p>No volume of this stack is visible on the host.{% if review.kind == "swarm" %} A Swarm stack's volumes are created on the nodes that run its tasks; only the manager's are visible here.{% endif %}</p>
+    {% endif %}
+
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Download archive</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -28,6 +28,7 @@
       <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_stack_remove', environment_id=environment_id, namespace=stack.name) }}">Remove</a>
       {% endif %}
       {% if detail.can_manage %}
+      <a class="btn btn--compact" href="{{ route_path('environment_swarm_stack_export_confirm', environment_id=environment_id, namespace=stack.name) }}">Export</a>
       <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_swarm_stack_forget', environment_id=environment_id, namespace=stack.name) }}">Forget</a>
       {% endif %}
     </div>

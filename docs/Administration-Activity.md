@@ -745,7 +745,7 @@ The delete confirmation page has a section `Activity held for export`.
 
 ## Rows recorded by other features
 
-Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
+Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Stack export rows](#stack-export-rows), [Container export rows](#container-export-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
 
 | Rows | Described on |
 |---|---|
@@ -854,6 +854,76 @@ Target type `volume`, the volume's name as the target id (cut to 255 characters)
 - A request from a user who is not an administrator, or with an environment or upload identifier of the wrong form, writes no row. The upload, the review and the discard write no row.
 - A row holds no option value, no label key or value, no path and no file content.
 
+## Stack export rows
+
+Target type `stack`, the stack's name as stored as the target id (cut to 255 characters), in the stack's environment. Actor: a user, always an administrator. Category `user_action`. An export writes two rows ([Compose stacks](Usage-Stacks#export), [Swarm stacks](Usage-Swarm#export-swarm-stacks)). A Swarm stack's rows carry `stack_kind` `swarm` and no `kind` key.
+
+| Action | Written | Detail keys |
+|---|---|---|
+| `stack_export_started` | After every check that can refuse the export has passed and the archive's manifest is built, before any volume is read. Also as a failure when the export is refused after the request reached the service | `name`, `stack_kind`, `variables`, `secret_values`, `files`, `contexts`, `volumes`, `secrets`, `format_version` |
+| `stack_exported` | When the download ends, by completion, failure or client disconnect | The keys above, and `bytes`, `volumes_done`, `skipped`, `completed`, `helpers_removed` |
+
+| Detail key | Value |
+|---|---|
+| `name` | The stack's name |
+| `stack_kind` | `compose` or `swarm` |
+| `variables` | The number of variables, plain and secret |
+| `secret_values` | The number of secret variables and secret companion files |
+| `files` | The number of companion files, plain and secret |
+| `contexts` | The number of build contexts |
+| `volumes` | The number of volumes chosen |
+| `secrets` | `sealed`, `omitted`, or `none` when the stack has no secret variable or file |
+| `format_version` | `1` |
+| `bytes` | Bytes of the archive handed to the response |
+| `volumes_done` | The number of volumes whose data was written completely |
+| `skipped` | Entries left out of the chosen volumes and listed in their `skipped.json` |
+| `completed` | `true` when the whole archive was produced and handed to the response. It does not report that the client received it |
+| `helpers_removed` | `true` when every helper container created was removed, and when none was created |
+| `holder_action` | `stack_export_started` failure for a busy stack or volume |
+| `reason`, `message` | Failure rows |
+
+- On a failed `stack_export_started`, the keys known when the export was refused are present: `stack_kind` and `format_version` once the stack was found, the counts once the archive's manifest was built.
+- `stack_exported` is written for every export that wrote `stack_export_started` with success. It is a failure, with `completed` `false`, when the archive was not fully produced.
+- `stack_export_started` reasons: `self_protected`, `invalid_passphrase`, `export_busy`, `object_busy`, `changed_since_review`, `volume_not_offered`, `too_many_volumes`, `plugin_driver`, `helper_image_missing`, `volume_gone`, `secrets_unreadable` and the host failure reasons ([Host failures](Usage-Containers#host-failures)), with `too_large`.
+- `stack_exported` reasons: `interrupted` (the client left or the request was cancelled), `malformed_stream`, `unreadable`, `helper_refused`, `unreachable`, `not_found`, `conflict`, `outcome_unknown`, `engine_error`. An unexpected error records the name of its class.
+- A request from a user who is not an administrator, for a name that is not a stack name, or for a stack that does not exist, is not managed or is of the other kind, writes no row. A request refused by the page's own checks (the secret choice, the two passphrases) writes no row.
+- A row holds no variable name or value, no file name or content, no volume name, no path and no passphrase.
+- A `stack_exported` row that cannot be written logs `activity_event_write_failed` with `action` `stack_exported`.
+
+## Container export rows
+
+Target type `container`, the full container id as the target id, in the container's environment. Actor: a user, always an administrator. Category `user_action`. An export writes one row ([Containers](Usage-Containers#export)).
+
+| Action | Written | Detail keys |
+|---|---|---|
+| `container_exported` | When the download ends, by completion, failure or client disconnect. Also as a failure when the export is refused after the request reached the service. No row is written when the export starts | `format_version`, `environment`, `secret_values`, `secrets`, `networks`, `bind_mounts`, `volumes`, `not_exported_groups`, `running`, and when the download ended `bytes`, `skipped`, `volumes_copied`, `completed` |
+
+| Detail key | Value |
+|---|---|
+| `format_version` | `1`. Present on every row |
+| `environment` | The number of environment variables |
+| `secret_values` | The number of environment variables marked secret, counting every row of a repeated name |
+| `secrets` | `sealed`, `omitted`, or `none` when no variable was marked |
+| `networks` | The number of user-defined networks |
+| `bind_mounts` | The number of bind mounts |
+| `volumes` | The number of volumes chosen |
+| `not_exported_groups` | The number of groups in `not_exported_fields` of the manifest |
+| `running` | `true` when the container is running, paused or restarting |
+| `bytes` | Bytes of the archive handed to the response |
+| `skipped` | Entries left out of the chosen volumes and listed in their `skipped.json` |
+| `volumes_copied` | The number of volumes whose data was written completely |
+| `completed` | `true` when the whole archive was produced and handed to the response. It does not report that the client received it |
+| `holder_action` | Failure row for a busy volume |
+| `reason`, `message` | Failure rows |
+
+- The counts are present once the container, its networks and its volumes were checked. A failure row before that holds `format_version`.
+- The row is a failure, with `completed` `false`, when the archive was not fully produced.
+- Failure reasons before the download: `self_protected`, `export_busy`, `object_busy`, `changed_since_review`, `plugin_driver`, `volume_gone`, `helper_image_missing`, `network_unreadable`, `not_representable`, `too_large` and the host failure reasons ([Host failures](Usage-Containers#host-failures)). A refused passphrase, a marked name that is not a variable and a chosen volume that is not mounted record `ValidationFailed`.
+- Failure reasons of a download that ended early: `interrupted` (the client left or the request was cancelled), `malformed_stream`, `unreadable`, `helper_refused`, `helper_image_missing`, `unreachable`, `not_found`, `conflict`, `outcome_unknown`, `engine_error`. An unexpected error records the name of its class.
+- A request from a user who is not an administrator, for a container that does not exist or is not visible, or with an id that is not a full container id, writes no row. A host failure met on the first read of the container writes no row. A request refused by the page's own checks (the secret choice, the two passphrases) writes no row.
+- A row holds no container name, no variable name or value, no volume name, no path and no passphrase.
+- A `container_exported` row that cannot be written logs `activity_event_write_failed` with `action` `container_exported`.
+
 ## Reveal and dismissal rows
 
 | Action | Actor | Category | Target | Written when |
@@ -903,7 +973,7 @@ Rows for `template_catalogue_created`, `template_catalogue_updated`, `template_c
 
 ## Self-protection refusals
 
-An action refused because it would stop the container dockmin runs in, or take away what it runs on, records a failure with the reason `self_protected` and the usual `message`. The product-written message names the object. The rows are those of the refused action: `container_stopped`, `container_restarted`, `container_killed`, `container_paused`, `container_removed`, `container_recreated`, `container_created`, `container_exec_started`, `container_attach_started`, `network_disconnected`, `volume_removed`, `volume_export_started`, `volume_imported`, `stack_deployed`, `stack_redeployed`, `stack_stopped`, `stack_restarted`, `stack_removed`, `service_updated`, `service_scaled`, `service_force_updated`, `service_rolled_back`, `service_removed`, `node_availability_changed` ([Containers](Usage-Containers#dockmins-own-container), [Volumes](Usage-Volumes#dockmins-volumes), [Stacks](Usage-Stacks#dockmins-own-stack), [Swarm](Usage-Swarm#dockmins-own-service)). A subsystem skips such a target before acting; the run counts the skip ([Automation](Operations-Automation#self-protection)).
+An action refused because it would stop the container dockmin runs in, or take away what it runs on, records a failure with the reason `self_protected` and the usual `message`. The product-written message names the object. The rows are those of the refused action: `container_stopped`, `container_restarted`, `container_killed`, `container_paused`, `container_removed`, `container_recreated`, `container_created`, `container_exec_started`, `container_attach_started`, `network_disconnected`, `volume_removed`, `volume_export_started`, `volume_imported`, `stack_export_started`, `container_exported`, `stack_deployed`, `stack_redeployed`, `stack_stopped`, `stack_restarted`, `stack_removed`, `service_updated`, `service_scaled`, `service_force_updated`, `service_rolled_back`, `service_removed`, `node_availability_changed` ([Containers](Usage-Containers#dockmins-own-container), [Volumes](Usage-Volumes#dockmins-volumes), [Stacks](Usage-Stacks#dockmins-own-stack), [Swarm](Usage-Swarm#dockmins-own-service)). A subsystem skips such a target before acting; the run counts the skip ([Automation](Operations-Automation#self-protection)).
 
 ## Limits
 

@@ -2,6 +2,7 @@
 
 import hashlib
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from secrets import choice
 from typing import TYPE_CHECKING, Final
@@ -130,6 +131,33 @@ class StackFileRepository(SecretRepository[StoredFile]):
                 raise SecretUnreadableError("a stored file cannot be read")
             revealed[str(row["name"])] = content
         return revealed
+
+    async def secret_file_opener(self, stack_id: int) -> Callable[[], dict[str, str]]:
+        """Read the sealed secret files of a stack now and return the function that opens them.
+
+        The function decrypts every secret file by name and is blocking, so it runs in a worker
+        thread. It raises SecretUnreadableError when any content cannot be decrypted.
+        """
+        rows = await self._session.fetch_limited(
+            f"SELECT id, name, content_ciphertext FROM {_TABLE} "
+            "WHERE stack_id = ? AND is_secret = 1 ORDER BY name LIMIT ?",
+            (stack_id, MAX_FILES + 1),
+            limit=MAX_FILES + 1,
+        )
+
+        def open_all() -> dict[str, str]:
+            opened: dict[str, str] = {}
+            for row in rows:
+                try:
+                    content = self._reveal(_CONTENT, row)
+                except DecryptionError:
+                    raise SecretUnreadableError("a stored file cannot be read") from None
+                if content is None:
+                    raise SecretUnreadableError("a stored file cannot be read")
+                opened[str(row["name"])] = content
+            return opened
+
+        return open_all
 
     async def put_file(
         self, stack_id: int, name: str, *, content: str | None, secret: bool

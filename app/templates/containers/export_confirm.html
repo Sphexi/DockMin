@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "partials/radio_field.html" import radio_field %}
+{% block title %}Export container {{ confirmation.name }} - dockmin{% endblock %}
+{% set crumb_object = confirmation.name %}
+{% set crumb_object_href = detail_href %}
+{% set crumb_page = "Export" %}
+{% block content %}
+{% call page_header("Export container", "Review what the archive holds and leaves out. Nothing is read until you confirm.") %}
+<a class="btn" href="{{ detail_href }}">Back to the container</a>
+{% endcall %}
+
+<section class="panel" aria-labelledby="export-heading">
+  <h2 id="export-heading">Export container <span class="mono cell-wrap">{{ confirmation.name }}</span>?</h2>
+  {{ confirm_targets([{"name": confirmation.name}], "container") }}
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ confirmation.environment_name }}</dd>
+    <dt>State</dt>
+    <dd>{{ confirmation.state }}</dd>
+    <dt>Image</dt>
+    <dd class="mono cell-wrap">{{ confirmation.image.reference }}</dd>
+    <dt>Tag</dt>
+    <dd class="mono">{{ confirmation.image.tag or "none" }}</dd>
+    <dt>Digest on this host</dt>
+    <dd class="mono cell-wrap">{{ confirmation.image.digest or "none" }}</dd>
+  </dl>
+
+  <form class="form" method="post" action="{{ run_href }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="expected_digest" value="{{ confirmation.digest }}">
+
+    <h3>What the archive holds</h3>
+    <ul>
+      <li><span class="mono">manifest.json</span>: the state of the container create form
+        {%- if confirmation.groups %} with
+        {% for noun, count in confirmation.groups %}{{ noun }} ({{ count }}){{ ", " if not loop.last else "" }}{% endfor %}{% endif %}.</li>
+      <li>The image reference, its tag and the digest this host holds for it.</li>
+      <li>{{ confirmation.networks|length }} user-defined {{ "network" if confirmation.networks|length == 1 else "networks" }} by name with the create options, without credentials in driver options.</li>
+      {% if confirmation.volumes %}<li>The volume data you choose below, under <span class="mono">volumes/</span>.</li>{% endif %}
+    </ul>
+
+    <div class="panel panel--alert" role="note">
+      <h3>Everything except the secret values is written as plain text</h3>
+      <p>The command, entrypoint, labels, healthcheck command, log options and every environment variable value not marked secret below are written to the archive as they are. Values marked secret are sealed under the passphrase or left out. The volume data is never encrypted.</p>
+    </div>
+
+    {% if confirmation.variable_names %}
+    <fieldset class="choice-group">
+      <legend>Environment variables marked secret</legend>
+      <p class="field__help">Only the names are shown. Mark every variable that holds a credential.</p>
+      {% for name in confirmation.variable_names %}
+      <div class="choice">
+        <input class="choice__input" type="checkbox" id="secret-{{ loop.index }}" name="secret" value="{{ name }}">
+        <label class="choice__label mono" for="secret-{{ loop.index }}">{{ name }}</label>
+      </div>
+      {% endfor %}
+    </fieldset>
+
+    <fieldset class="choice-group">
+      <legend>Secret values</legend>
+      {{ radio_field("secret_handling", "Seal under a passphrase", "seal", checked=true, help="Argon2id derives the key and AES-256-GCM seals each value. The passphrase is never stored or logged; a lost passphrase loses the sealed values and the rest of the archive still imports.") }}
+      {{ radio_field("secret_handling", "Leave the values out", "omit", help="The archive records the names only and the values are entered again on import.") }}
+    </fieldset>
+    {{ form_field("passphrase", "Passphrase", type="password", help="12 to 1024 characters. Used only when the values are sealed.", autocomplete="new-password") }}
+    {{ form_field("passphrase_confirm", "Repeat the passphrase", type="password", autocomplete="new-password") }}
+    {% else %}
+    <p>The container has no environment variables.</p>
+    {% endif %}
+
+    <h3>Volume data</h3>
+    {% if confirmation.volumes %}
+    <p class="field__help">Choose the named volumes whose files go into the archive. A volume left unchosen is recorded by its mount only.</p>
+    <fieldset class="choice-group">
+      <legend>Volumes</legend>
+      {% for volume in confirmation.volumes %}
+      <div class="choice">
+        <input class="choice__input" type="checkbox" id="volume-{{ loop.index }}" name="volume" value="{{ volume.name }}"
+               {%- if not volume.can_export or confirmation.helper_image is none %} disabled{% endif %}
+               aria-describedby="volume-{{ loop.index }}-help">
+        <label class="choice__label mono" for="volume-{{ loop.index }}">{{ volume.name }}</label>
+        <p class="choice__help" id="volume-{{ loop.index }}-help">
+          {%- if volume.refusal %}{{ volume.refusal }}
+          {%- else %}Mounted at {% for target in volume.targets %}<span class="mono">{{ target }}</span>{{ ", " if not loop.last else "" }}{% endfor %}.
+          {%- if volume.running_users %} {{ volume.running_users }} running {{ "container mounts" if volume.running_users == 1 else "containers mount" }} it.{% endif %}{% endif %}</p>
+      </div>
+      {% endfor %}
+    </fieldset>
+    {% if confirmation.is_running or confirmation.volumes|selectattr("running_users")|list %}
+    <div class="panel panel--alert" role="note">
+      <h3>Volume data can be inconsistent</h3>
+      <p>{% if confirmation.is_running %}This container is {{ confirmation.state }}. {% endif %}If a running container writes to a chosen volume while the archive is read, the volume data can be inconsistent. A database's files are the usual case. Nothing is stopped.</p>
+    </div>
+    {% endif %}
+    {% if confirmation.can_copy_volumes %}
+    <p>For each chosen volume dockmin creates a container named <span class="mono">{{ confirmation.helper_name_prefix }}</span> followed by twelve characters from the image <span class="mono">{{ confirmation.helper_image|replace("sha256:", "")|truncate(12, true, "") }}</span>, which is already on the host. It is never started, mounts the volume read-only, has no network and no capabilities, and is removed when its volume has been read, however that ends.</p>
+    {% elif confirmation.helper_image is none and confirmation.volumes|selectattr("can_export")|list %}
+    <div class="panel panel--alert" role="note">
+      <h3>The host has no image to use</h3>
+      <p>The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then review the export again to include volume data.</p>
+    </div>
+    {% endif %}
+    {% else %}
+    <p>The container mounts no named volumes.</p>
+    {% endif %}
+
+    {% if confirmation.binds %}
+    <h3>Host paths</h3>
+    <p class="field__help">Bind mounts are written as they are, and the path may not exist on the host that imports the archive. Their contents are not exported.</p>
+    <ul>
+      {% for bind in confirmation.binds %}
+      <li><span class="mono">{{ bind.source }}</span> at <span class="mono">{{ bind.target }}</span>{% if bind.read_only %}, read-only{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if confirmation.networks %}
+    <h3>Networks</h3>
+    <ul>
+      {% for network in confirmation.networks %}
+      <li><span class="mono">{{ network.name }}</span>, driver <span class="mono">{{ network.driver }}</span>
+        {%- if network.internal %}, internal{% endif %}
+        {%- if network.attachable %}, attachable{% endif %}
+        {%- if network.enable_ipv6 %}, IPv6{% endif %}
+        {%- if network.pools %}, {{ network.pools|length }} address {{ "pool" if network.pools|length == 1 else "pools" }}{% endif %}
+        {%- if network.removed_option_keys %}. Credentials left out of the options: <span class="mono">{{ network.removed_option_keys|join(", ") }}</span>{% endif %}.</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <h3>What is left out</h3>
+    <ul>
+      {% for sentence in confirmation.not_exported %}
+      <li>{{ sentence }}</li>
+      {% endfor %}
+      {% for item in confirmation.left_out %}
+      <li>{{ item|capitalize }}.</li>
+      {% endfor %}
+    </ul>
+
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Download archive</button>
+      <a class="btn" href="{{ detail_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

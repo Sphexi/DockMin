@@ -74,6 +74,7 @@ __all__ = [
     "VolumeExportRefused",
     "VolumeExportService",
     "VolumeExportStream",
+    "shared_export_slots",
 ]
 
 MAX_EXPORTS_PER_ENVIRONMENT: Final = 1
@@ -150,6 +151,11 @@ class ExportSlots:
 
 
 _SLOTS: Final = ExportSlots()
+
+
+def shared_export_slots() -> ExportSlots:
+    """Return the instance's export slots, shared by every kind of export."""
+    return _SLOTS
 
 
 @dataclass(frozen=True, slots=True)

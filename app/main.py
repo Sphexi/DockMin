@@ -122,6 +122,7 @@ from app.web import (
     automation_webhook_routes,
     backup_routes,
     container_create_routes,
+    container_export_routes,
     container_job_routes,
     container_routes,
     container_stream_routes,
@@ -142,6 +143,7 @@ from app.web import (
     results,
     server_routes,
     stack_dismissal_routes,
+    stack_export_routes,
     stack_file_routes,
     stack_log_routes,
     stack_read_routes,
@@ -841,6 +843,7 @@ def build_app(options: AppOptions) -> FastAPI:
     app.include_router(team_routes.router)
     app.include_router(token_routes.router)
     app.include_router(container_create_routes.router)
+    app.include_router(container_export_routes.router)
     app.include_router(container_job_routes.router)
     app.include_router(container_stream_routes.router)
     app.include_router(container_stream_routes.socket_router)
@@ -856,6 +859,8 @@ def build_app(options: AppOptions) -> FastAPI:
     app.include_router(stack_variable_routes.swarm)
     app.include_router(stack_dismissal_routes.router)
     app.include_router(stack_dismissal_routes.swarm)
+    app.include_router(stack_export_routes.router)
+    app.include_router(stack_export_routes.swarm)
     app.include_router(stack_routes.router)
     app.include_router(stack_file_routes.router)
     app.include_router(swarm_stream_routes.router)

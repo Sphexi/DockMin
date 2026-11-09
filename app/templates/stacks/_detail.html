@@ -34,6 +34,9 @@
       <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_stack_remove', environment_id=environment_id, stack_name=row.name) }}">Remove</a>
       {% endif %}
       {% if detail.can_manage %}
+      {% if not own_stack %}
+      <a class="btn btn--compact" href="{{ route_path('environment_stack_export_confirm', environment_id=environment_id, stack_name=row.name) }}">Export</a>
+      {% endif %}
       <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_stack_forget', environment_id=environment_id, stack_name=row.name) }}">Forget</a>
       {% endif %}
     </div>

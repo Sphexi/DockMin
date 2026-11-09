@@ -466,6 +466,33 @@ class StackRepository(SecretRepository[StoredStack]):
             revealed[str(row["name"])] = value
         return revealed
 
+    async def secret_variable_opener(self, stack_id: int) -> Callable[[], dict[str, str]]:
+        """Read the sealed secrets of a stack now and return the function that opens them.
+
+        The function decrypts every secret by variable name and is blocking, so it runs in a worker
+        thread. It raises SecretUnreadableError when any value cannot be decrypted.
+        """
+        rows = await self._session.fetch_limited(
+            "SELECT id, name, value_ciphertext FROM stack_variable "
+            "WHERE stack_id = ? AND is_secret = 1 ORDER BY name LIMIT ?",
+            (stack_id, MAX_VARIABLES),
+            limit=MAX_VARIABLES,
+        )
+
+        def open_all() -> dict[str, str]:
+            opened: dict[str, str] = {}
+            for row in rows:
+                try:
+                    value = self._reveal(_VALUE, row)
+                except DecryptionError:
+                    raise SecretUnreadableError("a stored variable cannot be read") from None
+                if value is None:
+                    raise SecretUnreadableError("a stored variable cannot be read")
+                opened[str(row["name"])] = value
+            return opened
+
+        return open_all
+
     async def reveal_variable(self, stack_id: int, variable_id: int) -> OpenedVariable | None:
         """Return one variable of the stack with a secret's value decrypted; None if it is gone.
 

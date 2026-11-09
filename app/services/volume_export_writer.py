@@ -260,20 +260,16 @@ class _Sink:
         self._emit(chunk)
 
 
-class RewriteStream:
-    """The export archive as gzip chunks, manifest first, with the volume's files under `data/`.
+class GzipTarStream:
+    """A gzip tar produced by a worker thread, handed on as chunks of at most a few queued blocks.
 
-    A worker thread asks `source` for a chunk only when it needs one and hands output to a queue
-    of four chunks, so memory stays bounded however large a member is. Devices and FIFOs are
-    left out and listed in a trailing `skipped.json`. StreamMalformed unless `source` is the
-    complete tar of one directory; an error of `source` is raised as it came. Call `aclose`
-    when done reading.
+    The worker pulls input only when it needs it and writes output into a queue of four chunks,
+    so memory stays bounded however large a member is. Subclasses write the members in
+    `_write_members`. An error raised there reaches the reader as it came, and a failed archive
+    ends without a gzip trailer. Call `aclose` when done reading.
     """
 
-    def __init__(self, source: AsyncIterator[bytes], manifest: bytes, *, root: str) -> None:
-        self._source = source
-        self._manifest = manifest
-        self._root = root
+    def __init__(self) -> None:
         self._output: asyncio.Queue[bytes | BaseException | None] = asyncio.Queue(
             OUTPUT_QUEUE_CHUNKS
         )
@@ -284,12 +280,9 @@ class RewriteStream:
         self._lock = threading.Lock()
         self._pending: set[concurrent.futures.Future[Any]] = set()
         self._done = False
-        self.skipped: list[SkippedMember] = []
-        self.skipped_count = 0
-        self.entries = 0
         self.bytes_out = 0
 
-    def __aiter__(self) -> "RewriteStream":
+    def __aiter__(self) -> "GzipTarStream":
         return self
 
     async def __anext__(self) -> bytes:
@@ -313,6 +306,9 @@ class RewriteStream:
         self._abort()
         if self._thread is not None:
             await self._finished.wait()
+
+    def _write_members(self, out: tarfile.TarFile) -> None:
+        raise NotImplementedError
 
     def _start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -363,14 +359,22 @@ class RewriteStream:
             with self._lock:
                 self._pending.discard(future)
 
-    async def _next_chunk(self) -> bytes | None:
-        try:
-            return await self._source.__anext__()
-        except StopAsyncIteration:
-            return None
+    def _call_always[T](self, work: Coroutine[Any, Any, T]) -> T:
+        """Run `work` on the loop to the end even after the stream was closed."""
+        loop = self._loop
+        assert loop is not None
+        return asyncio.run_coroutine_threadsafe(work, loop).result()
+
+    def _chunks_of(self, source: AsyncIterator[bytes]) -> ChunkSource:
+        async def next_chunk() -> bytes | None:
+            try:
+                return await source.__anext__()
+            except StopAsyncIteration:
+                return None
+
+        return ChunkSource(lambda: self._call(next_chunk()))
 
     def _rewrite(self) -> None:
-        source = ChunkSource(lambda: self._call(self._next_chunk()))
         sink = _Sink(lambda chunk: self._call(self._output.put(chunk)))
         with (
             gzip.GzipFile(fileobj=sink, mode="wb", compresslevel=GZIP_LEVEL, mtime=0) as compressed,
@@ -382,23 +386,43 @@ class RewriteStream:
             ) as out,
         ):
             try:
-                self._add_document(out, MANIFEST_NAME, self._manifest)
-                self._copy(TarReader(source), out)
-                source.finish()
-                self._add_document(out, SKIPPED_NAME, self._skipped_document())
+                self._write_members(out)
             except BaseException:
                 sink.drop()
                 raise
         sink.finish()
 
-    def _copy(self, reader: TarReader, out: tarfile.TarFile) -> None:
+
+class VolumeCopier:
+    """Copies the Engine's tar of one directory into an archive under `<prefix>data/`.
+
+    Devices and FIFOs are left out and counted; `write_skipped` adds `<prefix>skipped.json`.
+    StreamMalformed unless the tar is the complete archive of the directory named `root`.
+    """
+
+    def __init__(self, root: str, prefix: str = "") -> None:
+        self._root = root
+        self._prefix = prefix
+        self._data = f"{prefix}{DATA_DIRECTORY}"
+        self.skipped: list[SkippedMember] = []
+        self.skipped_count = 0
+        self.entries = 0
+
+    def copy(self, source: ChunkSource, out: tarfile.TarFile) -> None:
+        """Copy every member of the tar read from `source`, then check it ended cleanly."""
+        reader = TarReader(source)
         first = reader.next()
         if first is None or first.info.name != self._root or not first.info.isdir():
             raise StreamMalformed("the archive does not start with the directory that was read")
-        self._copy_entry(out, first, DATA_DIRECTORY)
+        self._copy_entry(out, first, self._data)
         while (entry := reader.next()) is not None:
             relative = self._relative(entry.info.name)
-            self._copy_entry(out, entry, f"{DATA_DIRECTORY}/{relative}", relative)
+            self._copy_entry(out, entry, f"{self._data}/{relative}", relative)
+        source.finish()
+
+    def write_skipped(self, out: tarfile.TarFile) -> None:
+        """Add the list of members that were left out."""
+        add_document(out, f"{self._prefix}{SKIPPED_NAME}", self._skipped_document())
 
     def _relative(self, name: str) -> str:
         prefix = f"{self._root}/"
@@ -424,7 +448,7 @@ class RewriteStream:
             written.type, written.linkname = tarfile.SYMTYPE, info.linkname
         elif info.type == tarfile.LNKTYPE:
             written.type = tarfile.LNKTYPE
-            written.linkname = f"{DATA_DIRECTORY}/{self._relative(info.linkname)}"
+            written.linkname = f"{self._data}/{self._relative(info.linkname)}"
         else:
             written.type, written.size = tarfile.REGTYPE, info.size
         out.addfile(written, entry.body if written.size else None)
@@ -444,12 +468,48 @@ class RewriteStream:
         }
         return (json.dumps(document, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
-    @staticmethod
-    def _add_document(out: tarfile.TarFile, name: str, content: bytes) -> None:
-        info = tarfile.TarInfo(name)
-        info.size = len(content)
-        info.mode = 0o644
-        out.addfile(info, _Memory(content))
+
+class RewriteStream(GzipTarStream):
+    """The export archive as gzip chunks, manifest first, with the volume's files under `data/`.
+
+    Devices and FIFOs are left out and listed in a trailing `skipped.json`. StreamMalformed
+    unless `source` is the complete tar of one directory; an error of `source` is raised as it
+    came.
+    """
+
+    def __init__(self, source: AsyncIterator[bytes], manifest: bytes, *, root: str) -> None:
+        super().__init__()
+        self._source = source
+        self._manifest = manifest
+        self._copier = VolumeCopier(root)
+
+    @property
+    def skipped(self) -> list[SkippedMember]:
+        """The members left out, up to the listing cap."""
+        return self._copier.skipped
+
+    @property
+    def skipped_count(self) -> int:
+        """How many members were left out."""
+        return self._copier.skipped_count
+
+    @property
+    def entries(self) -> int:
+        """How many members were copied."""
+        return self._copier.entries
+
+    def _write_members(self, out: tarfile.TarFile) -> None:
+        add_document(out, MANIFEST_NAME, self._manifest)
+        self._copier.copy(self._chunks_of(self._source), out)
+        self._copier.write_skipped(out)
+
+
+def add_document(out: tarfile.TarFile, name: str, content: bytes) -> None:
+    """Add a regular file of the given bytes, mode 0644, to an archive being written."""
+    info = tarfile.TarInfo(name)
+    info.size = len(content)
+    info.mode = 0o644
+    out.addfile(info, _Memory(content))
 
 
 class _Memory:
