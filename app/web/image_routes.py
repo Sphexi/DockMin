@@ -13,6 +13,7 @@ from app.auth.dependencies import CurrentUser, require_administrator_or_not_foun
 from app.auth.errors import PermissionDenied, ResourceNotFound, ValidationFailed
 from app.auth.principal import Principal
 from app.db.repositories.pagination import MAX_PAGE_SIZE
+from app.logging import get_logger
 from app.services.assembly import (
     Environments,
     Images,
@@ -77,9 +78,12 @@ from app.web.pagination import Column, PageView
 from app.web.problems import unreachable_copy
 from app.web.registry_providers import CATALOGUE
 from app.web.results import show_result
+from app.web.sorting import DirectionParam, SortParam, view_sort
 from app.web.templating import is_htmx_request, render_fragment, render_page
 
 TABS_REGION: Final = Region("image-tabs", "outerHTML")
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix=PREFIX, tags=["images"], dependencies=[Depends(require_user)])
 
@@ -283,9 +287,9 @@ def _checkable(rows: Sequence[ImageRow]) -> list[str]:
 
 def _columns(can_create: bool, can_remove: bool) -> tuple[Column, ...]:
     base = (
-        Column("image", "Image"),
-        Column("size", "Size", numeric=True, width="count"),
-        Column("created", "Created", optional=True, width="time"),
+        Column("image", "Image", sortable=True),
+        Column("size", "Size", sortable=True, numeric=True, width="count"),
+        Column("created", "Created", sortable=True, optional=True, width="time"),
         Column("used", "Used by", width="names"),
     )
     return (
@@ -309,6 +313,8 @@ async def list_images(
     update: Annotated[str | None, Query(max_length=FIELD_MAX)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=CURSOR_MAX)] = None,
+    sort: SortParam = None,
+    direction: DirectionParam = None,
 ) -> Response:
     """List the images of the host, read now, with the binding of each reference."""
     environment = (await environments.environments.get(actor, environment_id)).summary
@@ -325,15 +331,22 @@ async def list_images(
     can_remove = False
     orphans = None
     errors: tuple[str, ...] = ()
+    refused: dict[str, str] = {}
     failure: str | None = None
     status_code = 200
     next_cursor = None
     try:
         result = await images.queries.page(
-            actor, environment_id, filters, limit=limit, cursor=cursor
+            actor,
+            environment_id,
+            filters,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+            direction=direction,
         )
     except ValidationFailed as invalid:
-        errors, status_code = tuple(invalid.fields.values()), 400
+        errors, status_code, refused = tuple(invalid.fields.values()), 400, invalid.fields
     except (EnvironmentUnavailable, ObjectTooLarge) as unavailable:
         failure, status_code = str(unavailable), 503
     else:
@@ -352,12 +365,15 @@ async def list_images(
         )
         if value
     ]
+    view_key, view_direction = view_sort(sort, direction, refused)
     pager = PageView(
         base_path=_list_path(request, environment_id),
         limit=limit,
         item_count=len(rows),
         cursor=None if errors or failure else cursor,
         next_cursor=next_cursor,
+        sort=view_key,
+        direction=view_direction,
         params=tuple(params),
     )
     results: dict[str, Any] = {
@@ -441,6 +457,22 @@ async def _pull_page(
         },
         status_code,
     )
+
+
+@router.get("/disk-usage", response_class=HTMLResponse, name="environment_image_disk_usage")
+async def image_disk_usage(
+    request: Request, images: Images, actor: CurrentUser, environment_id: PathId
+) -> Response:
+    """Return the host-wide image total, or an empty fragment when the host cannot give it."""
+    total: int | None = None
+    try:
+        total = await images.queries.disk_usage(actor, environment_id)
+    except (EnvironmentUnavailable, ObjectTooLarge) as unavailable:
+        logger.warning(
+            "image_disk_usage_unavailable",
+            extra={"environment_id": environment_id, "reason": type(unavailable).__name__},
+        )
+    return _fragment(request, LIST_TABLES, "image_disk_total", total=total)
 
 
 @router.get("/pull", response_class=HTMLResponse, name="environment_image_pull")

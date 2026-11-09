@@ -53,6 +53,7 @@ from app.web.object_pages import (
 )
 from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
+from app.web.sorting import DirectionParam, SortParam, view_sort
 from app.web.stack_log_routes import LOGS_TAB, logs_status, logs_tab_context
 from app.web.stack_pages import DISMISSED_PAGE, DISMISSED_PARAM
 from app.web.stack_routes import compose_notice
@@ -82,16 +83,17 @@ DETAIL_NOTICES: Final[dict[str, tuple[FlashLevel, str]]] = {
 }
 
 TABS_REGION: Final = Region("stack-tabs", "outerHTML")
+LIST_TABLES: Final = "swarm/stacks/_tables.html"
 
 router = swarm_router()
 
 
 STACK_LIMIT: Final = 500
 STACK_COLUMNS: Final = (
-    Column("name", "Namespace"),
-    Column("state", "State", width="badge"),
-    Column("last", "Last operation", optional=True, width="time"),
-    Column("services", "Services", numeric=True, optional=True, width="count"),
+    Column("name", "Namespace", sortable=True),
+    Column("state", "State", sortable=True, width="badge"),
+    Column("last", "Last operation", sortable=True, optional=True, width="time"),
+    Column("services", "Services", sortable=True, numeric=True, optional=True, width="count"),
     Column("configs", "Configs", numeric=True, optional=True, width="count"),
     Column("secrets", "Secrets", numeric=True, optional=True, width="count"),
     Column("networks", "Networks", numeric=True, optional=True, width="count"),
@@ -117,6 +119,8 @@ async def list_stacks(
     environment_id: PathId,
     q: Filter = None,
     dismissed: Annotated[str, Query(max_length=8)] = "",
+    sort: SortParam = None,
+    direction: DirectionParam = None,
 ) -> Response:
     """List the managed stacks and the other namespaces the caller may see, merged by name."""
     return await list_response(
@@ -128,6 +132,8 @@ async def list_stacks(
         environment_id,
         needle=blank_to_none(q),
         show_dismissed=dismissed == DISMISSED_PAGE,
+        sort=sort,
+        direction=direction,
     )
 
 
@@ -142,48 +148,72 @@ async def list_response(
     needle: str | None = None,
     show_dismissed: bool = False,
     refusal: Failure | None = None,
+    sort: str | None = None,
+    direction: str | None = None,
 ) -> Response:
     """Render the Swarm stacks list, with `refusal` above it when an action was turned down."""
     environment = (await environments.environments.get(actor, environment_id)).summary
     page = None
     errors: tuple[str, ...] = ()
+    refused: dict[str, str] = {}
     failure: str | None = None
     status_code = refusal.status if refusal else 200
     try:
         page = await swarm.stacks.page(
-            actor, environment_id, q=needle, show_dismissed=show_dismissed
+            actor,
+            environment_id,
+            q=needle,
+            show_dismissed=show_dismissed,
+            sort=sort,
+            direction=direction,
         )
     except ValidationFailed as invalid:
-        errors, status_code = tuple(invalid.fields.values()), 400
+        errors, status_code, refused = tuple(invalid.fields.values()), 400, invalid.fields
     except UNAVAILABLE as unavailable:
         failure, status_code = str(unavailable), 503
     rows = list(page.rows) if page is not None else []
     params = ((DISMISSED_PARAM, DISMISSED_PAGE),) if show_dismissed else ()
+    view_key, view_direction = view_sort(sort, direction, refused)
     pager = PageView(
         base_path=swarm_path(request, "stack_list", environment_id=environment_id),
         limit=STACK_LIMIT,
         item_count=len(rows),
         cursor=None,
         next_cursor=None,
+        sort=view_key,
+        direction=view_direction,
         params=(*((("q", needle),) if needle else ()), *params),
     )
+    results: dict[str, Any] = {
+        "page": page,
+        "rows": rows,
+        "columns": STACK_COLUMNS,
+        "pager": pager,
+        "q": needle or "",
+        "errors": errors,
+        "failure": failure,
+        "show_dismissed": show_dismissed,
+        "dismissed_hidden": page.dismissed_hidden if page else 0,
+        "retry_href": self_href(request),
+        "can_create": await _can_create(swarm, actor, environment_id),
+    }
+    if is_htmx_request(request):
+        return fragment_response(
+            request,
+            LIST_TABLES,
+            "stacks_results",
+            status_code,
+            oob=True,
+            environment_id=environment_id,
+            **results,
+        )
     return page_response(
         request,
         "swarm/stacks/list.html",
         {
+            **results,
             "environment": environment,
-            "page": page,
-            "rows": rows,
-            "columns": STACK_COLUMNS,
-            "pager": pager,
-            "q": needle or "",
-            "errors": errors,
-            "failure": failure,
             "refusal": refusal,
-            "show_dismissed": show_dismissed,
-            "dismissed_hidden": page.dismissed_hidden if page else 0,
-            "retry_href": self_href(request),
-            "can_create": await _can_create(swarm, actor, environment_id),
             "compose": compose_notice(stacks.swarm_planner.compose_status()),
         },
         status_code,

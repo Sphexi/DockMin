@@ -2,6 +2,7 @@
 {% from "environments/_parts.html" import environment_badge with context %}
 {% from "partials/error_state.html" import error_state %}
 {% from "partials/form_field.html" import form_field %}
+{% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/list_bar.html" import list_bar %}
 {% from "partials/page_header.html" import page_header %}
 {% from "stacks/_parts.html" import compose_banner with context %}
@@ -26,6 +27,7 @@
 <form id="stack-filters" class="list-bar__filter" method="get" action="{{ list_href }}" role="search" aria-label="Filter stacks"
       hx-get="{{ list_href }}" hx-target="#stacks-results" hx-swap="innerHTML"
       hx-push-url="true" hx-trigger="submit, change from:(#stack-filters select, #stack-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ sort_fields(pager.sort, pager.direction) }}
   {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
   <button type="submit" class="btn btn--primary">Apply filter</button>
   <a class="btn" href="{{ list_href }}">Reset</a>

@@ -80,6 +80,7 @@ from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import unreachable_copy
 from app.web.results import show_result
+from app.web.sorting import DirectionParam, SortParam, view_sort
 from app.web.stack_links import stack_links
 from app.web.templating import is_htmx_request
 
@@ -232,12 +233,12 @@ def _container_tab_path(request: Request, environment_id: int, container_id: str
 
 
 COLUMNS: Final = (
-    Column("name", "Name"),
-    Column("driver", "Driver", width="short"),
-    Column("scope", "Scope", optional=True, width="short"),
+    Column("name", "Name", sortable=True),
+    Column("driver", "Driver", sortable=True, width="short"),
+    Column("scope", "Scope", sortable=True, optional=True, width="short"),
     Column("subnets", "Subnets", optional=True, width="medium"),
     Column("flags", "Flags", optional=True, width="badge"),
-    Column("stack", "Stack", optional=True, width="medium"),
+    Column("stack", "Stack", sortable=True, optional=True, width="medium"),
     Column("used", "Used by"),
     Column("actions", "Actions", width="actions"),
 )
@@ -258,6 +259,8 @@ async def list_networks(
     stack: Filter = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=CURSOR_MAX)] = None,
+    sort: SortParam = None,
+    direction: DirectionParam = None,
 ) -> Response:
     """List the networks of the host the caller may see, read now."""
     environment = (await environments.environments.get(actor, environment_id)).summary
@@ -273,15 +276,22 @@ async def list_networks(
     total = visible = 0
     can_create = can_prune = False
     errors: tuple[str, ...] = ()
+    refused: dict[str, str] = {}
     failure: str | None = None
     status_code = 200
     next_cursor = None
     try:
         result = await networks.queries.page(
-            actor, environment_id, filters, limit=limit, cursor=cursor
+            actor,
+            environment_id,
+            filters,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+            direction=direction,
         )
     except ValidationFailed as invalid:
-        errors, status_code = tuple(invalid.fields.values()), 400
+        errors, status_code, refused = tuple(invalid.fields.values()), 400, invalid.fields
     except UNAVAILABLE as unavailable:
         failure, status_code = str(unavailable), 503
     else:
@@ -301,12 +311,15 @@ async def list_networks(
         )
         if value
     ]
+    view_key, view_direction = view_sort(sort, direction, refused)
     pager = PageView(
         base_path=_list_path(request, environment_id),
         limit=limit,
         item_count=len(rows),
         cursor=None if errors or failure else cursor,
         next_cursor=next_cursor,
+        sort=view_key,
+        direction=view_direction,
         params=tuple(params),
     )
     results: dict[str, Any] = {

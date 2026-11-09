@@ -96,9 +96,10 @@ Redacted values show as `Redacted` in the interface and as `[REDACTED]` in the J
 | Ports | All | Published ports as `80->8080/tcp` (`ip:80->8080/tcp` when bound to one address) and unpublished as `8080/tcp`; 20 at most, then `and N more` |
 | Actions | Same as Select, and any user who may create in the environment | Actions offered for the state ([Lifecycle actions](#lifecycle-actions)); `Recreate` on rows the user may change; `Duplicate` for users who may create |
 
-The container name is the first name that carries no link path. Order is name (case-insensitive), then id.
+The container name is the first name that carries no link path. Default order is name (case-insensitive), then id; the Container, State, Image, Stack and Created headers sort the list ([Sorting](#sorting)).
 
 - Image, Stack, Created and Ports are hidden below 40rem; Container, State and Actions stay. The Select header is read by screen readers and not drawn.
+- Shift-click ticks a range of Select boxes ([Range selection](#range-selection)).
 - `Create container` is shown above the list to every user who may [create](#create).
 
 ### Filters
@@ -117,6 +118,62 @@ All filters combine. A container must match every one.
 - `stopped` matches the states `created`, `exited` and `dead`.
 - The stack name is the value of `com.docker.compose.project`, or of `com.docker.stack.namespace` when the first is absent.
 - An invalid filter replaces the table with the message for the field and returns `400`.
+
+### Sorting
+
+A column header that is a link sorts the whole set of containers the viewer may see, before it is cut into pages. The other lists link here for the shared rules.
+
+| Parameter | Rule |
+|---|---|
+| `sort` | A column key from the table below. At most 32 characters; longer answers `422`. Absent: the default order |
+| `dir` | `asc` (default) or `desc`. At most 8 characters; longer answers `422`. Without `sort` it is checked and ignored |
+
+| Column | `sort` | Orders by |
+|---|---|---|
+| Container | `name` | Name, ignoring case |
+| State | `state` | Rank: `running`, `restarting`, `paused`, `created`, `removing`, `exited`, `dead` |
+| Image | `image` | Image reference, ignoring case |
+| Stack | `stack` | Stack name, ignoring case |
+| Created | `created` | Creation time |
+
+| Rule | Value |
+|---|---|
+| Default order | `name` ascending, then id |
+| Header link | Ascending on the first click. A click on the sorted column switches between ascending and descending. A header link opens the first page |
+| Active column | `aria-sort` is `ascending` or `descending`. Other sortable headers read `none` |
+| Empty value | Sorts as the lowest value: first ascending, last descending. Empty values are a container with no stack and a state outside the rank |
+| Ties | Broken by name (ignoring case), then id, in the sort direction. `desc` reverses the whole order |
+| Filters | Submitting a filter keeps `sort` and `dir` and opens the first page. Paging links, `Clear filters` and `Back to the first page` keep them. `Reset` opens the list with no filter and the default order |
+| Cursor | A cursor names the sort and direction it was issued under, or none for the default order. Used under any other, it answers `400` |
+| Stored | Nothing. The sort is in the address only and is not remembered between visits |
+| Without JavaScript | A header link is a plain link that returns the full page |
+| JSON API | No `sort`. [JSON API](Reference-JSON-API) lists keep their fixed order |
+
+| Refused | Answer |
+|---|---|
+| Unknown `sort` | `400`, `Sort by one of the listed columns.` |
+| Unknown `dir` | `400`, `Choose ascending or descending.` |
+| Invalid cursor | `400`, `The page link is not valid.` |
+
+A refused value replaces the table with the message for the field.
+
+### Range selection
+
+Shift-click ticks or clears a run of batch checkboxes. The rule applies to the Select column of the container, image and volume lists, to the environment list ([Environments](Usage-Environments#environment-list)) and to the three sections of the onboarding review ([Review page](Usage-Environments#review-page)).
+
+| Rule | Value |
+|---|---|
+| Gesture | Click one box, then Shift-click another box in the same list |
+| Effect | Every enabled box from one to the other, both included, takes the state of the box that was Shift-clicked |
+| Disabled boxes | Left as they are |
+| Order | The order of the boxes on the page |
+| Start of the range | The last box clicked in that list. With none, Shift-click acts as a plain click and starts a range |
+| Groups | One group for each form and each checkbox name. The three sections of the onboarding review are three groups. A range never joins two |
+| Leaving the page | The start is forgotten when its box leaves the page: paging, sorting or filtering replaces the table. A range never covers rows of an earlier page |
+| Input | Mouse clicks, and clicks on the label of a box. Keyboard selection is unchanged and has no range form |
+| Text | A Shift-click on a box or its label does not select the text between the rows |
+| Without JavaScript | Each box is ticked on its own |
+| Batch limits | Unchanged. The confirmation page names the targets and refuses more than its limit |
 
 ### Paging
 

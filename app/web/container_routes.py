@@ -115,6 +115,7 @@ from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import error_copy, unreachable_copy
 from app.web.results import show_result
+from app.web.sorting import DirectionParam, SortParam, view_sort
 from app.web.stack_links import stack_links
 from app.web.templating import is_htmx_request, render_fragment, render_page, render_partial
 
@@ -389,11 +390,11 @@ ACTION_ERRORS = (
 
 def _columns(writable: bool, may_create: bool) -> tuple[Column, ...]:
     base = (
-        Column("name", "Container"),
-        Column("state", "State", width="badge"),
-        Column("image", "Image", optional=True),
-        Column("stack", "Stack", optional=True, width="medium"),
-        Column("created", "Created", optional=True, width="time"),
+        Column("name", "Container", sortable=True),
+        Column("state", "State", sortable=True, width="badge"),
+        Column("image", "Image", sortable=True, optional=True),
+        Column("stack", "Stack", sortable=True, optional=True, width="medium"),
+        Column("created", "Created", sortable=True, optional=True, width="time"),
         Column("ports", "Ports", optional=True),
     )
     columns = (Column("select", "Select"), *base) if writable else base
@@ -417,6 +418,8 @@ async def list_containers(
     label: Annotated[list[str] | None, Query(max_length=LABEL_PARAMS_MAX)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=CURSOR_MAX)] = None,
+    sort: SortParam = None,
+    direction: DirectionParam = None,
 ) -> Response:
     """List the containers the caller may see, read from the host now, filtered and paged."""
     environment = (await environments.environments.get(actor, environment_id)).summary
@@ -433,14 +436,21 @@ async def list_containers(
     total = 0
     health_unavailable = False
     errors: tuple[str, ...] = ()
+    refused: dict[str, str] = {}
     failure: str | None = None
     status_code = 200
     try:
         result = await containers.queries.page(
-            actor, environment_id, filters, limit=limit, cursor=cursor
+            actor,
+            environment_id,
+            filters,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+            direction=direction,
         )
     except ValidationFailed as invalid:
-        errors, status_code = tuple(invalid.fields.values()), 400
+        errors, status_code, refused = tuple(invalid.fields.values()), 400, invalid.fields
     except (EnvironmentUnavailable, ContainerListTooLarge) as unavailable:
         failure, status_code = str(unavailable), 503
     else:
@@ -460,11 +470,14 @@ async def list_containers(
         if value
     ]
     params.extend(("label", text) for text in labels)
+    view_key, view_direction = view_sort(sort, direction, refused)
     pager = PageView.of(
         page,
         base_path=_list_path(request, environment_id),
         limit=limit,
         cursor=None if errors or failure else cursor,
+        sort=view_key,
+        direction=view_direction,
         params=params,
     )
     writable = any(row.can_write for row in page.items)

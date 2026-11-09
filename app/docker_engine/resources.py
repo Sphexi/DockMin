@@ -47,6 +47,7 @@ from app.docker_engine.models import (
     EngineEvent,
     ExecInspect,
     ImageDeleteItem,
+    ImageDiskUsage,
     ImageHistoryEntry,
     ImageInspect,
     ImageSummary,
@@ -163,6 +164,7 @@ CONTAINER_INSPECT_BYTES = 4 * 1024 * 1024
 VOLUME_INSPECT_BYTES = 4 * 1024 * 1024
 IMAGE_INSPECT_BYTES = 4 * 1024 * 1024
 IMAGE_LIST_BYTES = 16 * 1024 * 1024
+DISK_USAGE_BYTES = 16 * 1024 * 1024
 IMAGE_HISTORY_BYTES = 1024 * 1024
 IMAGE_REMOVE_REPLY_BYTES = 1024 * 1024
 MAX_HISTORY_ROWS = 512
@@ -1186,6 +1188,19 @@ class SystemApi:
     async def info(self) -> SystemInfo:
         """Fetch host-level facts."""
         return await self._http.get_parsed(SystemInfo, "/info", max_bytes=INFO_RESPONSE_BYTES)
+
+    async def image_disk_usage(self) -> ImageDiskUsage:
+        """Fetch the bytes the host's images occupy, each shared layer counted once.
+
+        Asks for image data only (`type=image`). The reply is capped at 16 MiB and decoded in a
+        worker thread. ResponseTooLarge past the cap.
+        """
+        return await self._http.get_parsed(
+            ImageDiskUsage,
+            "/system/df",
+            params={"type": "image"},
+            max_bytes=DISK_USAGE_BYTES,
+        )
 
     def events(
         self,

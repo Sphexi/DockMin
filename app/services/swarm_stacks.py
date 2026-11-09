@@ -38,9 +38,11 @@ from app.services.host_objects import (
     VolumeListTooLarge,
     busy_view,
     read_services,
+    row_id,
     service_mode,
 )
 from app.services.image_bindings import CredentialOffer
+from app.services.list_order import ListOrder, Ordering, number_key, rank_key, text_key
 from app.services.object_inspector import (
     SWARM_OBJECT_ID,
     EngineObjectInspector,
@@ -97,6 +99,8 @@ __all__ = [
 ]
 
 MAX_NAMESPACES: Final = 500
+
+_status_place = rank_key(("active", "partial", "inactive", "error", "unknown"))
 MAX_MEMBERS_SHOWN: Final = 500
 MAX_QUERY: Final = 128
 NAMESPACE_ROUTE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
@@ -148,6 +152,20 @@ class NamespaceRow:
     objects_digest: str = ""
     dismissible: bool = False
     dismissal: DismissalView | None = None
+
+
+LIST_ORDER: Final = ListOrder[NamespaceRow](
+    default="name",
+    keys={
+        "name": text_key(lambda r: r.name),
+        "state": number_key(lambda r: _status_place(r.status)),
+        "last": text_key(lambda r: r.last_operation_at),
+        "services": number_key(lambda r: r.services),
+    },
+    name=lambda r: r.name,
+    row_id=lambda r: row_id(r.key),
+    entry_id=lambda r: r.key,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -664,8 +682,13 @@ class SwarmStackQueries:
         *,
         q: str | None = None,
         show_dismissed: bool = False,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> NamespacePage:
-        """List the managed stacks and namespaces the caller may see; ValidationFailed keyed `q`.
+        """List the managed stacks and namespaces the caller may see.
+
+        ValidationFailed keyed `q`, `sort` or `dir`. A sort orders the one page of at most
+        `MAX_NAMESPACES` entries, which is chosen by name.
 
         Managed and unmanaged entries merge by folded name. A dismissal hides its unmanaged
         namespace; with `show_dismissed` the list holds only the dismissed ones.
@@ -675,6 +698,7 @@ class SwarmStackQueries:
         needle = (q or "").strip().casefold()
         if len(needle) > MAX_QUERY:
             raise ValidationFailed({"q": f"Search for at most {MAX_QUERY} characters."})
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
         environment = await require_swarm(self._authoriser, self._hosts, actor, environment_id)
         groups = await self._visible_groups(actor, environment_id)
         managed = await self._managed(actor, environment_id, needle)
@@ -701,6 +725,8 @@ class SwarmStackQueries:
             [key for key, group in matched if key not in managed and not group.services],
         )
         rows = await self._rows_of(actor, environment_id, matched, managed, twins, stored, volumes)
+        if sort:
+            rows = ordering.ordered(rows)
         return NamespacePage(
             environment_id=environment_id,
             environment_name=environment.name,

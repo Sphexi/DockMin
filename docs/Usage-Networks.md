@@ -70,7 +70,7 @@ Secret-named keys follow the rule in [Withheld from standard users](Usage-Contai
 | Columns | Name (with short id and badge), Driver, Scope, Subnets, Flags, Stack, Used by, Actions |
 | Flags | `Internal`, `Attachable`, `IPv6` |
 | Actions column | `Details` for everyone; `Remove` for users with write access to a user network |
-| Order | Name, ignoring case, then id |
+| Order | Name, ignoring case, then id. The Name, Driver, Scope and Stack headers sort the list ([Sorting](#sorting)) |
 | Page size | 25 by default; `limit` 1 to 500. Outside the range answers `422` |
 | Paging | `cursor`; an invalid cursor answers `400` |
 | Count | `N networks`, or `N networks match these filters, of M you can see` |
@@ -101,6 +101,19 @@ A network is predefined or system by name and driver together. A user network ca
 | Stack | `stack` | At most 128 characters. Case-insensitive exact match on the stack name |
 
 An invalid filter value replaces the table with the message for the field and answers `400`. Filters survive paging.
+
+### Sorting
+
+The rules of [Sorting](Usage-Containers#sorting) apply: `sort` and `dir`, the header links, the cursor, and the `400` answers (`Sort by one of the listed columns.`, `Choose ascending or descending.`, `The page link is not valid.`).
+
+| Column | `sort` | Orders by | Empty value |
+|---|---|---|---|
+| Name | `name` | Name, ignoring case | None |
+| Driver | `driver` | Driver name, ignoring case | None |
+| Scope | `scope` | Scope, ignoring case | None |
+| Stack | `stack` | Stack name, ignoring case | A network with no stack |
+
+Default order: `name` ascending, then id. Empty values come first ascending and last descending. Filters apply before the sort.
 
 ### Host failures
 

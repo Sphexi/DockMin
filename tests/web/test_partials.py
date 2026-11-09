@@ -8,7 +8,7 @@ import pytest
 from jinja2 import UndefinedError
 
 from app.db.repositories.pagination import CursorPosition, Page, encode_cursor
-from app.web.pagination import DEFAULT_LIMIT, Column, PageView
+from app.web.pagination import DEFAULT_LIMIT, Column, Direction, PageView
 from tests.web.helpers import (
     BENIGN,
     ESCAPED_HOSTILE,
@@ -366,6 +366,43 @@ def test_table_paging_and_sort_links_swap_the_table_or_the_whole_results_region(
     links = [n for n in page.tags("a") if "hx-get" in n.attrs]
     assert [n.text() for n in links] == ["Name", "First page", "Next page"]
     assert {(n.attrs["hx-target"], n.attrs["hx-swap"]) for n in links} == {(target, swap)}
+
+
+@pytest.mark.parametrize(
+    ("direction", "active", "inactive"),
+    [("asc", "ascending", "none"), ("desc", "descending", "none")],
+)
+def test_sortable_headers_state_the_direction_and_carry_a_hidden_mark(
+    direction: Direction, active: str, inactive: str
+) -> None:
+    pager = PageView.of(
+        Page(items=["a"], next_cursor=None),
+        base_path=BASE_PATH,
+        limit=DEFAULT_LIMIT,
+        sort="name",
+        direction=direction,
+    )
+    html = render_macro(
+        "data_table",
+        "data_table",
+        table_id="t",
+        caption="Widgets",
+        columns=[
+            Column("name", "Name", sortable=True),
+            Column("size", "Size", sortable=True),
+            Column("note", "Note"),
+        ],
+        pager=pager,
+        caller=lambda: "",
+    )
+    page = Document(200, html)
+    headers = {n.text(): n for n in page.tags("th")}
+    marks = [n for n in page.tags("span") if "sort-link__mark" in n.classes()]
+
+    assert headers["Name"].attrs["aria-sort"] == active
+    assert headers["Size"].attrs["aria-sort"] == inactive
+    assert "aria-sort" not in headers["Note"].attrs
+    assert [m.attrs["aria-hidden"] for m in marks] == ["true", "true"]
 
 
 ENGINE_TEXT = "network x is ambiguous <b>&"

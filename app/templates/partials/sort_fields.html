@@ -1,0 +1,9 @@
+{# Carries the active sort through a filter form. With oob a results response replaces the copy on the page. #}
+{% macro sort_fields(sort, direction, oob=false) %}
+<div id="sort-fields" hidden{% if oob %} hx-swap-oob="true"{% endif %}>
+  {%- if sort %}
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <input type="hidden" name="dir" value="{{ direction }}">
+  {%- endif %}
+</div>
+{% endmacro %}

@@ -725,8 +725,9 @@ class StackListRepository(Repository[StackSummary]):
         visible: SqlFragment | None = None,
         kind: StackKind | None = None,
         name_prefix: str | None = None,
+        descending: bool = False,
     ) -> Page[StackSummary]:
-        """Return one page ordered by name.
+        """Return one page ordered by name, from the last name down when `descending`.
 
         `visible` restricts the page to stacks a user may reach; it is built over s.name and
         s.environment_id. `kind` restricts it to one kind; None lists both.
@@ -750,6 +751,7 @@ class StackListRepository(Repository[StackSummary]):
             limit=limit,
             cursor=cursor,
             sort_column="s.name",
+            descending=descending,
             id_column="s.id",
             where=" AND ".join(conditions),
             params=tuple(params),

@@ -545,6 +545,12 @@ class SystemInfo(_EngineModel):
     swarm: SwarmInfo = Field(default_factory=SwarmInfo, alias="Swarm")
 
 
+class ImageDiskUsage(_EngineModel):
+    """The image figure of `GET /system/df`: bytes of every layer, each counted once."""
+
+    layers_size: int = Field(alias="LayersSize", ge=0)
+
+
 class EventActor(_EngineModel):
     """The object an event is about."""
 

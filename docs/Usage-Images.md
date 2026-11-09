@@ -11,6 +11,7 @@ All paths are under `/environments/{id}/images`.
 | Page | Path | Method |
 |---|---|---|
 | Image list | The base path | `GET` |
+| Image total | `/disk-usage` | `GET`, a fragment the list page requests ([Total size](#total-size)) |
 | Image | `/{image_id}?tab={tab}` | `GET` |
 | Pull form | `/pull?reference={reference}` | `GET` |
 | Credential picker for a reference | `/pull/choices` | `POST`, htmx only; other requests redirect (`303`) to the pull form |
@@ -126,12 +127,13 @@ Messages quote no input.
 | Item | Value |
 |---|---|
 | Columns | Select (administrators), Image, Size, Created, Used by, Actions |
-| Select column | A checkbox per image, for [bulk removal](#bulk-removal). Administrators only |
+| Select column | A checkbox per image, for [bulk removal](#bulk-removal). Administrators only. Shift-click ticks a range ([Range selection](Usage-Containers#range-selection)) |
 | Actions column | Shown to users who may pull or remove. `Details` for everyone; `Pull again` when the image has a tag and the user may pull; `Remove` for administrators |
-| Order | The lowest reference in the form shown, ignoring case, then id. Images with no tag sort last |
+| Order | The lowest reference in the form shown, ignoring case, then id. Images with no tag sort last. The Image, Size and Created headers sort the list ([Sorting](#sorting)) |
 | Page size | 25 by default; `limit` 1 to 500 |
 | Paging | `cursor`; an invalid cursor answers `400` |
 | Count | `{N} images`; with a filter, `{N} images match these filters` (`1 image matches these filters`) |
+| Total | `{size} for all images on this host.` after the count ([Total size](#total-size)) |
 | Reference shown | The tags; the digests when the image has no tag. At most 100 per image, then `and N more` |
 | Used by | Names of up to 10 containers the viewer may see, linked; `and N others` for the rest |
 | Buttons | `Pull image` for users who may pull; `Prune images` and `Remove selected...` for administrators |
@@ -152,6 +154,38 @@ Every image on the host is listed. The list is not filtered by the viewer's acce
 An invalid filter value answers `400` and lists the problems; for `update` the problem reads `Choose available.`; for `dangling`, `Choose yes or no.` Filters survive paging.
 
 The `Updates available` card of the [environment page](Usage-Environments#environment-page) links to `?update=available`.
+
+### Sorting
+
+The rules of [Sorting](Usage-Containers#sorting) apply: `sort` and `dir`, the header links, the cursor, and the `400` answers (`Sort by one of the listed columns.`, `Choose ascending or descending.`, `The page link is not valid.`).
+
+| Column | `sort` | Orders by |
+|---|---|---|
+| Image | `image` | The lowest tag in the form shown, ignoring case |
+| Size | `size` | Size in bytes |
+| Created | `created` | Creation time |
+
+| Rule | Value |
+|---|---|
+| Default order | The lowest tag ascending, then id. Images with no tag come last |
+| With `sort=image` | An image with no tag has an empty value, the lowest: first ascending, last descending |
+| Ties | Broken by the lowest tag (ignoring case), then id, in the sort direction |
+| Filters | The sort applies to the images that match |
+
+### Total size
+
+The line above the table gives the bytes the host's images occupy.
+
+| Item | Value |
+|---|---|
+| Text | `25 images. 2.5 GiB for all images on this host.` With a filter: `3 images match these filters. 2.5 GiB for all images on this host.` |
+| Figure | `LayersSize` of the Engine's disk usage for images (`/system/df` with `type=image`): every layer on the host, each shared layer counted once. It is not the sum of the sizes in the Size column, which counts a shared layer once for each image |
+| Covers | Every image on the host. A filter does not change it, and a standard user sees the same figure |
+| Read | Once per full page load, by a request the page makes after it loads: `GET /environments/{id}/images/disk-usage`. Paging, sorting and filtering leave the figure as it is and make no new read |
+| Answer | `200`, the figure as a fragment, `Cache-Control: no-store`. An environment the user cannot see answers `404` |
+| Reply limit | 16 MiB, decoded off the event loop |
+| Absent | The count shows without a total when the host does not answer, answers too much, or reports a figure that is missing or negative. The fragment is empty and no message is shown. The failure is logged as `image_disk_usage_unavailable` |
+| Without JavaScript | The total is absent |
 
 ### Binding states
 

@@ -1841,6 +1841,30 @@ The read answers a page titled `Read from host: {project} on {environment}`, not
 | First redeploy | Through the [redeploy confirmation](#deploy-and-redeploy), which names the containers Compose may recreate. Compose recreates the containers whose configuration differs from the stored file |
 | Recorded | `stack_adopted` with `file_source` and `as_is` ([Recorded actions](#recorded-actions)) |
 
+## Stack list
+
+| Item | Value |
+|---|---|
+| Columns | Stack, Status, Last operation, Origin, Actions |
+| Filter | `q`, `Name contains`. `Reset` opens the list with no filter and the default order |
+| Page size | 25 by default; `limit` 1 to 500 |
+| Paging | `cursor`; an invalid cursor answers `400` |
+| Sortable | The Stack header |
+| Default order | `name` ascending |
+
+### Sorting
+
+The rules of [Sorting](Usage-Containers#sorting) apply: `sort` and `dir`, the header link, the cursor, and the `400` answers (`Sort by one of the listed columns.`, `Choose ascending or descending.`, `The page link is not valid.`).
+
+| Column | `sort` | Orders by |
+|---|---|---|
+| Stack | `name` | Name |
+
+- Status, Last operation and Origin cannot be sorted.
+- The sort applies to the stacks the viewer may see and that match `q`, before they are cut into pages.
+- The section [Projects not managed here](#projects-not-managed-here) is not affected by it.
+- The [JSON API](#json-api) list is always ordered by name.
+
 ## Projects not managed here
 
 The stack list of an administrator ends with the section `Compose projects not managed here`.
@@ -3020,7 +3044,24 @@ The list is at `/environments/{id}/swarm/stacks`, titled `Swarm stacks`.
 | Create | `Create stack` for users who may create |
 | Filter | `q`, `Name contains`, at most 128 characters |
 | Limit | 500 rows: `{N} stacks match; the first {M} are listed. Narrow the filter to see the others.` |
+| Order | By name, folded. The Namespace, State, Last operation and Services headers sort the list ([Sorting](#sorting-swarm-stacks)) |
 | Compose list | On a Swarm environment it reads `Swarm stacks are listed under Swarm stacks. This list shows Compose stacks only.` |
+
+#### Sorting Swarm stacks
+
+The rules of [Sorting](Usage-Containers#sorting) apply: `sort` and `dir`, the header links, and the `400` answers (`Sort by one of the listed columns.`, `Choose ascending or descending.`). The list has no cursor.
+
+| Column | `sort` | Orders by | Empty value |
+|---|---|---|---|
+| Namespace | `name` | Name, ignoring case | None |
+| State | `state` | Rank: `active`, `partial`, `inactive`, `error`, `unknown` ([Swarm stack statuses](#swarm-stack-statuses)) | A namespace that is not managed |
+| Last operation | `last` | Time of the last operation | A namespace that is not managed, and a stack with no operation |
+| Services | `services` | Number of services | None |
+
+- Empty values come first ascending and last descending.
+- Ties break by name (ignoring case), then id, in the sort direction.
+- A sort orders the rows of the one page. When more than 500 stacks match, the 500 listed are the first by name and the sort orders only those.
+- Submitting the filter keeps `sort` and `dir`. With JavaScript, a header link and the filter replace the results region in place; without it, each returns the full page.
 
 | Tab of a managed stack | Content |
 |---|---|

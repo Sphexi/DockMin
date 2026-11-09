@@ -312,8 +312,14 @@
   text-decoration: none;
 }
 
-.sort-link:hover {
+.sort-link:hover,
+th[aria-sort="ascending"] .sort-link,
+th[aria-sort="descending"] .sort-link {
   color: var(--color-text);
+}
+
+.sort-link:focus-visible {
+  border-radius: var(--radius-sm);
 }
 
 .sort-link__mark::before {

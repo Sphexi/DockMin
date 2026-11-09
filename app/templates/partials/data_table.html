@@ -15,7 +15,8 @@
   <p class="loading" role="status">Loading&hellip;</p>
   {% if pager.is_empty %}
   {% if filtered %}
-  {{ empty_state("Nothing matches these filters", "Change the filters, or clear them to see every row.", "Clear filters", clear_href if clear_href else pager.base_path) }}
+  {% set clear_base = clear_href if clear_href else pager.base_path %}
+  {{ empty_state("Nothing matches these filters", "Change the filters, or clear them to see every row.", "Clear filters", (clear_base ~ "?" ~ ({"sort": pager.sort, "dir": pager.direction}|urlencode)) if pager.sort else clear_base) }}
   {% else %}
   {{ empty_state(empty_title, empty_body, empty_action_label, empty_action_href) }}
   {% endif %}

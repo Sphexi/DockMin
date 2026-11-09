@@ -2,6 +2,7 @@
 {% from "environments/_parts.html" import environment_badge with context %}
 {% from "images/_tables.html" import images_results, results_summary with context %}
 {% from "partials/form_field.html" import form_field %}
+{% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/list_bar.html" import list_bar %}
 {% from "partials/page_header.html" import page_header %}
 {% block title %}Images on {{ environment.name }} - dockmin{% endblock %}
@@ -16,6 +17,7 @@
 <form id="image-filters" class="filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter images"
       hx-get="{{ list_href }}" hx-target="#images-results" hx-swap="innerHTML"
       hx-push-url="true" hx-trigger="submit, change from:(#image-filters select, #image-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ sort_fields(pager.sort, pager.direction) }}
   {{ form_field("q", "Reference contains", value=q, type="search", autocomplete="off") }}
   <div class="field">
     <div class="field__head">
@@ -67,7 +69,7 @@
   </div>
 </form>
 
-{% call list_bar(results_summary(none if (errors or failure) else total, filtered)) %}
+{% call list_bar(results_summary(none if (errors or failure) else total, filtered, disk_href=route_path("environment_image_disk_usage", environment_id=environment.id))) %}
 {% if can_create %}
 <a class="btn btn--primary" href="{{ route_path('environment_image_pull', environment_id=environment.id) }}">Pull image</a>
 {% endif %}

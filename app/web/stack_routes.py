@@ -91,6 +91,7 @@ from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import unreachable_copy
 from app.web.registry_providers import CATALOGUE
+from app.web.sorting import DirectionParam, SortParam, view_sort
 from app.web.stack_log_routes import LOGS_TAB, logs_status, logs_tab_context
 from app.web.stack_pages import (
     CREDENTIAL_REASONS,
@@ -360,7 +361,7 @@ def _job_path(request: Request, environment_id: int, job_id: str) -> str:
 
 
 COLUMNS: Final = (
-    Column("name", "Stack"),
+    Column("name", "Stack", sortable=True),
     Column("status", "Status", width="badge"),
     Column("last", "Last operation", optional=True, width="time"),
     Column("origin", "Origin", optional=True, width="short"),
@@ -380,12 +381,15 @@ async def list_response(
     cursor: str | None = None,
     show_dismissed: bool = False,
     refusal: Failure | None = None,
+    sort: str | None = None,
+    direction: str | None = None,
 ) -> Response:
     """Render the stacks list, with `refusal` shown above it when an action was turned down."""
     environment = (await environments.environments.get(actor, environment_id)).summary
     rows: tuple[StackRow, ...] = ()
     page: StackPage | None = None
     errors: tuple[str, ...] = ()
+    refused: dict[str, str] = {}
     failure: str | None = None
     status_code = refusal.status if refusal else 200
     try:
@@ -396,9 +400,11 @@ async def list_response(
             cursor=cursor,
             q=needle,
             show_dismissed=show_dismissed,
+            sort=sort,
+            direction=direction,
         )
     except ValidationFailed as invalid:
-        errors, status_code = tuple(invalid.fields.values()), 400
+        errors, status_code, refused = tuple(invalid.fields.values()), 400, invalid.fields
     except UNAVAILABLE as unavailable:
         failure, status_code = str(unavailable), 503
     else:
@@ -406,12 +412,15 @@ async def list_response(
     params = [("q", needle)] if needle else []
     if show_dismissed:
         params.append((DISMISSED_PARAM, DISMISSED_PAGE))
+    view_key, view_direction = view_sort(sort, direction, refused)
     pager = PageView(
         base_path=_list_path(request, environment_id),
         limit=limit,
         item_count=len(rows),
         cursor=None if errors or failure else cursor,
         next_cursor=page.next_cursor if page else None,
+        sort=view_key,
+        direction=view_direction,
         params=tuple(params),
     )
     results: dict[str, Any] = {
@@ -467,6 +476,8 @@ async def list_stacks(
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=CURSOR_MAX)] = None,
     dismissed: Annotated[str, Query(max_length=8)] = "",
+    sort: SortParam = None,
+    direction: DirectionParam = None,
 ) -> Response:
     """List the stacks the caller may see, and for administrators the unmanaged projects."""
     return await list_response(
@@ -479,6 +490,8 @@ async def list_stacks(
         limit=limit,
         cursor=cursor,
         show_dismissed=dismissed == DISMISSED_PAGE,
+        sort=sort,
+        direction=direction,
     )
 
 

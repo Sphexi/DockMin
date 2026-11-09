@@ -1,4 +1,5 @@
 {% from "partials/data_table.html" import data_table %}
+{% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/error_state.html" import error_state %}
 {% from "stacks/_parts.html" import changed_chip, dismiss_form, dismissal_state, dismissed_line, last_operation, leftover_links, leftover_summary, origin_text, restore_form, status_badge with context %}
 
@@ -107,6 +108,7 @@
 {% macro stacks_results(rows, columns, pager, filtered, errors, failure, retry_href, environment_id, visible_count, unmanaged, unmanaged_unavailable, is_administrator, oob=false, can_create=false, dismissed_hidden=0, show_dismissed=false) %}
 {% if oob %}
 {{ results_summary(none if (errors or failure) else visible_count, filtered, true) }}
+{{ sort_fields(pager.sort, pager.direction, true) }}
 {% endif %}
 {% if errors %}
 {% for message in errors %}

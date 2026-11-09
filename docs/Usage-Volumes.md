@@ -69,9 +69,9 @@ Secret-named keys follow the rule in [Withheld from standard users](Usage-Contai
 | Columns | Select (users who may remove a volume on the page), Name, Driver, Created, Stack, Used by, Actions |
 | Name | An anonymous volume shows its first 12 characters, with the full name as the cell's title |
 | Badge | `Anonymous` for an anonymous volume. `In use by dockmin` for a volume the container dockmin runs in has mounted ([dockmin's volumes](#dockmins-volumes)) |
-| Select column | A checkbox on each volume the user may remove, for [bulk removal](#bulk-removal). Disabled on a volume marked `In use by dockmin` |
+| Select column | A checkbox on each volume the user may remove, for [bulk removal](#bulk-removal). Disabled on a volume marked `In use by dockmin`. Shift-click ticks a range of enabled boxes ([Range selection](Usage-Containers#range-selection)) |
 | Actions column | `Details` for everyone; `Remove` for users with write access to the volume, except on a volume marked `In use by dockmin` |
-| Order | Name, ignoring case |
+| Order | Name, ignoring case. The Name, Driver, Created and Stack headers sort the list ([Sorting](#sorting)) |
 | Page size | 25 by default; `limit` 1 to 500. Outside the range answers `422` |
 | Paging | `cursor`; an invalid cursor answers `400` |
 | Count | `N volumes`, or `N volumes match these filters, of M you can see` |
@@ -93,6 +93,19 @@ A volume is anonymous when it carries the label `com.docker.volume.anonymous` or
 | Stack | `stack` | At most 128 characters. Case-insensitive exact match on the stack name |
 
 An invalid filter value replaces the table with the message for the field and answers `400`. Filters survive paging.
+
+### Sorting
+
+The rules of [Sorting](Usage-Containers#sorting) apply: `sort` and `dir`, the header links, the cursor, and the `400` answers (`Sort by one of the listed columns.`, `Choose ascending or descending.`, `The page link is not valid.`).
+
+| Column | `sort` | Orders by | Empty value |
+|---|---|---|---|
+| Name | `name` | Name, ignoring case | None |
+| Driver | `driver` | Driver name, ignoring case | None |
+| Created | `created` | Creation time | A volume whose creation time is absent or unreadable |
+| Stack | `stack` | Stack name, ignoring case | A volume with no stack |
+
+Default order: `name` ascending, then id. Empty values come first ascending and last descending. Filters apply before the sort.
 
 ### Host failures
 

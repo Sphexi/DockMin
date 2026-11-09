@@ -20,7 +20,7 @@ from app.db.engine import Database, Session, retry_busy
 from app.db.repositories.activity_event import DetailValue
 from app.db.repositories.clocked import Clock
 from app.db.repositories.environment import Environment
-from app.db.repositories.pagination import CursorPosition, Page, encode_cursor
+from app.db.repositories.pagination import Page
 from app.db.repositories.resource_control import ResourceControlRepository
 from app.db.repositories.stack import StackKind
 from app.db.repositories.team import TeamRepository
@@ -76,7 +76,6 @@ from app.services.host_objects import (
     busy_view,
     check_limit,
     create_failure,
-    decode_position,
     describe_service_users,
     describe_users,
     failure_reason,
@@ -96,6 +95,7 @@ from app.services.host_objects import (
     settled,
     write_settled_row,
 )
+from app.services.list_order import ListOrder, Ordering, text_key
 from app.services.network_addressing import (
     AddressingInvalid,
     NetworkRequest,
@@ -619,6 +619,20 @@ def _order(entry: _Entry) -> tuple[str, int, str]:
     return entry.sort_name, entry.row_id, entry.network.id
 
 
+LIST_ORDER: Final = ListOrder[_Entry](
+    default="name",
+    keys={
+        "name": text_key(lambda e: e.sort_name),
+        "driver": text_key(lambda e: e.network.driver),
+        "scope": text_key(lambda e: e.network.scope),
+        "stack": text_key(lambda e: stack_name(e.network.labels)),
+    },
+    name=lambda e: e.sort_name,
+    row_id=lambda e: e.row_id,
+    entry_id=lambda e: e.network.id,
+)
+
+
 def _matches(entry: _Entry, criteria: _Criteria, used: int) -> bool:
     network = entry.network
     if criteria.driver is not None:
@@ -791,16 +805,19 @@ class NetworkQueryService:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> NetworkPage:
         """Return one page of the networks the caller may see, read live from the host.
 
-        ValidationFailed for a bad filter, limit or cursor; EnvironmentUnavailable,
+        ValidationFailed for a bad filter, limit, sort, direction or cursor; EnvironmentUnavailable,
         NetworkListTooLarge and ContainerListTooLarge when the host cannot be read in full. A host
         whose services cannot be read still lists its networks, with `services_known` false.
         """
         criteria = _compile(filters or NetworkFilters())
         size = check_limit(limit)
-        position = decode_position(cursor)
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
+        position = ordering.position(cursor)
         await self._authoriser.require_environment(actor, environment_id)
         environment = await self._hosts.environment(environment_id)
         client = await self._hosts.client(environment_id)
@@ -820,20 +837,14 @@ class NetworkQueryService:
             return len(users.get(network_id, ())) + len(serviced.get(network_id, ()))
 
         matched = [e for e in visible if _matches(e, criteria, used_by(e.network.id))]
-        ordered = sorted(matched, key=_order)
-        remaining = (
-            ordered
-            if position is None
-            else [e for e in ordered if _order(e)[:2] > (position.sort_value, position.row_id)]
-        )
-        window = remaining[:size]
+        window = ordering.window(matched, position, size)
         permitted = await permitted_container_ids(
             self._authoriser, actor, environment_id, containers
         )
         permitted_services = await permitted_service_ids(
             self._authoriser, actor, environment_id, services or []
         )
-        writable = await self._writable(actor, window)
+        writable = await self._writable(actor, window.items)
         rows = [
             self._row_of(
                 environment_id,
@@ -845,15 +856,11 @@ class NetworkQueryService:
                 writable,
                 known_services,
             )
-            for entry in window
+            for entry in window.items
         ]
-        next_cursor = None
-        if len(remaining) > size and window:
-            last = _order(window[-1])
-            next_cursor = encode_cursor(CursorPosition(last[0], last[1]))
         return NetworkPage(
-            page=Page(rows, next_cursor),
-            total=len(ordered),
+            page=Page(rows, window.next_cursor),
+            total=window.total,
             visible=len(visible),
             limit=size,
             environment_name=environment.name,

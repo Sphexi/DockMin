@@ -1847,6 +1847,75 @@
     armReveals();
   }
 
+  var RANGE_NAMES = ["container", "image", "volume", "id", "stack", "object"];
+  var rangeAnchors = new WeakMap();
+
+  function rangeBox(element) {
+    if (!(element instanceof HTMLInputElement) || element.type !== "checkbox") {
+      return null;
+    }
+    if (!element.form || !element.closest("td") || RANGE_NAMES.indexOf(element.name) < 0) {
+      return null;
+    }
+    return element;
+  }
+
+  function rangeGroup(box) {
+    return Array.prototype.filter.call(box.form.elements, function (control) {
+      return control instanceof HTMLInputElement && control.type === "checkbox" && control.name === box.name;
+    });
+  }
+
+  function setRangeState(box, checked) {
+    if (box.disabled || box.checked === checked) {
+      return;
+    }
+    box.checked = checked;
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function selectRange(anchor, box) {
+    var group = rangeGroup(box);
+    var from = group.indexOf(anchor);
+    var to = group.indexOf(box);
+    if (from < 0 || to < 0) {
+      return;
+    }
+    group.slice(Math.min(from, to), Math.max(from, to) + 1).forEach(function (member) {
+      setRangeState(member, box.checked);
+    });
+  }
+
+  function trackRangeClick(event) {
+    var box = rangeBox(event.target);
+    if (!box) {
+      return;
+    }
+    var anchors = rangeAnchors.get(box.form) || {};
+    var anchor = anchors[box.name];
+    if (event.shiftKey && event.detail > 0 && anchor && anchor !== box && anchor.isConnected && anchor.form === box.form) {
+      selectRange(anchor, box);
+    }
+    anchors[box.name] = box;
+    rangeAnchors.set(box.form, anchors);
+  }
+
+  function holdRangeText(event) {
+    if (!event.shiftKey || !(event.target instanceof Element)) {
+      return;
+    }
+    var label = event.target.closest("label");
+    if (rangeBox(event.target) || (label && rangeBox(label.control))) {
+      event.preventDefault();
+    }
+  }
+
+  function initRangeSelection() {
+    document.addEventListener("click", trackRangeClick);
+    document.addEventListener("mousedown", holdRangeText);
+  }
+
   function init() {
     initThemeToggle();
     initDialogs();
@@ -1867,6 +1936,7 @@
     initRestart();
     initUpdate();
     initRevealedValues();
+    initRangeSelection();
   }
 
   if (document.readyState === "loading") {

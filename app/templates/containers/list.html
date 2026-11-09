@@ -4,6 +4,7 @@
 {% from "partials/container_state_label.html" import container_state_label %}
 {% from "partials/disclosure.html" import disclosure with context %}
 {% from "partials/form_field.html" import form_field %}
+{% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/name_field.html" import name_field %}
 {% from "partials/list_bar.html" import list_bar %}
 {% from "partials/page_header.html" import page_header %}
@@ -18,6 +19,7 @@
 <form id="container-filters" class="filters" method="get" action="{{ list_href }}" role="search" aria-label="Filter containers"
       hx-get="{{ list_href }}" hx-target="#containers-results" hx-swap="innerHTML"
       hx-push-url="true" hx-trigger="submit, change from:(#container-filters select, #container-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ sort_fields(pager.sort, pager.direction) }}
   {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
   <div class="field">
     <div class="field__head">

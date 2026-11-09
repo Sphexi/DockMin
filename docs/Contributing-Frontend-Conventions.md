@@ -433,8 +433,11 @@ The image list is in `templates/images/`; its macros are in `_parts.html`.
 | `stored_update(reference)` | The stored update status of one reference: `update_badge(reference.update_state)` and `checked <time>`; `Not checked` when `update_state` is empty or `not_bound` |
 | `update_badge(state)` | The badge for an update state |
 | `transfer_progress(progress, running, label)` | The bar, the `role="status"` summary line and the layer table of one pull or push. Used by the image transfer page and, per image, by the Compose and Swarm stack job pages |
+| `results_summary(total, filtered, oob=false, disk_href=none)` (`_tables.html`) | The `#results-summary` line with the count. On a full page `disk_href` adds an empty `<span id="image-disk-total">` with `hx-get` to it, `hx-trigger="load"` and `hx-swap="outerHTML"`. With `oob` the line carries an empty `<span id="image-disk-total" hx-preserve>` instead, so a table swap keeps the loaded figure and issues no request |
+| `image_disk_total(total)` (`_tables.html`) | The fragment `GET …/images/disk-usage` returns: `<span id="image-disk-total">{size} for all images on this host.</span>`, or nothing when `total` is none |
 
 - `update_state` and `update_checked_at` come from the stored status ([Images](Usage-Images#stored-status)).
+- The disk-usage route answers `Cache-Control: no-store`, and an empty fragment on any read failure ([Images](Usage-Images#total-size)).
 
 ## Forms
 
@@ -987,7 +990,69 @@ Construction validates the limit range, that `base_path` is absolute and not pro
 
 Templates read links and ARIA state off the object — `first_href`, `next_href`, `sort_href(key)`, `aria_sort(key)`, `is_empty`, `has_next`, `is_first_page` — and build no URL themselves. `sort_href` drops the cursor; a cursor encodes a position in the previous ordering.
 
-Columns are `Column(key, label, sortable=False, numeric=False, optional=False, width=None, wide_only=False)`. Mark a column sortable only when the repository can order by that key. An `optional` column is hidden below `40rem` and a `wide_only` column at `90rem` and narrower ([Narrow viewports](#narrow-viewports)). `width` is one of the names in [Column widths](#column-widths).
+Columns are `Column(key, label, sortable=False, numeric=False, optional=False, width=None, wide_only=False)`. Mark a column sortable only when the list's service declares a sort key of that name ([Sortable columns](#sortable-columns)). An `optional` column is hidden below `40rem` and a `wide_only` column at `90rem` and narrower ([Narrow viewports](#narrow-viewports)). `width` is one of the names in [Column widths](#column-widths).
+
+### Sortable columns
+
+A sortable column header is a link; the ordering is applied by the service, never by the template or the router.
+
+| Item | Convention |
+|---|---|
+| Key table | Each list's service declares `LIST_ORDER`, a `ListOrder` (`app/services/list_order.py`), beside its default `_order`. `keys` maps the column key to `text_key(...)` or `number_key(...)`; `default` names a text key; `name`, `row_id` and `entry_id` give the tie-break; `unsorted_empty` is the value an unsorted request gives an entry with no value under the default key |
+| Key helpers | `text_key` compares case-folded text. `number_key` compares whole numbers. `moment_key` turns a time into microseconds for `number_key`. `rank_key(order)` turns a value into its place in `order` and gives any other value None |
+| Empty values | A key function returns None for no value. It sorts below every other value: first ascending, last descending |
+| Request | `Ordering.resolve(LIST_ORDER, sort, direction)` raises `ValidationFailed` keyed `sort` or `dir`. `ordering.position(cursor)` raises it keyed `cursor` |
+| Where it runs | After the visibility filter and the list's own filters, before the page cap: `ordering.window(entries, position, size)` returns the page, the number of entries and the next cursor |
+| Ties | Case-folded name, then `row_id`, then `entry_id`, all in the sort direction |
+| Cursor | A named sort mints `[{key}.{dir}:{value}, row id]`. An unsorted request mints the plain payload `[{folded name}, row id]`. A cursor whose tag is not the request's key and direction, a tagged cursor on an unsorted request, a plain one on a named sort, or a value of the wrong type is `ValidationFailed` keyed `cursor` |
+| Route | Takes `sort: SortParam` and `direction: DirectionParam` (query name `dir`) from `app/web/sorting.py`, passes them to the service, and builds `PageView(sort=..., direction=...)` from `view_sort(sort, direction, refused)`, which drops a refused value |
+| Columns | `Column(key, label, sortable=True)` with `key` equal to a key of `LIST_ORDER` |
+| Refusal | A refused `sort`, `dir` or cursor renders the list's own error at `400`, as a refused filter does |
+| Compose stacks | The repository sorts in SQL on a plain `NOT NULL` column and takes `descending`; the service retags the cursor at its boundary. Only the name column is sortable |
+| Swarm stacks | No cursor. The service orders the one page of at most 500 rows |
+
+- `sort_href(key)` opens page one and toggles direction on the active column; `aria_sort(key)` reads `none`, `ascending` or `descending`. The mark is `.sort-link__mark`.
+- The "Clear filters" link of an empty filtered table keeps `sort` and `dir`.
+- JSON routes take no `sort`.
+
+#### The `sort_fields` partial
+
+`partials/sort_fields.html` defines `sort_fields(sort, direction, oob=false)`.
+
+| Item | Behaviour |
+|---|---|
+| Markup | `<div id="sort-fields" hidden>` holding `<input type="hidden" name="sort">` and `<input type="hidden" name="dir">` while a sort is active; the div is empty otherwise |
+| Placement | Inside the list's filter form, so submitting a filter sends the active sort and opens page one |
+| With `oob=true` | Adds `hx-swap-oob="true"`. The results macro of each list renders it out of band, so the form follows the sort after a header click |
+
+#### Swarm stack results region
+
+`swarm/stacks/list.html` wraps `stacks_results(...)` from `swarm/stacks/_tables.html` in `<div id="stacks-results">`.
+
+| Item | Behaviour |
+|---|---|
+| htmx request | `fragment_response(request, LIST_TABLES, "stacks_results", ..., oob=True)`. The macro renders the count (`list_count`) and `sort_fields` out of band, then the notices and the table |
+| Full page | The same macro without `oob`, inside the div |
+| Table | `data_table(..., region_id="stacks-results")`, so sort links carry `hx-target="#stacks-results"` and `hx-swap="innerHTML"` |
+| Failure | `error_state(..., region_id="stacks-results", swap="innerHTML")` |
+| Filter form | `hx-get` to the list, `hx-target="#stacks-results"`, `hx-swap="innerHTML"`, `hx-push-url="true"` |
+
+### Range selection
+
+`app/static/js/app.js` registers `initRangeSelection()`: one delegated `click` listener and one `mousedown` listener on `document`. No markup carries a hook.
+
+| Item | Behaviour |
+|---|---|
+| Boxes in scope | An `<input type="checkbox">` that has a form owner (`input.form`, set by nesting or by the `form` attribute), sits inside a `<td>`, and is named `container`, `image`, `volume`, `id`, `stack` or `object` |
+| Adding a list | Add its checkbox name to `RANGE_NAMES` and give the box a form owner. Nothing else responds |
+| Group | The checkboxes of the form owner with the same `name`, in document order |
+| Anchor | The last in-scope box clicked, kept per form owner and name. It is used only while it is in the document and has the same form owner |
+| Range | A click with `event.shiftKey` and `event.detail > 0` on a box other than the anchor. A click raised by the keyboard has `detail` 0, so it never starts a range |
+| Effect | Every enabled box from the anchor to the clicked box, both included, takes the clicked box's `checked`. Disabled boxes are skipped. Each box that changes dispatches bubbling `input` and `change` events |
+| Label | A click on a label of a box dispatches the click to the box, so it counts |
+| Text | The `mousedown` listener calls `preventDefault()` for a Shift-click on a box or its label, so the text between the rows is not selected |
+| Swaps | A swap that replaces the table removes the anchor from the document, so the next Shift-click is a plain click and a range never spans pages |
+| Without script | Each box is an ordinary checkbox |
 
 ### Column widths
 
@@ -1033,7 +1098,7 @@ A hand-written table uses the same classes and `data-min` ([Narrow viewports](#n
 | Out-of-band update | `oob=true` adds `hx-swap-oob="innerHTML"`, so a table fragment also replaces the text of the line on the page |
 | Lists with their own line | Containers, images, volumes, networks, stacks and the Swarm service and object lists render `results_summary(…)` with the same id and class |
 
-A route that accepts a cursor catches `InvalidCursorError` and `TypeError` and returns 400; a cursor minted under a different ordering compares a string against a number.
+A route over a repository `Page` that accepts a cursor catches `InvalidCursorError` and `TypeError` and returns 400; a cursor minted under a different ordering compares a string against a number. The sortable object lists refuse it through `Ordering` ([Sortable columns](#sortable-columns)).
 
 ## No inline code
 
@@ -1285,6 +1350,7 @@ Filters, defined in [`app/web/filters.py`](https://github.com/Sphexi/DockMin/blo
 - [ ] Errors return a fragment or a page, at the real status code.
 - [ ] No colour literal outside `tokens.css`; a new colour is added to all three palette blocks.
 - [ ] Lists are rendered from a `PageView`.
+- [ ] A sortable column's key is a key of the service's `ListOrder`, the filter form carries `sort_fields`, and a refused `sort`, `dir` or cursor answers `400`.
 - [ ] No inline `<script>`, no `on*` attribute, no `style=`.
 - [ ] Page-specific assets load from `head_extra`; a vendored file carries a Subresource Integrity hash.
 - [ ] The page works with JavaScript disabled.

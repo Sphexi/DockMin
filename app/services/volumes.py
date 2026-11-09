@@ -22,7 +22,7 @@ from app.auth.principal import Principal
 from app.db.engine import Database, Session, retry_busy
 from app.db.repositories.activity_event import DetailValue
 from app.db.repositories.clocked import Clock
-from app.db.repositories.pagination import CursorPosition, Page, encode_cursor
+from app.db.repositories.pagination import Page
 from app.db.repositories.resource_control import ResourceControlRepository
 from app.db.repositories.team import TeamRepository
 from app.db.repositories.user import UserRepository
@@ -80,7 +80,6 @@ from app.services.host_objects import (
     busy_view,
     check_limit,
     create_failure,
-    decode_position,
     describe_users,
     failure_reason,
     hold_all,
@@ -94,6 +93,7 @@ from app.services.host_objects import (
     settled,
     volume_users,
 )
+from app.services.list_order import ListOrder, Ordering, moment_key, number_key, text_key
 from app.services.object_inspector import (
     VOLUME_OR_NETWORK_NAME,
     EngineObjectInspector,
@@ -309,6 +309,20 @@ def _entry_of(volume: Volume, environment_id: int) -> _Entry | None:
 
 def _order(entry: _Entry) -> tuple[str, int, str]:
     return entry.sort_name, entry.row_id, entry.volume.name
+
+
+LIST_ORDER: Final = ListOrder[_Entry](
+    default="name",
+    keys={
+        "name": text_key(lambda e: e.sort_name),
+        "driver": text_key(lambda e: e.volume.driver),
+        "created": number_key(lambda e: moment_key(parse_engine_time(e.volume.created_at))),
+        "stack": text_key(lambda e: stack_name(e.volume.labels)),
+    },
+    name=lambda e: e.sort_name,
+    row_id=lambda e: e.row_id,
+    entry_id=lambda e: e.volume.name,
+)
 
 
 def _matches(entry: _Entry, criteria: _Criteria, used: int) -> bool:
@@ -539,15 +553,18 @@ class VolumeQueryService:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> VolumePage:
         """Return one page of the volumes the caller may see, read live from the host.
 
-        ValidationFailed for a bad filter, limit or cursor; EnvironmentUnavailable,
+        ValidationFailed for a bad filter, limit, sort, direction or cursor; EnvironmentUnavailable,
         VolumeListTooLarge and ContainerListTooLarge when the host cannot be read in full.
         """
         criteria = _compile(filters or VolumeFilters())
         size = check_limit(limit)
-        position = decode_position(cursor)
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
+        position = ordering.position(cursor)
         await self._authoriser.require_environment(actor, environment_id)
         environment = await self._hosts.environment(environment_id)
         client = await self._hosts.client(environment_id)
@@ -556,31 +573,21 @@ class VolumeQueryService:
         visible = await self._visible(actor, entries)
         users = volume_users(containers)
         matched = [e for e in visible if _matches(e, criteria, len(users.get(e.volume.name, ())))]
-        ordered = sorted(matched, key=_order)
-        remaining = (
-            ordered
-            if position is None
-            else [e for e in ordered if _order(e)[:2] > (position.sort_value, position.row_id)]
-        )
-        window = remaining[:size]
+        window = ordering.window(matched, position, size)
         permitted = await permitted_container_ids(
             self._authoriser, actor, environment_id, containers
         )
-        writable = await self._writable(actor, window)
+        writable = await self._writable(actor, window.items)
         protected = self._self_identity().volumes.get(environment_id, frozenset())
         rows = [
             self._row_of(
                 environment_id, e, users.get(e.volume.name, []), permitted, writable, protected
             )
-            for e in window
+            for e in window.items
         ]
-        next_cursor = None
-        if len(remaining) > size and window:
-            last = _order(window[-1])
-            next_cursor = encode_cursor(CursorPosition(last[0], last[1]))
         return VolumePage(
-            page=Page(rows, next_cursor),
-            total=len(ordered),
+            page=Page(rows, window.next_cursor),
+            total=window.total,
             visible=len(visible),
             limit=size,
             environment_name=environment.name,

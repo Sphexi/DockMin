@@ -12,7 +12,7 @@ from app.auth.errors import (
 )
 from app.auth.principal import Principal
 from app.db.repositories.environment import Environment
-from app.db.repositories.pagination import CursorPosition, Page, encode_cursor
+from app.db.repositories.pagination import Page
 from app.docker_engine.client import EngineClient
 from app.docker_engine.models import ServiceStatus, SwarmService, SwarmTask
 from app.services.access import ResourceKey, ResourceRef, is_canonical_id
@@ -26,12 +26,12 @@ from app.services.containers import (
 from app.services.host_objects import (
     DEFAULT_PAGE_SIZE,
     check_limit,
-    decode_position,
     label_views,
     read_networks,
     row_id,
 )
 from app.services.image_bindings import RebindRefused
+from app.services.list_order import ListOrder, Ordering, moment_key, number_key, text_key
 from app.services.object_inspector import (
     EngineObjectInspector,
 )
@@ -132,6 +132,29 @@ MODE_FILTERS: Final = ("replicated", "global", "job")
 MODE_SWITCH: Final = "A service cannot change between replicated and global mode. Create a new one."
 
 
+def _desired_replicas(entry: Entry) -> int | None:
+    status = entry.service.service_status
+    if status is not None:
+        return status.desired_tasks
+    return replicas_of(spec_view_model(entry.service))
+
+
+LIST_ORDER: Final = ListOrder[Entry](
+    default="name",
+    keys={
+        "name": text_key(lambda e: e.sort_name),
+        "mode": text_key(lambda e: mode_text(spec_view_model(e.service))),
+        "replicas": number_key(_desired_replicas),
+        "image": text_key(lambda e: display_image(image_of(spec_view_model(e.service)) or "")),
+        "stack": text_key(lambda e: stack_name(e.service.spec.labels)),
+        "updated": number_key(lambda e: moment_key(parse_engine_time(e.service.updated_at))),
+    },
+    name=lambda e: e.sort_name,
+    row_id=lambda e: e.row_id,
+    entry_id=lambda e: e.service.id,
+)
+
+
 class SwarmServiceQueries(SwarmServiceBase):
     """Reads services through the authoriser and prepares the forms and confirmations."""
 
@@ -160,11 +183,13 @@ class SwarmServiceQueries(SwarmServiceBase):
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> ServicePage:
         """Return one page of the services the caller may see, read live from the manager.
 
-        ValidationFailed for a bad filter, limit or cursor; ResourceNotFound unless the
-        environment is a Swarm manager the caller can see; EnvironmentUnavailable and
+        ValidationFailed for a bad filter, limit, sort, direction or cursor; ResourceNotFound
+        unless the environment is a Swarm manager the caller can see; EnvironmentUnavailable and
         SwarmListTooLarge when the manager cannot be read in full.
         """
         wanted = filters or ServiceFilters()
@@ -178,7 +203,8 @@ class SwarmServiceQueries(SwarmServiceBase):
             (wanted.stack or "").strip().casefold() or None,
         )
         size = check_limit(limit)
-        position = decode_position(cursor)
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
+        position = ordering.position(cursor)
         environment = await require_swarm(self._authoriser, self._hosts, actor, environment_id)
         client = await self._hosts.client(environment_id)
         services = await swarm_read(client.swarm_services.list(), environment_id, self._poke)
@@ -191,27 +217,20 @@ class SwarmServiceQueries(SwarmServiceBase):
             for r in await self._authoriser.filter_visible(actor, [e.ref for e in entries])
         }
         visible = [e for e in entries if e.service.id in allowed]
-        matched = sorted((e for e in visible if entry_matches(e, wanted)), key=entry_order)
-        remaining = (
-            matched
-            if position is None
-            else [e for e in matched if entry_order(e) > (position.sort_value, position.row_id)]
-        )
-        window = remaining[:size]
+        window = ordering.window((e for e in visible if entry_matches(e, wanted)), position, size)
         writable = {
             r.resource_id
-            for r in await self._authoriser.filter_visible(actor, [e.ref for e in window], "write")
+            for r in await self._authoriser.filter_visible(
+                actor, [e.ref for e in window.items], "write"
+            )
         }
         rows = [
-            row_of(environment_id, e.service, can_write=e.service.id in writable) for e in window
+            row_of(environment_id, e.service, can_write=e.service.id in writable)
+            for e in window.items
         ]
-        next_cursor = None
-        if len(remaining) > size and window:
-            last = entry_order(window[-1])
-            next_cursor = encode_cursor(CursorPosition(last[0], last[1]))
         return ServicePage(
-            page=Page(rows, next_cursor),
-            total=len(matched),
+            page=Page(rows, window.next_cursor),
+            total=window.total,
             visible=len(visible),
             limit=size,
             environment_name=environment.name,

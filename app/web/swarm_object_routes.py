@@ -68,6 +68,7 @@ from app.web.object_pages import (
 from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import unreachable_copy
+from app.web.sorting import DirectionParam, SortParam, view_sort
 from app.web.stack_links import stack_links
 from app.web.swarm_routes import (
     ACTION_ERRORS,
@@ -93,9 +94,9 @@ OBJECT_TABLES: Final = "swarm/objects/_tables.html"
 OBJECT_DETAIL: Final = "swarm/objects/_detail.html"
 UPLOAD_FIELD: Final = "upload"
 OBJECT_COLUMNS: Final = (
-    Column("name", "Name"),
-    Column("stack", "Stack", optional=True),
-    Column("created", "Created", optional=True, width="time"),
+    Column("name", "Name", sortable=True),
+    Column("stack", "Stack", sortable=True, optional=True),
+    Column("created", "Created", sortable=True, optional=True, width="time"),
     Column("actions", "Actions", width="actions"),
 )
 
@@ -158,6 +159,8 @@ def _register_objects(kind: ObjectKind) -> None:
         stack: Filter = None,
         limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
         cursor: Annotated[str | None, Query(max_length=CURSOR_MAX)] = None,
+        sort: SortParam = None,
+        direction: DirectionParam = None,
     ) -> Response:
         """List the objects the caller may see, read now."""
         environment = (await environments.environments.get(actor, environment_id)).summary
@@ -166,15 +169,22 @@ def _register_objects(kind: ObjectKind) -> None:
         total = visible = 0
         can_create = False
         errors: tuple[str, ...] = ()
+        refused: dict[str, str] = {}
         failure: str | None = None
         status_code = 200
         next_cursor = None
         try:
             result = await _queries(swarm, kind).page(
-                actor, environment_id, filters, limit=limit, cursor=cursor
+                actor,
+                environment_id,
+                filters,
+                limit=limit,
+                cursor=cursor,
+                sort=sort,
+                direction=direction,
             )
         except ValidationFailed as invalid:
-            errors, status_code = tuple(invalid.fields.values()), 400
+            errors, status_code, refused = tuple(invalid.fields.values()), 400, invalid.fields
         except UNAVAILABLE as unavailable:
             failure, status_code = str(unavailable), 503
         else:
@@ -184,12 +194,15 @@ def _register_objects(kind: ObjectKind) -> None:
         params = [
             (key, value) for key, value in (("q", filters.q), ("stack", filters.stack)) if value
         ]
+        view_key, view_direction = view_sort(sort, direction, refused)
         pager = PageView(
             base_path=_object_name(request, kind, "list", environment_id=environment_id),
             limit=limit,
             item_count=len(rows),
             cursor=None if errors or failure else cursor,
             next_cursor=next_cursor,
+            sort=view_key,
+            direction=view_direction,
             params=tuple(params),
         )
         results: dict[str, Any] = {

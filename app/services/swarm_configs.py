@@ -15,7 +15,7 @@ from app.auth.principal import Principal
 from app.db.engine import Database, Session, retry_busy
 from app.db.repositories.activity_event import DetailValue
 from app.db.repositories.clocked import Clock
-from app.db.repositories.pagination import CursorPosition, Page, encode_cursor
+from app.db.repositories.pagination import Page
 from app.db.repositories.resource_control import ResourceControlRepository
 from app.db.repositories.team import TeamRepository
 from app.db.repositories.user import UserRepository
@@ -60,7 +60,6 @@ from app.services.host_objects import (
     audited_list_read,
     busy_view,
     check_limit,
-    decode_position,
     describe_service_users,
     failure_reason,
     hold_all,
@@ -73,6 +72,7 @@ from app.services.host_objects import (
     settled,
     write_settled_row,
 )
+from app.services.list_order import ListOrder, Ordering, moment_key, number_key, text_key
 from app.services.object_inspector import (
     EngineObjectInspector,
     EnvironmentUnavailable,
@@ -471,6 +471,19 @@ def _order(entry: _Entry) -> tuple[str, int, str]:
     return entry.sort_name, entry.row_id, entry.swarm_object.id
 
 
+LIST_ORDER: Final = ListOrder[_Entry](
+    default="name",
+    keys={
+        "name": text_key(lambda e: e.sort_name),
+        "stack": text_key(lambda e: stack_name(e.swarm_object.labels)),
+        "created": number_key(lambda e: moment_key(parse_engine_time(e.swarm_object.created_at))),
+    },
+    name=lambda e: e.sort_name,
+    row_id=lambda e: e.row_id,
+    entry_id=lambda e: e.swarm_object.id,
+)
+
+
 def _entry_of(
     swarm_object: SwarmConfig | SwarmSecret, kind: ObjectKind, environment_id: int
 ) -> _Entry | None:
@@ -704,16 +717,19 @@ class _SwarmObjectQueries:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> SwarmObjectPage:
         """Return one page of the objects the caller may see, read live from the manager.
 
         ResourceNotFound unless the environment is a Swarm manager the caller may see;
-        ValidationFailed for a bad filter, limit or cursor; EnvironmentUnavailable and
-        SwarmObjectListTooLarge when the host cannot be read in full.
+        ValidationFailed for a bad filter, limit, sort, direction or cursor;
+        EnvironmentUnavailable and SwarmObjectListTooLarge when the host cannot be read in full.
         """
         criteria = _compile(filters or SwarmObjectFilters())
         size = check_limit(limit)
-        position = decode_position(cursor)
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
+        position = ordering.position(cursor)
         environment = await require_swarm(self._authoriser, self._hosts, actor, environment_id)
         client = await self._hosts.client(environment_id)
         listed = await self._list(client, environment_id)
@@ -725,22 +741,15 @@ class _SwarmObjectQueries:
             for ref in await self._authoriser.filter_visible(actor, [e.ref for e in entries])
         }
         visible = [e for e in entries if e.swarm_object.id in permitted]
-        ordered = sorted((e for e in visible if _matches(e, criteria)), key=_order)
-        remaining = (
-            ordered
-            if position is None
-            else [e for e in ordered if _order(e)[:2] > (position.sort_value, position.row_id)]
-        )
-        window = remaining[:size]
-        held = await self._authoriser.filter_visible(actor, [e.ref for e in window], "write")
+        window = ordering.window((e for e in visible if _matches(e, criteria)), position, size)
+        held = await self._authoriser.filter_visible(actor, [e.ref for e in window.items], "write")
         writable = frozenset(ref.resource_id for ref in held)
-        next_cursor = None
-        if len(remaining) > size and window:
-            last = _order(window[-1])
-            next_cursor = encode_cursor(CursorPosition(last[0], last[1]))
         return SwarmObjectPage(
-            page=Page([self._row_of(environment_id, e, writable) for e in window], next_cursor),
-            total=len(ordered),
+            page=Page(
+                [self._row_of(environment_id, e, writable) for e in window.items],
+                window.next_cursor,
+            ),
+            total=window.total,
             visible=len(visible),
             limit=size,
             environment_name=environment.name,

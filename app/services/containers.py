@@ -12,11 +12,7 @@ from app.auth.errors import PermissionDenied, ProductError, ValidationFailed
 from app.auth.principal import Principal
 from app.db.repositories.pagination import (
     MAX_PAGE_SIZE,
-    CursorPosition,
-    InvalidCursorError,
     Page,
-    decode_cursor,
-    encode_cursor,
 )
 from app.db.repositories.stack import StackKind
 from app.db.repositories.team import TeamRepository
@@ -44,6 +40,7 @@ from app.services.access import (
 from app.services.authorisation import Authoriser
 from app.services.effective_access import EffectiveAccess, EffectiveAccessService
 from app.services.grantees import GranteeDirectory, GranteeNames, HasGrantees, names_for
+from app.services.list_order import ListOrder, Ordering, number_key, rank_key, text_key
 from app.services.object_inspector import ContainerTooLarge as ContainerTooLarge
 from app.services.object_inspector import (
     EngineObjectInspector,
@@ -571,6 +568,25 @@ def _order(entry: _Entry) -> tuple[str, int, str]:
     return entry.name.casefold(), _row_id(entry.summary.id), entry.summary.id
 
 
+STATE_RANK: Final = ("running", "restarting", "paused", "created", "removing", "exited", "dead")
+
+_state_place = rank_key(STATE_RANK)
+
+LIST_ORDER: Final = ListOrder[_Entry](
+    default="name",
+    keys={
+        "name": text_key(lambda e: e.name),
+        "state": number_key(lambda e: _state_place(e.summary.state)),
+        "image": text_key(lambda e: e.summary.image),
+        "stack": text_key(lambda e: stack_name(e.summary.labels)),
+        "created": number_key(lambda e: e.summary.created),
+    },
+    name=lambda e: e.name,
+    row_id=lambda e: _row_id(e.summary.id),
+    entry_id=lambda e: e.summary.id,
+)
+
+
 def _ports_of(bindings: Sequence[PortBinding]) -> tuple[tuple[PortView, ...], int]:
     seen: set[tuple[str, int, int | None, str]] = set()
     views: list[PortView] = []
@@ -749,18 +765,6 @@ def _matches(entry: _Entry, criteria: _Criteria) -> bool:
     return criteria.stack is None or stack_of(labels) == criteria.stack
 
 
-def _decode_position(cursor: str | None) -> CursorPosition | None:
-    if cursor is None:
-        return None
-    try:
-        position = decode_cursor(cursor)
-    except InvalidCursorError:
-        raise ValidationFailed({"cursor": "The page link is not valid."}) from None
-    if not isinstance(position.sort_value, str):
-        raise ValidationFailed({"cursor": "The page link is not valid."})
-    return position
-
-
 def _check_limit(limit: int) -> int:
     if isinstance(limit, bool) or not 1 <= limit <= MAX_PAGE_SIZE:
         raise ValidationFailed({"limit": f"Choose a page size from 1 to {MAX_PAGE_SIZE}."})
@@ -796,38 +800,32 @@ class ContainerService:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> ContainerPage:
         """Return one page of the containers the caller may see, read live from the host.
 
         EnvironmentUnavailable and ContainerListTooLarge when the host cannot be read;
-        ValidationFailed for a bad filter, limit or cursor.
+        ValidationFailed for a bad filter, limit, sort, direction or cursor.
         """
         criteria = _compile(filters or ContainerFilters())
         size = _check_limit(limit)
-        position = _decode_position(cursor)
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
+        position = ordering.position(cursor)
         loaded = await self._load(actor, environment_id, criteria, kinds=HEALTH_FILTERS)
-        ordered = sorted(loaded.entries, key=_order)
-        remaining = (
-            ordered
-            if position is None
-            else [e for e in ordered if _order(e)[:2] > (position.sort_value, position.row_id)]
-        )
-        window = remaining[:size]
-        has_next = len(remaining) > size
+        shown = ordering.window(loaded.entries, position, size)
         writable = {
             ref.resource_id
             for ref in await self._authoriser.filter_visible(
-                actor, [e.ref for e in window], "write"
+                actor, [e.ref for e in shown.items], "write"
             )
         }
-        rows = [self._row_of(actor, environment_id, e, e.summary.id in writable) for e in window]
-        next_cursor = None
-        if has_next and window:
-            last = _order(window[-1])
-            next_cursor = encode_cursor(CursorPosition(last[0], last[1]))
+        rows = [
+            self._row_of(actor, environment_id, e, e.summary.id in writable) for e in shown.items
+        ]
         return ContainerPage(
-            Page(rows, next_cursor),
-            total=len(ordered),
+            Page(rows, shown.next_cursor),
+            total=shown.total,
             limit=size,
             health_unavailable=loaded.health_unavailable,
         )

@@ -619,6 +619,7 @@ The refresher is the subsystem `environment-snapshot-refresher` ([Subsystems](Re
 - A standard user's group and tag filter lists offer only groups and tags that apply to environments they can see.
 - An invalid filter replaces the table with an error (`Check the filters`) and returns 422.
 - `Delete selected environments`, below the table, opens the confirmation for the ticked rows ([Deleting](#deleting)). Administrators only.
+- Shift-click on a Select box ticks or clears every box between it and the last box clicked on the page ([Range selection](Usage-Containers#range-selection)). The list has no sortable columns.
 
 ## Groups
 
@@ -775,6 +776,8 @@ The review runs in this order:
 | Objects without access settings | Type, name, environment. A volume with a candidate owner shows `Owner {username}, from the containers that mount it.` ([Assign owners](Usage-Volumes#assign-owners)) | Ticked |
 | Ownership | `Owner (username)`, `Team (name)`, `Team access` | Empty, with `Read and write` |
 | dockmin's own objects | Type and name of each object | Listed, never offered |
+
+Shift-click on a box of the Stacks, Images or Objects without access settings section ticks or clears the enabled boxes between it and the last box clicked in that section. A disabled box is left as it is, and a range does not cross into another section ([Range selection](Usage-Containers#range-selection)).
 
 | How the file was obtained | Source |
 |---|---|

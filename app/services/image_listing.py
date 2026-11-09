@@ -20,6 +20,23 @@ class ImageListTooLarge(ObjectTooLarge):
         )
 
 
+class DiskUsageTooLarge(ObjectTooLarge):
+    """The host's disk-usage reply is larger than the read limit."""
+
+    def __init__(self) -> None:
+        super().__init__("This host reports more disk usage data than can be read here.")
+
+
+async def read_image_disk_usage(client: EngineClient) -> int:
+    """Read the bytes the host's images occupy; DiskUsageTooLarge or EnvironmentUnavailable."""
+    try:
+        return (await client.system.image_disk_usage()).layers_size
+    except ResponseTooLarge:
+        raise DiskUsageTooLarge() from None
+    except EngineError as error:
+        raise unavailable_from(error) from None
+
+
 async def read_images(client: EngineClient) -> list[ImageSummary]:
     """Read every image; ImageListTooLarge past the limit, EnvironmentUnavailable otherwise."""
     try:

@@ -105,6 +105,7 @@ from app.web.origins import RequestOrigin
 from app.web.pagination import Column, PageView
 from app.web.problems import unreachable_copy
 from app.web.registry_providers import CATALOGUE
+from app.web.sorting import DirectionParam, SortParam, view_sort
 from app.web.stack_links import stack_links
 from app.web.swarm_routes import (
     ACTION_ERRORS,
@@ -236,13 +237,13 @@ async def _credential_offer(
 
 
 SERVICE_COLUMNS: Final = (
-    Column("name", "Name"),
-    Column("mode", "Mode", optional=True, width="short"),
-    Column("replicas", "Replicas", width="count"),
-    Column("image", "Image", optional=True),
-    Column("stack", "Stack", optional=True),
+    Column("name", "Name", sortable=True),
+    Column("mode", "Mode", sortable=True, optional=True, width="short"),
+    Column("replicas", "Replicas", sortable=True, width="count"),
+    Column("image", "Image", sortable=True, optional=True),
+    Column("stack", "Stack", sortable=True, optional=True),
     Column("ports", "Ports", optional=True),
-    Column("updated", "Updated", optional=True, width="time"),
+    Column("updated", "Updated", sortable=True, optional=True, width="time"),
     Column("actions", "Actions", width="actions"),
 )
 SERVICE_TABLES: Final = "swarm/services/_tables.html"
@@ -262,6 +263,8 @@ async def list_services(
     stack: Filter = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=CURSOR_MAX)] = None,
+    sort: SortParam = None,
+    direction: DirectionParam = None,
 ) -> Response:
     """List the services the caller may see, read now."""
     environment = (await environments.environments.get(actor, environment_id)).summary
@@ -270,15 +273,22 @@ async def list_services(
     total = visible = 0
     can_create = False
     errors: tuple[str, ...] = ()
+    refused: dict[str, str] = {}
     failure: str | None = None
     status_code = 200
     next_cursor = None
     try:
         result = await swarm.services.page(
-            actor, environment_id, filters, limit=limit, cursor=cursor
+            actor,
+            environment_id,
+            filters,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+            direction=direction,
         )
     except ValidationFailed as invalid:
-        errors, status_code = tuple(invalid.fields.values()), 400
+        errors, status_code, refused = tuple(invalid.fields.values()), 400, invalid.fields
     except UNAVAILABLE as unavailable:
         failure, status_code = str(unavailable), 503
     else:
@@ -290,12 +300,15 @@ async def list_services(
         for key, value in (("q", filters.q), ("mode", filters.mode), ("stack", filters.stack))
         if value
     ]
+    view_key, view_direction = view_sort(sort, direction, refused)
     pager = PageView(
         base_path=service_list_href(request, environment_id),
         limit=limit,
         item_count=len(rows),
         cursor=None if errors or failure else cursor,
         next_cursor=next_cursor,
+        sort=view_key,
+        direction=view_direction,
         params=tuple(params),
     )
     results: dict[str, Any] = {

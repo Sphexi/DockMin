@@ -20,11 +20,7 @@ from app.db.repositories.image_update_status import (
 )
 from app.db.repositories.pagination import (
     MAX_PAGE_SIZE,
-    CursorPosition,
-    InvalidCursorError,
     Page,
-    decode_cursor,
-    encode_cursor,
 )
 from app.docker_engine.client import EngineClient
 from app.docker_engine.errors import (
@@ -72,6 +68,7 @@ from app.services.image_bindings import (
 from app.services.image_listing import (
     read_containers,
     read_host_listing,
+    read_image_disk_usage,
     read_images,
 )
 from app.services.image_views import (
@@ -95,6 +92,7 @@ from app.services.image_views import (
     UntagImpact,
     references_digest,
 )
+from app.services.list_order import ListOrder, Ordering, number_key, text_key
 from app.services.object_inspector import (
     HostClients,
     unavailable_from,
@@ -185,7 +183,7 @@ class _Entry:
     texts: tuple[str, ...]
     shown: tuple[str, ...]
     tag_keys: frozenset[str]
-    sort_value: str
+    name: str
     row_id: int
     dangling: bool
 
@@ -283,18 +281,6 @@ def _compile(filters: ImageFilters) -> _Criteria:
     return _Criteria(None if text is None else text.casefold(), dangling, usage, binding, update)
 
 
-def _decode_position(cursor: str | None) -> CursorPosition | None:
-    if cursor is None:
-        return None
-    try:
-        position = decode_cursor(cursor)
-    except InvalidCursorError:
-        raise ValidationFailed({"cursor": "The page link is not valid."}) from None
-    if not isinstance(position.sort_value, str):
-        raise ValidationFailed({"cursor": "The page link is not valid."})
-    return position
-
-
 def _check_limit(limit: int) -> int:
     if isinstance(limit, bool) or not 1 <= limit <= MAX_PAGE_SIZE:
         raise ValidationFailed({"limit": f"Choose a page size from 1 to {MAX_PAGE_SIZE}."})
@@ -317,7 +303,7 @@ def _entry_of(summary: ImageSummary) -> _Entry | None:
         texts=tuple(reference.familiar for reference in (*tags, *digests)),
         shown=tuple(reference.key for reference in shown),
         tag_keys=frozenset(reference.key for reference in tags),
-        sort_value=DANGLING_SORT_VALUE if first is None else first.casefold(),
+        name="" if first is None else first,
         row_id=int(image_id[:ROW_ID_HEX_DIGITS], 16),
         dangling=not tags,
     )
@@ -334,8 +320,18 @@ def _references(texts: Sequence[str]) -> list[ImageReference]:
     return sorted(found.values(), key=lambda r: r.familiar.casefold())
 
 
-def _order(entry: _Entry) -> tuple[str, int, str]:
-    return entry.sort_value, entry.row_id, entry.id
+LIST_ORDER: Final = ListOrder[_Entry](
+    default="image",
+    keys={
+        "image": text_key(lambda e: e.name),
+        "size": number_key(lambda e: e.summary.size),
+        "created": number_key(lambda e: e.summary.created),
+    },
+    name=lambda e: e.name,
+    row_id=lambda e: e.row_id,
+    entry_id=lambda e: e.id,
+    unsorted_empty=DANGLING_SORT_VALUE,
+)
 
 
 def usage_of(containers: Sequence[ContainerSummary]) -> dict[str, list[ContainerSummary]]:
@@ -543,16 +539,20 @@ class ImageQueryService:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> ImagePage:
         """Return one page of the host's images, read live, with each reference's binding.
 
         Every image on the host is listed. EnvironmentUnavailable, ImageListTooLarge and
         ContainerListTooLarge when the host cannot be read in full; ValidationFailed for a bad
-        filter, limit or cursor. Only an administrator's first page scans for orphaned bindings.
+        filter, limit, sort, direction or cursor. Only an administrator's first page scans for
+        orphaned bindings.
         """
         criteria = _compile(filters or ImageFilters())
         size = _check_limit(limit)
-        position = _decode_position(cursor)
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
+        position = ordering.position(cursor)
         await self._authoriser.require_environment(actor, environment_id)
         environment = await self._hosts.environment(environment_id)
         client = await self._hosts.client(environment_id)
@@ -570,24 +570,14 @@ class ImageQueryService:
                 environment_id, [k for e in matched for k in e.shown]
             )
             matched = [e for e in matched if _update_available(e, checks)]
-        ordered = sorted(matched, key=_order)
-        remaining = (
-            ordered
-            if position is None
-            else [e for e in ordered if _order(e)[:2] > (position.sort_value, position.row_id)]
-        )
-        window = remaining[:size]
-        shown = [key for e in window for key in e.shown]
+        window = ordering.window(matched, position, size)
+        shown = [key for e in window.items for key in e.shown]
         views = await self._bindings.views(actor, environment_id, shown)
         stored = await self._stored_checks(environment_id, shown)
         rows = [
             await self._row_of(actor, environment_id, e, users.get(e.id, []), views, stored)
-            for e in window
+            for e in window.items
         ]
-        next_cursor = None
-        if len(remaining) > size and window:
-            last = _order(window[-1])
-            next_cursor = encode_cursor(CursorPosition(last[0], last[1]))
         orphans = (
             await self._bindings.orphaned(
                 actor, environment_id, await resolve_live_references(client, images, containers)
@@ -596,8 +586,8 @@ class ImageQueryService:
             else None
         )
         return ImagePage(
-            page=Page(rows, next_cursor),
-            total=len(ordered),
+            page=Page(rows, window.next_cursor),
+            total=window.total,
             limit=size,
             environment_name=environment.name,
             is_local=environment.connection_kind == "unix_socket",
@@ -605,6 +595,16 @@ class ImageQueryService:
             can_remove=actor.is_administrator,
             orphans=orphans,
         )
+
+    async def disk_usage(self, actor: Principal, environment_id: int) -> int:
+        """Return the bytes every image on the host occupies, each shared layer counted once.
+
+        Covers the whole host, whatever the caller may see of it. ResourceNotFound unless the
+        caller may see the environment; EnvironmentUnavailable or DiskUsageTooLarge when the host
+        cannot answer.
+        """
+        await self._authoriser.require_environment(actor, environment_id)
+        return await read_image_disk_usage(await self._hosts.client(environment_id))
 
     async def origin_name(self, actor: Principal, environment_id: int, image_id: str) -> str:
         """Return the first tag of an image, or its short id; ResourceNotFound unless readable."""

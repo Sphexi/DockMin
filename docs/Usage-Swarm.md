@@ -154,7 +154,7 @@ Services, configs, secrets and networks are decided in this order, as containers
 | Ports | One outlined chip per port: `{published}→{target}/{protocol}`, with `(host)` for host mode |
 | Updated | Age, and the update state while it is not `completed` |
 | Actions | `Details` for everyone; `Remove` for users with write access |
-| Order | Name, ignoring case, then id |
+| Order | Name, ignoring case, then id. The Name, Mode, Replicas, Image, Stack and Updated headers sort the list ([Sorting](#sorting)) |
 | Page size | 25 by default; `limit` 1 to 500. Outside the range answers `422` |
 | Paging | `cursor`; an invalid cursor answers `400` |
 | Count | `N services`, or `N services match these filters, of M you can see` |
@@ -167,6 +167,21 @@ Services, configs, secrets and networks are decided in this order, as containers
 | Stack | `stack` | At most 128 characters. Case-insensitive exact match on the stack name |
 
 An invalid filter replaces the table with the message and answers `400`. Filters survive paging. A host that cannot be read replaces the table with an error and answers `503`.
+
+#### Sorting
+
+The rules of [Sorting](Usage-Containers#sorting) apply: `sort` and `dir`, the header links, the cursor, and the `400` answers (`Sort by one of the listed columns.`, `Choose ascending or descending.`, `The page link is not valid.`).
+
+| Column | `sort` | Orders by | Empty value |
+|---|---|---|---|
+| Name | `name` | Name, ignoring case | None |
+| Mode | `mode` | Mode, ignoring case | None |
+| Replicas | `replicas` | Desired replicas: the count in the service's status, else the configured count | A global or job service with no status |
+| Image | `image` | Image as shown, ignoring case | A service with no image |
+| Stack | `stack` | Stack name, ignoring case | A service with no stack |
+| Updated | `updated` | Time of the last update | A time that cannot be read |
+
+Default order: `name` ascending, then id. Empty values come first ascending and last descending. Filters apply before the sort.
 
 ### Service page
 
@@ -665,10 +680,23 @@ A config is a named piece of content that services read as a file. It is not sec
 |---|---|
 | List columns | Name (with short id), Stack, Created, Actions (`Details`; `Remove` for users with write access) |
 | List filters | `q` name contains (at most 128 characters, case-insensitive), `stack` (at most 128 characters, case-insensitive exact). Page size 25 by default; `limit` 1 to 500 |
+| List sorting | The Name, Stack and Created headers sort the list ([Sorting configs and secrets](#sorting-configs-and-secrets)). Default `name` ascending, then id |
 | Config page | Name, id, created, updated, stack, the services that use it (`Used by`), content, labels. Tab `Access` for administrators |
 | Content shown | The first 64 KiB, when the content is UTF-8 without control characters other than tab, line feed and carriage return (`Only the start is shown.` beyond that). Otherwise `Binary content, {size}. It is not shown.` and nothing is shown |
 | Immutable | A config cannot be changed after it is created; create a new one to replace it. Labels cannot be edited |
 | Templating | Not offered. A config templated by Docker shows its stored text |
+
+### Sorting configs and secrets
+
+The rules of [Sorting](Usage-Containers#sorting) apply to both lists: `sort` and `dir`, the header links, the cursor, and the `400` answers (`Sort by one of the listed columns.`, `Choose ascending or descending.`, `The page link is not valid.`).
+
+| Column | `sort` | Orders by | Empty value |
+|---|---|---|---|
+| Name | `name` | Name, ignoring case | None |
+| Stack | `stack` | Stack name, ignoring case | An object with no stack |
+| Created | `created` | Creation time | A time that cannot be read |
+
+Default order: `name` ascending, then id. Empty values come first ascending and last descending. Filters apply before the sort.
 
 ### Create a config
 
@@ -706,6 +734,7 @@ A secret is a named value that services read as a file. Its value is write-only.
 | Value | Never stored, logged, echoed or rendered by dockmin, administrators included. No route returns it. Docker does not return it either |
 | Stored by | Swarm, in its encrypted cluster store |
 | List and page | Name, id, created, updated, stack, the services that use it, labels. No value, size or hash |
+| List sorting | As for configs ([Sorting configs and secrets](#sorting-configs-and-secrets)) |
 | Immutable | A secret cannot be changed after it is created. Labels cannot be edited |
 | Drivers, templating | Not offered |
 | Used in a service | As a file in the service's containers. Attaching one needs write access to it. A user with write access to a service can read the secrets already attached to it ([Access](#access)) |

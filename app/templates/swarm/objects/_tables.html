@@ -2,6 +2,7 @@
 {% from "environments/_parts.html" import age with context %}
 {% from "swarm/_parts.html" import stack_link with context %}
 {% from "partials/data_table.html" import data_table %}
+{% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/error_state.html" import error_state %}
 
 {% macro object_row(kind, row, stack_links=none) %}
@@ -46,6 +47,7 @@
 {% macro objects_results(kind, rows, columns, pager, total, visible, filtered, errors, failure, retry_href, oob=false, environment_id=none, can_create=false, stack_links=none) %}
 {% if oob %}
 {{ results_summary(kind, none if (errors or failure) else total, visible, filtered, true) }}
+{{ sort_fields(pager.sort, pager.direction, true) }}
 {% endif %}
 {% if errors %}
 {% for message in errors %}

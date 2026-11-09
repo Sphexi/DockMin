@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "environments/_parts.html" import environment_badge with context %}
-{% from "swarm/stacks/_parts.html" import row_state with context %}
-{% from "stacks/_parts.html" import changed_chip, compose_banner, dismiss_form, dismissal_state, dismissed_line, last_operation, leftover_links, leftover_summary, restore_form with context %}
-{% from "partials/data_table.html" import data_table %}
+{% from "stacks/_parts.html" import compose_banner with context %}
+{% from "swarm/stacks/_tables.html" import stacks_results with context %}
 {% from "partials/error_state.html" import error_state %}
 {% from "partials/form_field.html" import form_field %}
 {% from "partials/list_bar.html" import list_bar, list_count %}
+{% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/page_header.html" import page_header %}
 {% block title %}Swarm stacks on {{ environment.name }} - dockmin{% endblock %}
 {% block content %}
@@ -23,7 +23,10 @@
 <p class="field__help">A stack is every service, config, secret and network that carries the same stack name label. A managed stack has its file stored here and is deployed, redeployed and removed from its page. Any other name is read-only{% if principal.is_administrator %}, and an administrator can adopt it by supplying its file{% endif %}.</p>
 
 {% call list_bar(list_count(none if (errors or failure or page is none) else page.total, "stack", filtered=(q|length > 0))) %}
-<form class="list-bar__filter" method="get" action="{{ list_href }}" role="search" aria-label="Filter stacks">
+<form id="stack-filters" class="list-bar__filter" method="get" action="{{ list_href }}" role="search" aria-label="Filter stacks"
+      hx-get="{{ list_href }}" hx-target="#stacks-results" hx-swap="innerHTML"
+      hx-push-url="true" hx-trigger="submit, change from:(#stack-filters select, #stack-filters input[type=checkbox])" hx-sync="this:replace">
+  {{ sort_fields(pager.sort, pager.direction) }}
   {{ form_field("q", "Name contains", value=q, type="search", autocomplete="off") }}
   <button type="submit" class="btn btn--primary">Apply filter</button>
   <a class="btn" href="{{ list_href }}">Reset</a>
@@ -33,69 +36,7 @@
 {% endif %}
 {% endcall %}
 
-{% if errors %}
-{% for message in errors %}
-{{ error_state("Check the filter", message) }}
-{% endfor %}
-{% elif failure %}
-{{ error_state("Stacks cannot be listed", failure, retry_href=retry_href) }}
-{% else %}
-{{ dismissed_line(dismissed_hidden, show_dismissed, list_href) }}
-{% set empty_body = "Change the name, or clear the filter to see every stack." if q else ("No stack is managed here and no object on this cluster carries a stack name." if principal.is_administrator else "You cannot see any stack on this cluster. Ask an administrator for access to more stacks.") %}
-{% call data_table("stacks-table", "Swarm stacks", columns, pager, empty_title=("No matching stacks" if q else "No stacks"), empty_body=empty_body, empty_action_label=("Create stack" if principal.is_administrator and can_create and not q else none), empty_action_href=(route_path("environment_swarm_stack_new", environment_id=environment.id) if principal.is_administrator and can_create and not q else none), filtered=(q|length > 0), clear_href=list_href) %}
-{% for row in rows %}
-<tr id="stack-{{ row.key }}">
-  <th scope="row">
-    <div class="cell-stack">
-      {% if row.linkable %}
-      <a class="mono cell-wrap" href="{{ route_path('environment_swarm_stack_detail', environment_id=row.environment_id, namespace=row.name) }}">{{ row.name }}</a>
-      {% else %}
-      <span class="mono cell-wrap">{{ row.name }}</span>
-      <span class="cell-note">Its name is not one this page can open.</span>
-      {% endif %}
-      {% if row.spellings|length > 1 %}<span class="cell-note">Also spelled {{ row.spellings|reject("equalto", row.name)|join(", ") }}</span>{% endif %}
-      {% if row.managed and row.changed_since_deploy %}<span class="cell-note">{{ changed_chip(row) }}</span>{% endif %}
-      {% if row.compose_stack %}<span class="cell-note">Shares its access control with Compose stack <span class="mono">{{ row.compose_stack }}</span>.</span>{% endif %}
-      {{ dismissal_state(row.dismissal, show_dismissed) }}
-      {% if row.leftovers_only %}
-      <span>{{ leftover_summary("No services.", [("config", "configs", row.configs), ("secret", "secrets", row.secrets), ("network", "networks", row.networks), ("volume visible on this manager", "volumes visible on this manager", row.manager_volumes_total)]) }}</span>
-      {% if page.volumes_unavailable %}<span class="cell-note">The volumes on this manager could not be read.</span>{% endif %}
-      {{ leftover_links("Configs", row.leftover_configs, row.configs, row.environment_id, "environment_swarm_config_detail", "object_id", "id") }}
-      {{ leftover_links("Secrets", row.leftover_secrets, row.secrets, row.environment_id, "environment_swarm_secret_detail", "object_id", "id") }}
-      {{ leftover_links("Networks", row.leftover_networks, row.networks, row.environment_id, "environment_network_detail", "network_id", "id") }}
-      {{ leftover_links("Volumes visible on this manager", row.manager_volumes, row.manager_volumes_total, row.environment_id, "environment_volume_detail", "volume_name", "name") }}
-      {% endif %}
-    </div>
-  </th>
-  <td>{{ row_state(row) }}</td>
-  <td>{% if row.managed %}{{ last_operation(row) }}{% else %}<span class="cell-note">Not managed here</span>{% endif %}</td>
-  <td class="is-numeric">{{ row.services }}</td>
-  <td class="is-numeric">{{ row.configs }}</td>
-  <td class="is-numeric">{{ row.secrets }}</td>
-  <td class="is-numeric">{{ row.networks }}</td>
-  <td>
-    <div class="row-actions">
-      {% if row.linkable %}
-      <a class="btn btn--compact" href="{{ route_path('environment_swarm_stack_detail', environment_id=row.environment_id, namespace=row.name) }}" aria-label="Details of stack {{ row.name }}">Details</a>
-      {% endif %}
-      {% if row.adoptable %}
-      <a class="btn btn--compact" href="{{ route_path('environment_swarm_stack_adopt', environment_id=row.environment_id, namespace=row.name) }}" aria-label="Adopt stack {{ row.name }}">Adopt</a>
-      {% elif principal.is_administrator and not row.managed and not row.compose_stack %}
-      <span class="cell-note">Cannot be adopted</span>
-      {% endif %}
-      {% if row.leftovers_only and row.dismissible and (not row.dismissal or row.dismissal.changed_since) %}
-      {{ dismiss_form(route_path("environment_swarm_stack_unmanaged_dismiss", environment_id=row.environment_id, namespace=row.name), row.objects_digest, row.name) }}
-      {% endif %}
-      {% if row.dismissal %}
-      {{ restore_form(row.dismissal, route_path("environment_swarm_stack_unmanaged_restore", environment_id=row.environment_id, namespace=row.name), row.name) }}
-      {% endif %}
-    </div>
-  </td>
-</tr>
-{% endfor %}
-{% endcall %}
-{% if page.truncated %}
-<p class="field__help">{{ page.total }} stacks match; the first {{ rows|length }} are listed. Narrow the filter to see the others.</p>
-{% endif %}
-{% endif %}
+<div id="stacks-results">
+  {{ stacks_results(rows, columns, pager, page, q, errors, failure, retry_href, environment.id, can_create, show_dismissed, dismissed_hidden) }}
+</div>
 {% endblock %}

@@ -25,6 +25,7 @@ from app.compose_cli.parsers import ResolvedProject
 from app.compose_cli.target import ComposeTarget
 from app.db.repositories.environment import Environment
 from app.db.repositories.environment_tls import EnvironmentTlsRepository
+from app.db.repositories.pagination import CursorPosition, decode_cursor, encode_cursor
 from app.db.repositories.registry_credential import SecretUnreadableError
 from app.db.repositories.resource_control import ResourceControlRepository
 from app.db.repositories.stack import (
@@ -57,10 +58,10 @@ from app.services.guards import require_administrator
 from app.services.host_objects import (
     busy_view,
     check_limit,
-    decode_position,
     permitted_container_ids,
 )
 from app.services.image_bindings import CredentialOffer, ImageBindingService
+from app.services.list_order import ListOrder, Ordering, text_key
 from app.services.object_inspector import (
     EngineObjectInspector,
     EnvironmentUnavailable,
@@ -180,6 +181,14 @@ __all__ = [
 SERVICE_LABEL: Final = "com.docker.compose.service"
 
 DEFAULT_PAGE_SIZE: Final = 25
+
+LIST_ORDER: Final = ListOrder[StackSummary](
+    default="name",
+    keys={"name": text_key(lambda s: s.name)},
+    name=lambda s: s.name,
+    row_id=lambda s: s.id,
+    entry_id=lambda s: str(s.id),
+)
 
 MAX_SHOWN_CONTAINERS: Final = 200
 
@@ -642,18 +651,21 @@ class StackQueryService:
         q: str | None = None,
         include_unmanaged: bool = True,
         show_dismissed: bool = False,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> StackPage:
-        """List the stacks the caller may see, by name.
+        """List the stacks the caller may see, by name unless `sort` says otherwise.
 
         Administrators also get the unmanaged projects found on the host, unless
         `include_unmanaged` is false, which skips reading the host. A dismissal hides its
         project from that list; with `show_dismissed` the list holds only the dismissed projects.
-        ValidationFailed keyed `cursor` or `limit` for a bad page request.
+        ValidationFailed keyed `cursor`, `limit`, `sort` or `dir` for a bad page request.
         """
         await self._authoriser.require_environment(actor, environment_id)
         environment = await self._hosts.environment(environment_id)
         limit = check_limit(limit)
-        decode_position(cursor)
+        ordering = Ordering.resolve(LIST_ORDER, sort, direction)
+        position = ordering.position(cursor)
         needle = (q or "").strip().casefold()[:MAX_NAME_CHARS] or None
         visible = None
         if not actor.is_administrator:
@@ -662,11 +674,18 @@ class StackQueryService:
         page = await self._listing.page(
             environment_id,
             limit=limit,
-            cursor=cursor,
+            cursor=None
+            if position is None
+            else encode_cursor(CursorPosition(str(position.value), position.row_id)),
             name_contains=needle,
             visible=visible,
             kind="compose",
+            descending=ordering.descending,
         )
+        next_cursor = None
+        if page.next_cursor is not None:
+            last = decode_cursor(page.next_cursor)
+            next_cursor = ordering.encode(str(last.sort_value), last.row_id)
         items = tuple(_row_of(item) for item in page.items)
         unmanaged: tuple[UnmanagedProject, ...] = ()
         dismissed_hidden = 0
@@ -682,7 +701,7 @@ class StackQueryService:
             environment_id=environment_id,
             environment_name=environment.name,
             items=items,
-            next_cursor=page.next_cursor,
+            next_cursor=next_cursor,
             unmanaged=unmanaged,
             unmanaged_unavailable=unavailable,
             can_create=await self._authoriser.may_create(actor, environment_id),

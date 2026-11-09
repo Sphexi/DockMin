@@ -2,6 +2,14 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Sortable column headers on the container, image, volume, network, Compose stack, Swarm service, config, secret and Swarm stack lists, with the `sort` and `dir` query parameters: [Sorting](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#sorting).
+- The total size of every image on the host above the image list, read from the Engine's disk usage with each shared layer counted once: [Total size](https://github.com/Sphexi/DockMin/wiki/Usage-Images#total-size).
+- Shift-click range selection on the batch checkboxes of the container, image and volume lists, the environment list and the onboarding review: [Range selection](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#range-selection).
+
 ## 0.2.2 - 2026-11-08
 
 ### Changed

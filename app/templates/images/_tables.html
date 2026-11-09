@@ -3,6 +3,7 @@
 {% from "images/_parts.html" import reference_list, update_form, update_results, using_containers with context %}
 {% from "partials/badge.html" import badge %}
 {% from "partials/data_table.html" import data_table %}
+{% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/error_state.html" import error_state %}
 
 {% macro image_actions(row, can_create, can_remove) %}
@@ -61,16 +62,24 @@
 </form>
 {% endmacro %}
 
-{# Outside the swapped table, so a table response carries it out of band. #}
-{% macro results_summary(total, filtered, oob=false) %}
+{# Outside the swapped table, so a table response carries it out of band. The host total sits inside the line and is kept by id across those swaps; only a full page asks for it. #}
+{% macro results_summary(total, filtered, oob=false, disk_href=none) %}
 <p id="results-summary" class="results-summary" role="status"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
   {%- if total is not none %}{{ total }} {{ "image" if total == 1 else "images" }}{% if filtered %} {{ "matches" if total == 1 else "match" }} these filters{% endif %}.{% endif -%}
+  {%- if oob %} <span id="image-disk-total" hx-preserve></span>
+  {%- elif disk_href %} <span id="image-disk-total" hx-get="{{ disk_href }}" hx-trigger="load" hx-swap="outerHTML"></span>
+  {%- endif -%}
 </p>
+{% endmacro %}
+
+{% macro image_disk_total(total) %}
+{%- if total is not none %}<span id="image-disk-total">{{ total|filesize }} for all images on this host.</span>{% endif -%}
 {% endmacro %}
 
 {% macro images_results(rows, columns, pager, total, filtered, environment_id, errors, failure, retry_href, checkable, orphans, can_create, can_remove, oob=false, max_batch=none) %}
 {% if oob %}
 {{ results_summary(none if (errors or failure) else total, filtered, true) }}
+{{ sort_fields(pager.sort, pager.direction, true) }}
 {% endif %}
 {% if errors %}
 {% for message in errors %}
