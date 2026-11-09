@@ -117,6 +117,22 @@ class SelfProtected(ProductError):
         )
 
     @classmethod
+    def export(cls, name: str) -> Self:
+        """Return the refusal for exporting a volume the container dockmin runs in has mounted."""
+        return cls(
+            f"The volume {name} is mounted in the container dockmin runs in. "
+            "It cannot be exported from dockmin."
+        )
+
+    @classmethod
+    def export_unverified(cls) -> Self:
+        """Return the refusal for an export while dockmin's own mounts on the host are unknown."""
+        return cls(
+            "dockmin cannot establish which volumes its own container mounts on this host, so "
+            "no volume here can be exported until it can."
+        )
+
+    @classmethod
     def node(cls) -> Self:
         """Return the refusal for draining the Swarm node that runs dockmin's container."""
         return cls(

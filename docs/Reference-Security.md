@@ -145,6 +145,7 @@ dockmin finds the container it runs in at start ([Instance](Administration-Insta
 | Detach from a network | Refused |
 | Create, duplicate or recreate a container with `PidMode`, `IpcMode` or `NetworkMode` of the form `container:{name or id}` naming it, `VolumesFrom` naming it, or a named volume it has mounted | Refused, in every environment that reports the container |
 | Remove a volume it has mounted: single, with containers, bulk, prune, stack removal with volumes | Refused, or the volume is kept |
+| Export a volume it has mounted, or a `local` volume bound to a path it mounts | Refused. While its mounts on the host are unknown, every volume of that host is refused |
 | Deploy, redeploy, stop, restart or remove its Compose project | Refused |
 | Change or remove its Swarm service; change the Swarm stack that holds it; drain its node | Refused |
 | Restart | Only by an administrator, from the Instance page, through an environment on the local Docker socket |
@@ -169,6 +170,22 @@ Reading a Compose project's files from its host makes dockmin bind-mount a host 
 | Reads | Regular files only, each under a size limit, inside the working directory. Symbolic links, directories and archives that are not exactly one file are refused |
 | Output | A secret file's content and a secret variable's value are held in memory for 15 minutes, at most 8 reads for each user and 32 in all, stored encrypted when adopted, and never shown or recorded |
 | Recorded | `stack_files_read` names the project, the helper container and the reasons files were refused ([Activity](Administration-Activity#stack-rows)) |
+
+## Volume export
+
+An administrator can download a volume's files as one archive ([Volumes](Usage-Volumes#export)).
+
+| Item | Value |
+|---|---|
+| Who | Administrators only. Any other user receives `404` on the confirmation and on the download, and nothing is recorded |
+| Contents | Plaintext. The archive holds every file of the volume as it is stored, unencrypted and without a passphrase. Anyone who holds the file can read everything in the volume, including files whose mode allows the owner only |
+| Where the plaintext goes | The response to the administrator's browser. dockmin writes nothing to its own disk and does not log or parse file content |
+| dockmin's own volumes | Refused: a volume mounted in the container dockmin runs in, and a `local` volume bound to a path that container mounts. The data volume holds the database and the key volume holds the encryption key. While dockmin's mounts on a host are unknown, every volume of that host is refused |
+| Plugin drivers | Refused. Only the `local` driver is exported |
+| Driver options | Options named for a credential, and credential entries inside option values, are removed from the manifest and listed by key. The match is on key names and on the forms `user%password` and `user:password@host`. An option that holds a credential in another form is written as found |
+| Labels | `com.docker.compose.*`, `com.docker.stack.namespace` and `dockmin.*` are not written |
+| Host access | A helper container created from an image already on the host, never started, with the volume read-only, no network, a read-only root file system and all capabilities dropped. It is removed with its anonymous volumes when the export ends |
+| Recorded | `volume_export_started` and `volume_exported`, naming the volume and never an option value, a label value or a path ([Activity](Administration-Activity#volume-export-rows)) |
 
 ## Stack builds
 

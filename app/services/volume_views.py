@@ -257,6 +257,7 @@ class VolumeDetail:
     can_manage_access: bool
     protected: bool = False
     stack_kind: StackKind | None = None
+    can_export: bool = False
 
 
 @dataclass(frozen=True, slots=True)

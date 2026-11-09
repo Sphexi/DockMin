@@ -13,7 +13,7 @@ from typing import Any, Literal, Protocol
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from app.docker_engine.archive import ArchiveEntry, read_archive
+from app.docker_engine.archive import ArchiveEntry, DirectoryStream, open_directory, read_archive
 from app.docker_engine.engine_http import (
     ACTION_REPLY_BYTES,
     COUNT_RESPONSE_BYTES,
@@ -423,6 +423,16 @@ class ContainersApi:
         full 64-hex id.
         """
         return await read_archive(self._http, container_id, path, limit=limit)
+
+    async def archive_directory(self, container_id: str, path: str) -> DirectoryStream:
+        """Stream the tar of one directory of a container, created or running.
+
+        The stat header is checked as a directory and the first chunk is read before this
+        returns; the body is never held whole. No size cap and no total time limit; a read that
+        receives nothing for 60 seconds fails. The caller must close the stream. `container_id`
+        must be a full 64-hex id.
+        """
+        return await open_directory(self._http, container_id, path)
 
     async def create(self, body: Mapping[str, Any], *, name: str | None = None) -> str:
         """Create a container from an Engine create body and return its id.

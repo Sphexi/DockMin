@@ -745,7 +745,7 @@ The delete confirmation page has a section `Activity held for export`.
 
 ## Rows recorded by other features
 
-Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
+Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
 
 | Rows | Described on |
 |---|---|
@@ -790,6 +790,33 @@ Target type `stack`, the stack's name as the target id. Every stack action is li
 - Failure rows of these actions use the reasons of [Stacks](Usage-Stacks#errors), among them `file_missing`, `file_in_use`, `context_in_use`, `changed_since_review`, `not_running`, `self_protected` and the [build refusals](Usage-Stacks#build-refusals).
 - A row names a file and never holds its content, a digest of a secret file, or a path beneath the data directory. A build context row holds the archive's name, size and digest, never its content or build output.
 - `stack_files_read` is written once for each read from a host ([Read from host](Usage-Stacks#read-from-host), [Reconstruct a stack from the cluster](Usage-Swarm#reconstruct-a-stack-from-the-cluster)), with target type `stack` and the project or namespace name as the target id. It is a `success` when a file was produced and when none could be; the outcome is in `file_source` and `needs_file`. A standard user's request writes no row. A row holds no file content and no variable value.
+
+## Volume export rows
+
+Target type `volume`, the volume's name as the target id (cut to 255 characters), in the volume's environment. Actor: a user, always an administrator. Category `user_action`. An export writes two rows ([Volumes](Usage-Volumes#export)).
+
+| Action | Written | Detail keys |
+|---|---|---|
+| `volume_export_started` | After every refusal check has passed and the helper container exists, before any data is read. Also as a failure when the export is refused after the request reached the service | `driver`, `format_version` (`1`), `containers` (the number of containers that mount the volume, in any state), `running_containers` (those in state `running`, `paused` or `restarting`), `helper_container` (the full id) |
+| `volume_exported` | When the download ends, by completion, failure or client disconnect | `name`, `driver`, `format_version`, `bytes`, `source_bytes`, `skipped`, `completed`, `helper_removed` |
+
+| Detail key | Value |
+|---|---|
+| `bytes` | Bytes of the archive handed to the response |
+| `source_bytes` | Bytes read from the Docker host |
+| `skipped` | Entries left out of the archive and listed in `skipped.json` |
+| `completed` | `true` when the whole archive was produced and handed to the response. It does not report that the client received it |
+| `helper_removed` | Whether the helper container was removed |
+| `reason` | Failure rows |
+| `holder_action` | `volume_export_started` failure for a busy volume |
+
+- On a failed `volume_export_started`, the keys that were known when the export was refused are present: `driver` and `format_version` after the volume was read, `containers` and `running_containers` after the host's containers were listed.
+- `volume_exported` is written for every export that wrote `volume_export_started` with success. It is a failure, with `completed` `false`, when the archive was not fully produced.
+- `volume_export_started` reasons: `self_protected`, `export_busy`, `object_busy`, `changed_since_review`, `plugin_driver`, `helper_image_missing`, `helper_refused`, `unreadable`, `volume_gone`, `too_large` and the host failure reasons ([Volumes](Usage-Volumes#recorded-actions)).
+- `volume_exported` reasons: `interrupted` (the client left or the request was cancelled), `malformed_stream`, `unreadable`, `unreachable`, `outcome_unknown`, `engine_error`.
+- A request from a user who is not an administrator, for a name that is not a volume name, or for a volume that does not exist or is not visible, writes no row.
+- A row holds no option value, no label value, no path and no file content.
+- A `volume_exported` row that cannot be written logs `activity_event_write_failed` with `action` `volume_exported`.
 
 ## Reveal and dismissal rows
 
@@ -840,7 +867,7 @@ Rows for `template_catalogue_created`, `template_catalogue_updated`, `template_c
 
 ## Self-protection refusals
 
-An action refused because it would stop the container dockmin runs in, or take away what it runs on, records a failure with the reason `self_protected` and the usual `message`. The product-written message names the object. The rows are those of the refused action: `container_stopped`, `container_restarted`, `container_killed`, `container_paused`, `container_removed`, `container_recreated`, `container_created`, `container_exec_started`, `container_attach_started`, `network_disconnected`, `volume_removed`, `stack_deployed`, `stack_redeployed`, `stack_stopped`, `stack_restarted`, `stack_removed`, `service_updated`, `service_scaled`, `service_force_updated`, `service_rolled_back`, `service_removed`, `node_availability_changed` ([Containers](Usage-Containers#dockmins-own-container), [Volumes](Usage-Volumes#dockmins-volumes), [Stacks](Usage-Stacks#dockmins-own-stack), [Swarm](Usage-Swarm#dockmins-own-service)). A subsystem skips such a target before acting; the run counts the skip ([Automation](Operations-Automation#self-protection)).
+An action refused because it would stop the container dockmin runs in, or take away what it runs on, records a failure with the reason `self_protected` and the usual `message`. The product-written message names the object. The rows are those of the refused action: `container_stopped`, `container_restarted`, `container_killed`, `container_paused`, `container_removed`, `container_recreated`, `container_created`, `container_exec_started`, `container_attach_started`, `network_disconnected`, `volume_removed`, `volume_export_started`, `stack_deployed`, `stack_redeployed`, `stack_stopped`, `stack_restarted`, `stack_removed`, `service_updated`, `service_scaled`, `service_force_updated`, `service_rolled_back`, `service_removed`, `node_availability_changed` ([Containers](Usage-Containers#dockmins-own-container), [Volumes](Usage-Volumes#dockmins-volumes), [Stacks](Usage-Stacks#dockmins-own-stack), [Swarm](Usage-Swarm#dockmins-own-service)). A subsystem skips such a target before acting; the run counts the skip ([Automation](Operations-Automation#self-protection)).
 
 ## Limits
 

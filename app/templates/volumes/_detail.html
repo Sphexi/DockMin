@@ -16,7 +16,11 @@
     <div class="row-actions">
       {% if detail.protected %}
       {{ badge("In use by dockmin", "info") }}
-      {% elif detail.can_remove %}
+      {% endif %}
+      {% if detail.can_export %}
+      <a class="btn btn--compact" href="{{ route_path('environment_volume_export_confirm', environment_id=detail.environment_id, volume_name=detail.name) }}">Export</a>
+      {% endif %}
+      {% if not detail.protected and detail.can_remove %}
       <a class="btn btn--compact btn--danger-quiet" href="{{ route_path('environment_volume_remove', environment_id=detail.environment_id, volume_name=detail.name) }}">Remove</a>
       {% endif %}
     </div>

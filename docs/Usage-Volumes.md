@@ -19,6 +19,8 @@ All paths are under `/environments/{id}/volumes`.
 | Remove, or remove with containers | `/{volume_name}/remove` | `POST` |
 | Bulk removal confirmation | `/-/remove?volume={volume_name}`, repeated | `GET` |
 | Bulk removal | `/-/remove` | `POST` |
+| Export confirmation | `/{volume_name}/export` | `GET` |
+| Export download | `/{volume_name}/export` | `POST` |
 | Owner assignment review | `/-/backfill` | `GET` |
 | Owner assignment | `/-/backfill` | `POST` |
 | Save or delete the access control | `/{volume_name}/access`, `/{volume_name}/access/delete` | `POST` |
@@ -28,7 +30,7 @@ All paths are under `/environments/{id}/volumes`.
 - `{tab}` is `overview` (default), `containers` or `access`. Any other value answers `404`. `access` is shown to administrators; other roles receive `403`.
 - `{mode}` is `anonymous` (default) or `all`.
 - `/-/remove` takes 1 to 25 distinct `volume` values. Outside that, an administrator receives `400`. A standard user's request with no `volume` value answers `404`.
-- Every `POST` redirects (`303`) on success. Create redirects to the new volume, remove to the list. A forced removal and a prune redirect to a result page, `/results/{token}` ([Result pages](Contributing-Frontend-Conventions#result-pages)), which lists each target and outcome; reloading it repeats nothing.
+- Every `POST` except the export download redirects (`303`) on success. Create redirects to the new volume, remove to the list. The export download answers `200` with the archive ([Export](#export)). A forced removal and a prune redirect to a result page, `/results/{token}` ([Result pages](Contributing-Frontend-Conventions#result-pages)), which lists each target and outcome; reloading it repeats nothing.
 - A refusal renders a page at the real status code, with a `Review again` link for `409`, `502` and `503`.
 - Volume routes have no JSON form.
 
@@ -46,6 +48,7 @@ A volume is identified by its name. Visibility follows the order in [Visibility]
 | Bulk remove | Yes | Volumes they hold write access to. The others are counted and left out. On a local socket environment none qualifies |
 | Remove with its containers | Yes | Write access to the volume and to every container that uses it. `403` on a local socket |
 | Prune | Yes | Refused (`403`) |
+| Export | Yes, except a volume dockmin's own container mounts | `404` on both routes |
 | Assign owners | Yes | `404` on both routes |
 | Access tab | Yes | Refused (`403`) |
 
@@ -122,6 +125,7 @@ The list is replaced by an error, and the answer is `503`. The messages are thos
 - Label values are cut at 4096 characters. A volume whose labels were cut while reading shows `Only the first labels are shown.`
 - Values of driver options that look like secrets are redacted.
 - The page offers `Remove` to users with write access, and the badge `In use by dockmin` in its place for a volume dockmin's own container mounts.
+- The page offers `Export` to administrators, except on a volume marked `In use by dockmin` ([Export](#export)).
 - A raw inspect document is never shown.
 
 ## Create
@@ -264,6 +268,179 @@ Bulk removal deletes several volumes in one reviewed step. It needs write access
 
 Each removal writes a `volume_removed` row with `batch` set. The access control of a removed volume is deleted with it, as for a single removal.
 
+## Export
+
+Export downloads one volume as a gzip archive holding its files and a manifest. Administrators only. The archive is not encrypted.
+
+1. Open `Export` on the volume page.
+2. Read the confirmation.
+3. Choose `Download archive`. The browser saves `volume-{name}-{YYYYMMDDTHHMMSSZ}.tar.gz`.
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on both routes and nothing is recorded |
+| Volume | Driver `local` only, with or without driver options. Any size |
+| Read | A helper container is created on the host and never started; the volume is mounted into it read-only and the files are streamed from the Engine's archive call ([The helper container](#the-helper-container)) |
+| Output | `application/gzip`, `Content-Disposition: attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` |
+| Writes | Nothing on the host is changed except the helper container, which is created and removed |
+| Disk | Nothing is written to dockmin's disk. The archive is produced while the data is read |
+| Lock | The volume is held until the download ends ([Busy](#busy)) |
+| Concurrency | One export at a time on an environment, two in all ([Limits](#limits)) |
+| Import | Not available |
+
+### Confirmation
+
+`GET /environments/{id}/volumes/{volume_name}/export`. Nothing is read, created or recorded.
+
+| Element | Text |
+|---|---|
+| Heading | `Export volume {name}?` |
+| Subtitle | `Review the volume below. Nothing is read until you confirm.` |
+| Facts | Driver, Created, Environment. The volume's size is not shown |
+| `What the archive holds` | `Every file of the volume under data/, with its mode, numeric owner ids, timestamps and symbolic links.` `manifest.json: the volume's name, driver, labels and driver options. Credentials in driver options are left out and listed by key.` `Device files and FIFOs are left out and listed in skipped.json. Sockets are not read.` |
+| Alert `The archive is not encrypted` | `The archive holds the volume's files as they are. Anyone who holds the file can read everything in the volume.` |
+| Alert `The volume is in use` | Shown when a container in state `running`, `paused` or `restarting` mounts the volume: `{N} running containers mount this volume. If they write while the archive is read, the archive can be inconsistent. A database's files are the usual case. Nothing is stopped.` One container: `1 running container mounts this volume. If it writes while the archive is read, the archive can be inconsistent. ...`. Names up to 10 containers and counts the rest |
+| Line when none runs | `No running container mounts the volume.` |
+| `The helper container` | `dockmin creates a container named dockmin-read- followed by twelve characters from the image {first 12 digits of the image id}, which is already on the host. The container is never started. It mounts the volume read-only, has no network and no capabilities, and appears in the container list until the export ends. It is removed when the export ends, however it ends.` |
+| Buttons | `Download archive` (a form that posts the CSRF token and the volume's creation time), `Cancel` |
+| No image on the host | The alert `The host has no image to use`: `The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then review the export again.` No download button |
+
+- The download is a plain form `POST`. It works without script.
+- A running container does not stop the export.
+
+### Archive
+
+A tar archive in PAX format, compressed with gzip (level 6, no timestamp in the gzip header). Members in this order:
+
+| Member | Content |
+|---|---|
+| `manifest.json` | JSON, keys sorted, indented two spaces ([Manifest](#manifest)) |
+| `data/` | The volume's root directory, then every entry below it as `data/{relative path}`, in the order the Engine lists them |
+| `skipped.json` | Entries left out ([skipped.json](#skippedjson)). Always present, last |
+
+| Entry in the volume | In the archive |
+|---|---|
+| Regular file | Copied, with content, mode, numeric uid and gid, and modification time |
+| Directory | Copied, with mode, ids and modification time |
+| Symbolic link | Copied as a link with its target as written. Targets are not rewritten or followed |
+| Hard link | Copied as a hard link; the target is rewritten to its path under `data/` |
+| Extended attributes | `SCHILY.xattr.*` records are kept. Other PAX records are rebuilt from the member, not copied |
+| FIFO, character device, block device | Left out, listed in `skipped.json` |
+| Unix socket | Not in the archive and not in `skipped.json`. The Engine's archive stream does not carry sockets |
+| Any other member type | Left out, listed in `skipped.json` with type `other` |
+
+- Owner names are not recorded. Ownership is the numeric uid and gid.
+- The archive holds the files as they are on the host at the time of the read.
+- A stream that is not the complete tar of one directory fails the export: no end marker, data after the end marker, a header over 1 MiB, a member outside the directory, a member with a `..` segment. The response then ends without the gzip trailer, so the file does not decompress cleanly.
+
+#### Manifest
+
+| Field | Type | Value |
+|---|---|---|
+| `format_version` | integer | `1` |
+| `kind` | string | `volume` |
+| `exported_at` | string | UTC time of the export, ISO 8601, ending in `Z` |
+| `instance_version` | string | The dockmin version that wrote the archive; `unknown` when it cannot be read |
+| `name` | string | The volume's name |
+| `driver` | string | `local` |
+| `labels` | object | The volume's labels, keys sorted, without the excluded labels below |
+| `options` | object | The volume's driver options, keys sorted, with credentials removed ([Credentials in driver options](#credentials-in-driver-options)) |
+| `removed_option_keys` | array of strings | What was removed from `options`, as keys and `key.name` entries. Never a value |
+| `data_path` | string | `data` |
+
+- A field not listed is refused by a reader. The volume's resource control is not exported.
+- Labels left out, matched without regard to case: `com.docker.stack.namespace`, and every label beginning `com.docker.compose.` or `dockmin.`.
+
+#### Credentials in driver options
+
+| Case | Result | Listed in `removed_option_keys` |
+|---|---|---|
+| An option whose key names a credential: `password`, `passwd`, `pass`, `pwd`, `passphrase`, `secret`, `secretfile`, `token`, `key`, `apikey`, `credential`, `credentials`, `cred`, `creds`, or a key the log scrubber treats as secret | The option is removed | `{key}` |
+| A comma-separated entry inside a value whose name is one of those, such as `password=...` in `o` | The entry is removed | `{key}.{name}`, for example `o.password` |
+| `user=name%password` or `username=name%password` inside a value | The text from `%` is cut | `{key}.password` |
+| `user:password@host` inside a value | The password is cut | `{key}.password` |
+
+Every other option is written as found.
+
+#### skipped.json
+
+| Field | Value |
+|---|---|
+| `format_version` | `1` |
+| `count` | The number of entries left out, exact |
+| `truncated` | `true` when `count` exceeds the 10,000 entries listed |
+| `skipped` | Objects with `path` (relative to `data/`) and `type`: `fifo`, `character_device`, `block_device` or `other` |
+
+### Refusals
+
+A refusal before the download starts renders a page at the real status code. Nothing is read from the volume and no helper container is created, except where the table says otherwise.
+
+| Condition | Status | Page | Message | Reason |
+|---|---|---|---|---|
+| Not an administrator, a name that is not a valid volume name, a volume that does not exist or is not visible | 404 | | Not found | No row |
+| The volume is mounted in the container dockmin runs in | 409 | `Protected` | `The volume {name} is mounted in the container dockmin runs in. It cannot be exported from dockmin.` | `self_protected` |
+| The volume is a `local` volume whose `device` option is, holds or lies inside a source of a mount of dockmin's container | 409 | `Protected` | The same message | `self_protected` |
+| dockmin's own mounts on the host are not known | 409 | `Protected` | `dockmin cannot establish which volumes its own container mounts on this host, so no volume here can be exported until it can.` No volume on that host can be exported | `self_protected` |
+| The driver is not `local` | 409 | `The volume cannot be exported` | `Only volumes of the local driver can be exported. A plugin driver can run code on the host when its volume is mounted.` | `plugin_driver` |
+| The creation time differs from the confirmation's | 409 | `The volume changed` | `This volume changed since you reviewed it; nothing was changed.` | `changed_since_review` |
+| Another action holds the volume | 409 | `This volume is busy` | [Busy](#busy) | `object_busy` |
+| An export already runs on the environment | 429, `Retry-After: 5` | `The export was not started` | `A volume export is already running on this environment. Try again when it has finished.` | `export_busy` |
+| Two exports run in the instance | 429, `Retry-After: 5` | `The export was not started` | `Too many volume exports are running. Try again shortly.` | `export_busy` |
+| The volume was removed after the review | 404 | `The volume no longer exists` | `The volume no longer exists.` | `volume_gone` |
+| The host has no image | 409 | `The volume cannot be exported` | `The host has no image to create the helper container from. Pull or load an image on the host, then try again.` | `helper_image_missing` |
+| Docker refused to create the helper | 409 | `The volume cannot be exported` | `Docker refused to create the helper container.` | `helper_refused` |
+| Docker could not read the volume | 409 | `The volume cannot be exported` | `Docker could not read the volume's contents.` | `unreadable` |
+| The host is unreachable or answers unexpectedly | 503 | The host message | [Host failures](Usage-Containers#host-failures) | The host failure reason |
+
+- `unreadable` is known only after the helper exists. The helper is removed before the page is returned.
+- The confirmation applies the same checks for dockmin's own volumes, mounts and plugin drivers. It does not check the creation time, the lock or the limits.
+- A volume with driver options (NFS, CIFS) is not refused. The Docker host mounts the storage when the volume is read.
+
+### What is left out
+
+| Left out | Where it is recorded |
+|---|---|
+| Device files and FIFOs | `skipped.json`, and the count in `skipped` on the `volume_exported` row |
+| Unix sockets | Nowhere. They are absent from the archive and from `skipped.json` |
+| Entries of any other member type | `skipped.json` with type `other` |
+| The volume's resource control (owner, teams) | Not exported |
+| Credential option keys and values | `removed_option_keys` in the manifest |
+| Labels `com.docker.compose.*`, `com.docker.stack.namespace`, `dockmin.*` | Not recorded |
+
+### The helper container
+
+| Item | Value |
+|---|---|
+| Image | An image already on the host. Nothing is pulled. Images are taken smallest first, at most 16 are inspected, and the first that declares no `VOLUME` is used. When every one inspected declares a volume, the smallest is used |
+| Name | `dockmin-read-{12 hexadecimal digits}` |
+| Label | `dockmin.role=file-reader` |
+| State | `created`, always. The container is never started and no code from the image runs |
+| Body | `NetworkDisabled` true. `HostConfig`: `Mounts` `[{"Type": "volume", "Source": "{volume}", "Target": "/dockmin-read", "ReadOnly": true}]`, `NetworkMode` `none`, `ReadonlyRootfs` true, `CapDrop` `["ALL"]`, `AutoRemove` false |
+| Read | The Engine's container archive call for `/dockmin-read`. The Engine serves the mounts of a created container. The archive's top directory `dockmin-read/` becomes `data/` |
+| Visible | The helper is listed with the other containers on the host while it exists |
+| Removed | The Engine's container delete with `v` true, when the download ends by completion, failure, client disconnect or cancellation. The removal is shielded from cancellation and has 30 seconds. Anonymous volumes the image declared are removed with it. The exported volume is never removed |
+| Removal refused | The row records `helper_removed` `false`. A helper in state `created` for over 10 minutes is removed, with its anonymous volumes, when the next helper container is created on that environment, unless an export is still using it |
+| Recorded | `helper_container`: the full id, on `volume_export_started` |
+
+### Limits
+
+| Limit | Value |
+|---|---|
+| Size | None |
+| Total time | None. The download lasts as long as data flows |
+| Stall | The export fails when the host sends no byte for 60 seconds |
+| Concurrent exports | 1 for each environment, 2 in the instance, counted in the process |
+| Memory | Bounded: at most four 64 KiB output chunks are queued, and no tar member is held whole |
+| Directory entries | `skipped.json` lists at most 10,000 |
+
+### Format version
+
+| Item | Value |
+|---|---|
+| Written | `format_version` `1` |
+| Reading | A later release reads every earlier `format_version` |
+| Newer archive | An archive whose `format_version` is above the version the release knows is refused |
+
 ## dockmin's volumes
 
 A volume mounted in the container dockmin runs in ([dockmin's own container](Usage-Containers#dockmins-own-container)) is listed and its page opens. It is never removed from dockmin.
@@ -276,6 +453,7 @@ A volume mounted in the container dockmin runs in ([dockmin's own container](Usa
 | Prune | Listed under `Kept` on the confirmation and not removed |
 | Stack removal with volumes | Kept. The stack's remove-volumes page gives the reason `The container dockmin runs in has it mounted.` to an administrator |
 | Mounting it in another container | Refused when a container is created or recreated ([dockmin's own container](Usage-Containers#dockmins-own-container)) |
+| Export | No `Export` button. The confirmation and the download are refused: `409`, the page `Protected`. Recorded as a `volume_export_started` failure with reason `self_protected` ([Refusals](#refusals)) |
 
 ## Prune
 
@@ -452,6 +630,7 @@ One action runs on a volume at a time. A second is refused at once; it does not 
 | Create | The volume name |
 | Remove | The volume |
 | Remove with containers | Each container in turn, then the volume |
+| Export | The volume, from the start of the download until it ends |
 | Stack deploy, redeploy | The name of each volume the stack's file creates |
 | Stack remove with volumes | Each volume the remove deletes |
 
@@ -465,11 +644,13 @@ Every action records one activity row, for success and for failure. A refusal on
 |---|---|
 | `volume_created` | The volume's name. None when the form was refused |
 | `volume_removed` | The volume's name |
+| `volume_export_started` | The volume's name. Written once the export is cleared and the helper container exists, before any data is read, or when the export is refused after the request reached the service |
+| `volume_exported` | The volume's name. Written when the download ends, for success and for failure |
 | `resource_control_created` | The volume's name. Written by an owner assignment, one row for each volume assigned, and by [Adopt everything on this host](Usage-Environments#adopt-everything-on-this-host), which records `onboarding` `true` and `candidate_source` and not `backfill` |
 
 | Detail key | Present when |
 |---|---|
-| `driver` | `volume_created`, `volume_removed` |
+| `driver` | `volume_created`, `volume_removed`, `volume_export_started`, `volume_exported` |
 | `option_keys` | `volume_created`: the option keys, comma-separated. Values are never recorded |
 | `labels` | `volume_created`: the number of labels. Keys and values are never recorded |
 | `restricted` | `volume_created` by an administrator: `driver` for a driver other than `local`, `options` when options were set, comma-separated |
@@ -483,6 +664,8 @@ Every action records one activity row, for success and for failure. A refusal on
 | `pruned` | `volume_removed`, `true` when it ran from a prune. A prune writes one row per volume and none for the run |
 | `batch` | `volume_removed`, `true` when it ran from a bulk removal. A bulk removal writes one row per volume and none for the run |
 | `control_released` | `volume_removed`: whether the access control was deleted |
+| `format_version`, `containers`, `running_containers`, `helper_container` | `volume_export_started`. Keys: [Activity](Administration-Activity#volume-export-rows) |
+| `name`, `bytes`, `source_bytes`, `skipped`, `completed`, `helper_removed` | `volume_exported`. Keys: [Activity](Administration-Activity#volume-export-rows) |
 | `backfill` | `resource_control_created` from an owner assignment: `true` |
 | `candidate_source` | `resource_control_created` from an owner assignment: `container_control`, or `activity` when any mounting container's owner came from the activity log |
 | `containers` | `resource_control_created` from an owner assignment: the short ids of the mounting containers, comma-separated |
@@ -506,9 +689,12 @@ A removal with containers writes a `container_removed` row for each container it
 | `name_in_use` | A volume with the name exists |
 | `volume_in_use` | Removal of a volume that containers mount |
 | `changed_since_review` | The creation time or the use differs from the confirmation |
-| `self_protected` | The container dockmin runs in has the volume mounted |
+| `self_protected` | The container dockmin runs in has the volume mounted. For an export: also while dockmin's own mounts on the host are unknown, and for a volume bound to a path dockmin's container mounts |
 | `object_busy` | Another action holds the volume |
+| `export_busy` | `volume_export_started`: the export limit is reached |
+| `plugin_driver`, `helper_image_missing`, `helper_refused`, `unreadable` | `volume_export_started`: [Refusals](#refusals) |
+| `interrupted`, `malformed_stream` | `volume_exported`: the client left before the archive was complete; the host's stream was not the tar of one directory |
 | `volume_gone` | The volume no longer exists |
 | `engine_rejected` | Docker refused the request |
 | `volume_changed` | `container_created`: a volume changed while a standard user's container was being created |
-| `unreachable`, `unsupported`, `credentials`, `engine`, `outcome_unknown`, `too_large` | Host failures, as in [Host failures](Usage-Containers#host-failures) |
+| `unreachable`, `unsupported`, `credentials`, `engine`, `engine_error`, `outcome_unknown`, `too_large` | Host failures, as in [Host failures](Usage-Containers#host-failures) |

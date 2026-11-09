@@ -281,6 +281,10 @@ NOT_AUDITED: Mapping[str, str] = {
         "creates and removes a helper container within the audited operation that reads the "
         "files, and refuses anyone but an administrator"
     ),
+    "app/services/host_files.py:HostFileReader.volume_session": (
+        "creates and removes a helper container within the audited operation that exports the "
+        "volume, and refuses anyone but an administrator"
+    ),
     "app/services/host_files.py:HostFileReader.remove_leftovers": (
         "removes helper containers that an earlier read left behind, within the audited "
         "operation that reads the files"

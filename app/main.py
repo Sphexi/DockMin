@@ -161,6 +161,7 @@ from app.web import (
     template_routes,
     token_routes,
     user_routes,
+    volume_export_routes,
     volume_routes,
 )
 from app.web.csrf import enforce_csrf
@@ -859,6 +860,7 @@ def build_app(options: AppOptions) -> FastAPI:
     app.include_router(swarm_stack_manage_routes.router)
     app.include_router(swarm_stack_routes.router)
     app.include_router(network_routes.router)
+    app.include_router(volume_export_routes.router)
     app.include_router(volume_routes.router)
     app.include_router(suggestion_routes.router)
     app.include_router(job_routes.router)

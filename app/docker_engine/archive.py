@@ -1,4 +1,4 @@
-"""Read one regular file out of a container through the Engine archive endpoint."""
+"""Read a file or stream a directory out of a container through the Engine archive endpoint."""
 
 import asyncio
 import base64
@@ -8,9 +8,9 @@ import json
 import posixpath
 import re
 import tarfile
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Final
 
 from app.docker_engine.engine_http import EngineHttp
@@ -21,11 +21,13 @@ STAT_HEADER: Final = "X-Docker-Container-Path-Stat"
 STAT_HEADER_MAX_CHARS: Final = 8192
 TAR_OVERHEAD_BYTES: Final = 64 * 1024
 ARCHIVE_SECONDS: Final = 120.0
+STALL_SECONDS: Final = 60.0
 PATH_MAX_BYTES: Final = 4096
 
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 _BAD_REQUEST: Final = 400
 _GO_MODE_SYMLINK: Final = 1 << 27
+_GO_MODE_DIR: Final = 1 << 31
 # Go's os.FileMode type bits: dir, symlink, named pipe, socket, device, char device, irregular.
 _GO_MODE_TYPE_MASK: Final = 0x8F280000
 _REGULAR_TYPES: Final = (tarfile.REGTYPE, tarfile.AREGTYPE)
@@ -53,6 +55,12 @@ class NotARegularFile(ArchiveError):
     """The path is a directory or another kind of file that is not regular."""
 
     code = "not_regular_file"
+
+
+class NotADirectory(ArchiveError):
+    """The path is not a directory."""
+
+    code = "not_directory"
 
 
 class FileTooLarge(ArchiveError):
@@ -154,6 +162,81 @@ async def read_archive(
         raise ArchiveMalformed(environment_id, "the path stat header was not checked")
     content = await asyncio.to_thread(_single_member, environment_id, b"".join(parts), name, limit)
     return ArchiveEntry(name=name, content=content)
+
+
+class DirectoryStream:
+    """The tar body of one directory, yielded as it arrives; `received` counts the bytes so far.
+
+    The first chunk has already been read when this is returned, so the path stat has been
+    checked. Closing the stream, or cancelling a read from it, closes the response.
+    """
+
+    def __init__(self, chunks: AsyncGenerator[bytes, None], first: bytes, name: str) -> None:
+        self._chunks = chunks
+        self._pending: bytes | None = first
+        self.name = name
+        self.received = 0
+
+    def __aiter__(self) -> "DirectoryStream":
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._pending is not None:
+            chunk, self._pending = self._pending, None
+        else:
+            chunk = await self._chunks.__anext__()
+        self.received += len(chunk)
+        return chunk
+
+    async def aclose(self) -> None:
+        """Close the response; safe to call after the last chunk or more than once."""
+        await self._chunks.aclose()
+
+
+async def open_directory(http: EngineHttp, container_id: str, path: str) -> DirectoryStream:
+    """Start streaming the directory at `path`, refusing anything that is not a directory.
+
+    There is no size limit and no total time limit: the read ends when the Engine ends it, and
+    fails when no byte arrives for `STALL_SECONDS`. ArchiveError subclasses for a missing or
+    non-directory path and for a stream with no body.
+    """
+    environment_id = http.environment_id
+    if _CONTAINER_ID.fullmatch(container_id) is None:
+        raise EngineError(environment_id, "archive reads need a full container id")
+    _requested_name(environment_id, path)
+    stats: list[PathStat] = []
+
+    def check_stat(headers: Mapping[str, str]) -> None:
+        stats.append(_checked_directory(environment_id, headers.get(STAT_HEADER)))
+
+    chunks = http.stream_bytes(
+        "GET",
+        f"/containers/{container_id}/archive",
+        params={"path": path},
+        timeouts=replace(Timeouts.standard(), read=STALL_SECONDS),
+        on_headers=check_stat,
+    )
+    try:
+        first = await chunks.__anext__()
+    except StopAsyncIteration:
+        raise ArchiveMalformed(environment_id, "the archive has no body") from None
+    except NotFound:
+        raise FileMissing(environment_id, "the path does not exist") from None
+    except EngineError as error:
+        if error.status_code == _BAD_REQUEST:
+            raise FileMissing(environment_id, "the path does not exist") from None
+        raise
+    except BaseException:
+        await chunks.aclose()
+        raise
+    return DirectoryStream(chunks, first, stats[0].name)
+
+
+def _checked_directory(environment_id: int, header: str | None) -> PathStat:
+    stat = parse_stat_header(environment_id, header)
+    if not stat.mode & _GO_MODE_DIR or stat.mode & _GO_MODE_SYMLINK or stat.link_target:
+        raise NotADirectory(environment_id, "the path is not a directory")
+    return stat
 
 
 def _requested_name(environment_id: int, path: str) -> str:

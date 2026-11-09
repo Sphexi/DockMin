@@ -70,12 +70,18 @@ class Stream:
     """A body delivered one chunk per pull; `delivered` counts the chunks handed over so far."""
 
     def __init__(
-        self, chunks: Iterable[bytes], ending: Ending = Ending.COMPLETE, status: int = 200
+        self,
+        chunks: Iterable[bytes],
+        ending: Ending = Ending.COMPLETE,
+        status: int = 200,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self.chunks = tuple(chunks)
         self.ending = ending
         self.status = status
+        self.headers = dict(headers or {})
         self.delivered = 0
+        self.closed = 0
 
 
 type Behaviour = Reply | Disconnect | Stall | Refuse | Stream
@@ -229,7 +235,10 @@ class FakeEngineTransport(httpx.AsyncBaseTransport):
                 stream = engine.take(request.method, path)
                 assert isinstance(stream, Stream)
                 return httpx.Response(
-                    stream.status, stream=_ChunkStream(stream, self._closing), request=request
+                    stream.status,
+                    headers=stream.headers,
+                    stream=_ChunkStream(stream, self._closing),
+                    request=request,
                 )
             case _:
                 return await self._through_asgi(request)
@@ -272,7 +281,8 @@ class _ChunkStream(httpx.AsyncByteStream):
                 raise httpx.ReadError("connection closed")
 
     async def aclose(self) -> None:
-        """Release nothing; the stream holds no resources."""
+        """Count the close, so a test can tell the response was released."""
+        self._stream.closed += 1
 
 
 async def _respond(engine: FakeEngine, method: str, target: str) -> bytes:

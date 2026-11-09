@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 - A `websocket_connection` access line for each WebSocket connection, written with `DOCKMIN_ACCESS_LOG` on: [Access log](https://github.com/Sphexi/DockMin/wiki/Reference-Deployment#access-log).
 - Access lines for refused requests and refused WebSocket handshakes of the redirect listener, with a `listener` field: [Redirect listener](https://github.com/Sphexi/DockMin/wiki/Reference-Deployment#redirect-listener).
 - Links to the Swarm config, Swarm secret and notification channel pages from activity targets, and `Deleted` marks on the event page for those targets and for backups: [Deleted targets](https://github.com/Sphexi/DockMin/wiki/Administration-Activity#deleted-targets).
+- Volume export: an administrator downloads one `local` volume as a `tar.gz` archive of its files with a `manifest.json` (`format_version` 1) and a `skipped.json`, read through a helper container that is never started and is removed when the export ends, with `volume_export_started` and `volume_exported` activity rows: [Export](https://github.com/Sphexi/DockMin/wiki/Usage-Volumes#export).
 
 ### Changed
 

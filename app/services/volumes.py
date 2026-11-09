@@ -658,6 +658,8 @@ class VolumeQueryService:
             can_remove=writable,
             can_manage_access=actor.is_administrator,
             protected=self._self_identity().protects_volume(environment_id, volume.name),
+            can_export=actor.is_administrator
+            and not self._self_identity().protects_volume(environment_id, volume.name),
         )
 
     async def access_panel(self, actor: Principal, environment_id: int, name: str) -> AccessPanel:
