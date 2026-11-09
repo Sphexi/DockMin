@@ -1,5 +1,6 @@
 """Builds the manifest and the small members of a stack or container export from a description."""
 
+import base64
 import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -26,11 +27,21 @@ from app.services.export_manifest import (
     StackSection,
     VariableEntry,
     VolumeSection,
+    authenticated_bytes,
     manifest_bytes,
     sealed_name,
 )
-from app.services.export_sealing import DEFAULT_COST, SealCost, new_archive_id, seal
+from app.services.export_sealing import (
+    DEFAULT_COST,
+    MAC_BYTES,
+    SealCost,
+    SealedValues,
+    new_archive_id,
+    seal,
+)
 from app.services.volume_manifest import VolumeManifest
+
+_NO_MAC = base64.b64encode(bytes(MAC_BYTES)).decode("ascii")
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,9 +136,10 @@ def prepare_export(
 ) -> PreparedExport:
     """Build the manifest and documents, sealing secret values when a passphrase is given.
 
-    Secret values are sealed under `passphrase`, or left out when it is None. Blocking and
-    memory-hungry when it seals: run it with `asyncio.to_thread`. ValidationFailed for a
-    passphrase outside the length bounds; ValueError when the description breaks a manifest rule.
+    Secret values are sealed under `passphrase`, and the manifest then carries a MAC over all of
+    it; they are left out when it is None. Blocking and memory-hungry when it seals: run it with
+    `asyncio.to_thread`. ValidationFailed for a passphrase outside the length bounds; ValueError
+    when the description breaks a manifest rule.
     """
     archive_id = new_archive_id()
     secrets: dict[str, bytes] = {}
@@ -138,30 +150,37 @@ def prepare_export(
         container = _container_section(description, secrets)
     else:
         stack = _stack_section(description, secrets, documents)
+    mode: SecretsMode = "none" if not secrets else "omitted" if passphrase is None else "sealed"
+    volumes = [
+        VolumeSection(prefix=f"{VOLUMES_DIRECTORY}/{index}", manifest=volume)
+        for index, volume in enumerate(description.volumes)
+    ]
+
+    def assemble(sealed: SealedValues | None) -> ExportManifest:
+        return ExportManifest(
+            format_version=FORMAT_VERSION,
+            kind=description.kind,
+            archive_id=archive_id,
+            exported_at=description.exported_at,
+            instance_version=description.instance_version,
+            name=description.name,
+            description=description.description,
+            secrets=mode,
+            sealed=sealed,
+            stack=stack,
+            container=container,
+            images=list(description.images),
+            volumes=volumes,
+            not_exported_fields=list(description.not_exported_fields),
+        )
+
+    def authenticate(unauthenticated: SealedValues) -> bytes:
+        return authenticated_bytes(assemble(unauthenticated.model_copy(update={"mac": _NO_MAC})))
+
     sealed = None
-    if secrets and passphrase is not None:
-        sealed = seal(secrets, passphrase, archive_id, cost=cost)
-    mode: SecretsMode = "none" if not secrets else "omitted" if sealed is None else "sealed"
-    manifest = ExportManifest(
-        format_version=FORMAT_VERSION,
-        kind=description.kind,
-        archive_id=archive_id,
-        exported_at=description.exported_at,
-        instance_version=description.instance_version,
-        name=description.name,
-        description=description.description,
-        secrets=mode,
-        sealed=sealed,
-        stack=stack,
-        container=container,
-        images=list(description.images),
-        volumes=[
-            VolumeSection(prefix=f"{VOLUMES_DIRECTORY}/{index}", manifest=volume)
-            for index, volume in enumerate(description.volumes)
-        ],
-        not_exported_fields=list(description.not_exported_fields),
-    )
-    return PreparedExport(manifest, tuple(documents))
+    if mode == "sealed" and passphrase is not None:
+        sealed = seal(secrets, passphrase, archive_id, cost=cost, authenticate=authenticate)
+    return PreparedExport(assemble(sealed), tuple(documents))
 
 
 def _stack_section(

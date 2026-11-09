@@ -41,14 +41,14 @@
 </p>
 {% endmacro %}
 
-{% macro unmanaged_section(projects, unavailable, environment_id, dismissed_hidden=0, show_dismissed=false) %}
+{% macro unmanaged_section(projects, unavailable, environment_id, dismissed_hidden=0, show_dismissed=false, sort=none, direction="asc") %}
 {% set list_href = route_path("environment_stack_list", environment_id=environment_id) %}
 <section id="stacks-unmanaged" class="section" aria-labelledby="unmanaged-heading">
   <h2 id="unmanaged-heading">Compose projects not managed here</h2>
   {% if unavailable %}
   <p class="field__help">The Compose projects on the host could not be read.</p>
   {% else %}
-  {{ dismissed_line(dismissed_hidden, show_dismissed, list_href) }}
+  {{ dismissed_line(dismissed_hidden, show_dismissed, list_href, sort, direction) }}
   {% if projects %}
   <p class="field__help">These projects run on the host without a stack here. Adopting one stores the file you paste for it and puts it under your control. It changes nothing on the host.</p>
   <div class="data-table__scroll" role="region" aria-label="Unmanaged Compose projects" tabindex="0">
@@ -119,7 +119,7 @@
 {% else %}
 {{ stacks_table(rows, columns, pager, filtered, environment_id, can_create) }}
 {% if is_administrator and not filtered and pager.is_first_page %}
-{{ unmanaged_section(unmanaged, unmanaged_unavailable, environment_id, dismissed_hidden, show_dismissed) }}
+{{ unmanaged_section(unmanaged, unmanaged_unavailable, environment_id, dismissed_hidden, show_dismissed, pager.sort, pager.direction) }}
 {% endif %}
 {% endif %}
 {% endmacro %}

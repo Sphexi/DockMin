@@ -4,7 +4,7 @@ import gzip
 import hashlib
 import tarfile
 import zlib
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +12,11 @@ from typing import Final
 
 from pydantic import ValidationError
 
+from app.services.build_context_archive import (
+    ContextRefused,
+    InspectedContext,
+    inspect_context,
+)
 from app.services.export_manifest import (
     MANIFEST_MAX_BYTES,
     MANIFEST_NAME,
@@ -41,9 +46,11 @@ from app.services.volume_manifest import SKIPPED_NAME, VolumeManifest
 
 __all__ = [
     "MAX_UPLOAD_BYTES",
+    "ContextFacts",
     "StackArchiveRefused",
     "StackArchiveSummary",
     "StackLimits",
+    "VolumeFeed",
     "VolumeSummary",
     "inspect_container_archive",
     "inspect_stack_archive",
@@ -108,6 +115,15 @@ class VolumeSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ContextFacts:
+    """What inspecting a build context found, as opposed to what the manifest declares."""
+
+    member_count: int
+    extracted_size: int
+    compressed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class StackArchiveSummary:
     """What a validated stack archive holds. File contents and the stack file are kept here."""
 
@@ -115,6 +131,7 @@ class StackArchiveSummary:
     compose_text: str = field(repr=False)
     files: dict[str, str] = field(repr=False)
     volumes: tuple[VolumeSummary, ...]
+    contexts: Mapping[str, ContextFacts] = field(default_factory=dict)
 
     @property
     def data_bytes(self) -> int:
@@ -217,12 +234,27 @@ def _decoded(data: bytes, name: str) -> str:
         raise StackArchiveRefused("A document of the archive is not UTF-8 text.", name) from None
 
 
+def _inspect_whole(data: bytes, name: str) -> InspectedContext:
+    try:
+        return inspect_context(data)
+    except ContextRefused as refused:
+        raise StackArchiveRefused(
+            f"A build context of the archive is refused: {refused}", name
+        ) from None
+
+
+def _inspected(data: bytes, name: str) -> ContextFacts:
+    found = _inspect_whole(data, name)
+    return ContextFacts(found.member_count, found.extracted_size, found.compressed)
+
+
 def _read_documents(
     manifest: ExportManifest, entries: Iterator[ReadEntry]
-) -> tuple[str, dict[str, str], ReadEntry | None]:
+) -> tuple[str, dict[str, str], dict[str, ContextFacts], ReadEntry | None]:
     """Read the stack file and plain companion files; check every declared document is there.
 
-    Returns the first entry below `volumes/`, which ended the documents, or None.
+    Each build context is inspected as an upload would be. Returns the first entry below
+    `volumes/`, which ended the documents, or None.
     """
     declared = manifest.documents()
     if manifest.stack is None and manifest.kind != "container":
@@ -230,6 +262,7 @@ def _read_documents(
     seen: set[str] = set()
     compose = ""
     files: dict[str, str] = {}
+    contexts: dict[str, ContextFacts] = {}
     pending: ReadEntry | None = None
     for entry in entries:
         name = entry.info.name
@@ -241,7 +274,7 @@ def _read_documents(
             raise StackArchiveRefused("The archive's members do not match its manifest.", name)
         seen.add(name)
         if isinstance(ref, ContextEntry):
-            _document_digest(entry, ref)
+            contexts[ref.name] = _inspected(_document_digest(entry, ref), name)
             continue
         text = _decoded(_document_digest(entry, ref), name)
         if isinstance(ref, CompanionFile):
@@ -250,7 +283,7 @@ def _read_documents(
             compose = text
     if seen != declared.keys():
         raise StackArchiveRefused("The archive's members do not match its manifest.")
-    return compose, files, pending
+    return compose, files, contexts, pending
 
 
 def _split(name: str) -> tuple[str, str]:
@@ -377,9 +410,9 @@ def inspect_stack_archive(path: Path, limits: StackLimits | None = None) -> Stac
     bounds = limits or StackLimits()
     with closing(_entries(path, bounds)) as entries:
         manifest = _read_manifest(entries)
-        compose, files, pending = _read_documents(manifest, entries)
+        compose, files, contexts, pending = _read_documents(manifest, entries)
         volumes = _check_volumes(manifest, pending, entries, bounds)
-    return StackArchiveSummary(manifest, compose, files, volumes)
+    return StackArchiveSummary(manifest, compose, files, volumes, contexts)
 
 
 def inspect_container_archive(path: Path, limits: StackLimits | None = None) -> StackArchiveSummary:
@@ -393,20 +426,20 @@ def inspect_container_archive(path: Path, limits: StackLimits | None = None) -> 
         manifest = _read_manifest(entries)
         if manifest.kind != "container":
             raise StackArchiveRefused("The archive holds a stack, not a container.")
-        _, _, pending = _read_documents(manifest, entries)
+        _, _, _, pending = _read_documents(manifest, entries)
         volumes = _check_volumes(manifest, pending, entries, bounds)
     return StackArchiveSummary(manifest, "", {}, volumes)
 
 
 def read_contexts(
     path: Path, manifest: ExportManifest, limits: StackLimits | None = None
-) -> dict[str, bytes]:
-    """Return the build contexts as uploaded, by name; each is checked against its digest."""
+) -> dict[str, InspectedContext]:
+    """Return the build contexts as uploaded, by name; each is digest-checked and inspected."""
     bounds = limits or StackLimits()
     if manifest.stack is None or not manifest.stack.contexts:
         return {}
     wanted = {context.member: context for context in manifest.stack.contexts}
-    found: dict[str, bytes] = {}
+    found: dict[str, InspectedContext] = {}
     with closing(_entries(path, bounds)) as entries:
         _read_manifest(entries)
         for entry in entries:
@@ -415,19 +448,67 @@ def read_contexts(
                 break
             context = wanted.get(name)
             if context is not None:
-                found[context.name] = _document_digest(entry, context)
+                found[context.name] = _inspect_whole(_document_digest(entry, context), name)
     if len(found) != len(wanted):
         raise StackArchiveRefused("The archive's members do not match its manifest.")
     return found
 
 
-def _volume_members(path: Path, prefix: str, limits: StackLimits) -> Iterator[Member]:
-    index = prefix.rpartition("/")[2]
-    checker = VolumeChecker(limits.volumes)
-    with closing(_entries(path, limits)) as entries:
-        for entry in entries:
+def _ordinal(prefix: str) -> int:
+    try:
+        return int(prefix.rpartition("/")[2])
+    except ValueError:
+        raise StackArchiveRefused("The archive's members do not match its manifest.") from None
+
+
+class VolumeFeed:
+    """One read of the archive that serves each volume's data once, in the archive's order.
+
+    The archive is decompressed once however many volumes are served. A volume asked for after a
+    later one has been served is refused, as is a volume asked for twice.
+    """
+
+    def __init__(self, path: Path, limits: StackLimits | None = None) -> None:
+        self._limits = limits or StackLimits()
+        self._entries = _entries(path, self._limits)
+        self._pending: ReadEntry | None = None
+        self._served = -1
+
+    def tar(self, prefix: str) -> Generator[bytes, None, None]:
+        """Return the volume's data as a tar rooted at the volume, checked as it is read.
+
+        Setuid and setgid bits are cleared and owner ids kept, as for a volume import. The volume's
+        own root entry is not written. StackArchiveRefused if the file no longer passes validation
+        or the volume is out of order.
+        """
+        ordinal = _ordinal(prefix)
+        if ordinal <= self._served:
+            raise StackArchiveRefused("A volume of the archive can be read once, in order.", prefix)
+        self._served = ordinal
+        return _refusing(rewrite_members(self._members(prefix, ordinal)), prefix.rpartition("/")[2])
+
+    def close(self) -> None:
+        """Release the archive file."""
+        self._entries.close()
+
+    def _next(self) -> ReadEntry | None:
+        if self._pending is not None:
+            entry, self._pending = self._pending, None
+            return entry
+        return next(self._entries, None)
+
+    def _members(self, prefix: str, ordinal: int) -> Iterator[Member]:
+        index = prefix.rpartition("/")[2]
+        checker = VolumeChecker(self._limits.volumes)
+        while (entry := self._next()) is not None:
             name = entry.info.name
-            if not name.startswith(f"{prefix}/"):
+            if not name.startswith(_VOLUMES_PREFIX):
+                continue
+            owner = _split(name)[0]
+            if owner != prefix:
+                if _ordinal(owner) > ordinal:
+                    self._pending = entry
+                    return
                 continue
             rest = name[len(prefix) + 1 :]
             if rest in (VOLUME_MANIFEST_NAME, SKIPPED_NAME):
@@ -441,13 +522,19 @@ def _volume_members(path: Path, prefix: str, limits: StackLimits) -> Iterator[Me
 def stack_volume_tar(
     path: Path, prefix: str, limits: StackLimits | None = None
 ) -> Generator[bytes, None, None]:
-    """Yield one volume's data as a tar rooted at the volume, checking it again as it goes.
+    """Yield one volume's data as a tar rooted at the volume; the read ends after the volume."""
+    feed = VolumeFeed(path, limits)
+    return _closing(feed.tar(prefix), feed)
 
-    Setuid and setgid bits are cleared and owner ids kept, as for a volume import. The volume's
-    own root entry is not written. StackArchiveRefused if the file no longer passes validation.
-    """
-    members = _volume_members(path, prefix, limits or StackLimits())
-    return _refusing(rewrite_members(members), prefix.rpartition("/")[2])
+
+def _closing(
+    chunks: Generator[bytes, None, None], feed: VolumeFeed
+) -> Generator[bytes, None, None]:
+    try:
+        yield from chunks
+    finally:
+        chunks.close()
+        feed.close()
 
 
 def _refusing(chunks: Generator[bytes, None, None], index: str) -> Generator[bytes, None, None]:

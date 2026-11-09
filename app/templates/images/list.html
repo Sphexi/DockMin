@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "environments/_parts.html" import environment_badge with context %}
 {% from "images/_tables.html" import images_results, results_summary with context %}
+{% from "partials/check_status.html" import check_status %}
 {% from "partials/form_field.html" import form_field %}
 {% from "partials/sort_fields.html" import sort_fields %}
 {% from "partials/list_bar.html" import list_bar %}
@@ -80,4 +81,5 @@
 <div id="images-results">
   {{ images_results(rows, columns, pager, total, filtered, environment_id, errors, failure, retry_href, checkable, orphans, can_create, can_remove, max_batch=max_batch) }}
 </div>
+{{ check_status("update-results-status", "") }}
 {% endblock %}

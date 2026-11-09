@@ -17,7 +17,6 @@ __all__ = [
     "CAPACITY",
     "LIFETIME_SECONDS",
     "SPOOL_DIRECTORY",
-    "UNSEAL_FAILURE_LIMIT",
     "HeldStack",
     "StackImportStore",
 ]
@@ -25,7 +24,6 @@ __all__ = [
 SPOOL_DIRECTORY: Final = "stack-import"
 LIFETIME_SECONDS: Final = 1800.0
 CAPACITY: Final = 4
-UNSEAL_FAILURE_LIMIT: Final = 5
 _ID_BYTES: Final = 16
 
 
@@ -52,11 +50,10 @@ class HeldStack:
 
 
 class StackImportStore:
-    """In-memory holds on spooled stack uploads: one per user, four in all, 30 minutes each.
+    """In-memory holds on spooled uploads: one per user and kind, four in all, 30 minutes each.
 
-    A hold is dropped, and its file removed, on a newer upload by the same user, on discard and
-    on expiry; a hold whose import has begun does not expire. Failed attempts to open a hold's
-    sealed values are counted per session for the life of the process.
+    A hold is dropped, and its file removed, on a newer upload of the same kind by the same user,
+    on discard and on expiry; a hold whose import has begun does not expire.
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
@@ -64,7 +61,6 @@ class StackImportStore:
         self._held: OrderedDict[str, HeldStack] = OrderedDict()
         self._timers: set[asyncio.TimerHandle] = set()
         self._sweeps: set[asyncio.Future[None]] = set()
-        self._failures: dict[int, int] = {}
 
     @staticmethod
     def new_id() -> str:
@@ -82,7 +78,7 @@ class StackImportStore:
         upload: SpooledUpload,
         summary: StackArchiveSummary,
     ) -> HeldStack:
-        """Hold a validated upload, dropping the user's earlier one and the oldest past four."""
+        """Hold a validated upload; the same user's earlier one of its kind and extras go."""
         doomed = self._expire()
         held = HeldStack(
             upload_id,
@@ -97,7 +93,7 @@ class StackImportStore:
             self._clock() + LIFETIME_SECONDS,
         )
         for token, other in list(self._held.items()):
-            if other.user_id == user_id and not other.importing:
+            if (other.user_id, other.kind) == (user_id, kind) and not other.importing:
                 doomed.append(self._held.pop(token))
         self._held[upload_id] = held
         while len(self._held) > CAPACITY:
@@ -129,16 +125,6 @@ class StackImportStore:
         if held is not None:
             held.opened = None
             await self._remove([held])
-
-    def failures(self, session_id: int) -> int:
-        """Return how many attempts to open sealed values have failed in this session."""
-        return self._failures.get(session_id, 0)
-
-    def note_failure(self, session_id: int) -> int:
-        """Count a failed attempt and return how many the session has left."""
-        count = self._failures.get(session_id, 0) + 1
-        self._failures[session_id] = count
-        return max(0, UNSEAL_FAILURE_LIMIT - count)
 
     async def sweep(self) -> None:
         """Remove what has expired."""

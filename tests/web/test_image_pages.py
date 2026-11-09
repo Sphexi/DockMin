@@ -160,6 +160,27 @@ async def test_each_filter_narrows_the_list_and_a_bad_filter_says_what_to_change
     )
 
 
+UPDATE_STATUS = 'id="update-results-status"'
+
+
+async def test_the_update_status_target_stays_on_the_page_and_no_fragment_carries_it_out_of_band(
+    admin_client: AsyncClient, world: World, daemon: ContainerEngine
+) -> None:
+    alpha = await make_set(admin_client, world, "alpha", address="ghcr.io")
+    await bind(world, alpha, GHCR_REFERENCE)
+    detail_path = image_path(world, image_id(GHCR))
+
+    page = await admin_client.get(images_path(world))
+    listing = await admin_client.get(images_path(world), headers=HTMX)
+    detail_page = await admin_client.get(detail_path)
+    detail_tab = await admin_client.get(detail_path, headers=HTMX)
+
+    assert page.text.count(UPDATE_STATUS) == 1
+    assert detail_page.text.count(UPDATE_STATUS) == 1
+    assert UPDATE_STATUS not in listing.text
+    assert UPDATE_STATUS not in detail_tab.text
+
+
 async def test_a_standard_user_sees_no_removal_or_prune_and_cannot_see_hidden_environments(
     admin_client: AsyncClient,
     standard_client: AsyncClient,

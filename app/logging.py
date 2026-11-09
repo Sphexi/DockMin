@@ -12,7 +12,7 @@ from collections.abc import Collection, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from typing import Any, TextIO
+from typing import Any, Final, TextIO
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -95,7 +95,8 @@ EXTRA_SENSITIVE_NAMES = frozenset(
 # Traefik keeps htpasswd credentials under these label segments.
 SENSITIVE_LABEL_SEGMENTS = frozenset({"BASICAUTH", "DIGESTAUTH"})
 
-_ACCEPTED_REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+REQUEST_ID_RULE: Final = "1 to 64 letters, digits, dots, hyphens or underscores"
+REQUEST_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 # Lookbehind and bound confine each attempt to one token; without them every offset inside a
 # long token retries the whole run, which is quadratic.
@@ -349,7 +350,7 @@ class RequestIdMiddleware:
             return
 
         incoming = dict(scope["headers"]).get(REQUEST_ID_HEADER.encode(), b"").decode("latin-1")
-        request_id = incoming if _ACCEPTED_REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex
+        request_id = incoming if REQUEST_ID_PATTERN.fullmatch(incoming) else uuid.uuid4().hex
         # Outer error middleware renders unhandled-exception responses after this
         # middleware has unwound, so the id is also kept on the shared scope state.
         scope.setdefault("state", {})["request_id"] = request_id

@@ -33,6 +33,7 @@ async def test_a_run_bound_to_the_digest_it_was_shown_starts(
     assert run == {"trigger": "manual", "outcome": "success"}
 
 
+@pytest.mark.usefixtures("no_status_transition_events")
 async def test_a_run_is_refused_and_recorded_when_the_rule_changed_after_the_review(
     started_app: FastAPI, seeded: World
 ) -> None:

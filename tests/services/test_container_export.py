@@ -16,7 +16,7 @@ from app.services.container_export import (
     ContainerExportService,
     ContainerExportStream,
 )
-from app.services.export_sealing import open_sealed
+from app.services.export_manifest import open_manifest_secrets
 from app.services.volume_export import ExportSlots
 from app.services.volume_export_writer import StreamMalformed
 from tests.access_support import ADMIN, ENV_A, STANDARD
@@ -53,6 +53,8 @@ from tests.volume_export_support import (
 
 WRONG_LENGTH = "short"
 STALE_DIGEST = "0" * 64
+STARTED = "container_export_started"
+FINISHED = "container_exported"
 
 
 @pytest.fixture
@@ -142,7 +144,7 @@ async def test_a_marked_value_opens_under_the_passphrase_and_an_unmarked_one_is_
 
     assert manifest.container is not None and manifest.sealed is not None
     position = [e.name for e in manifest.container.environment].index(SECRET_NAME)
-    opened = open_sealed(manifest.sealed, PASSPHRASE, manifest.archive_id)
+    opened = open_manifest_secrets(manifest, PASSPHRASE)
     assert opened == {f"environment:{position}": SECRET_VALUE.encode()}
     assert manifest.volumes == []
 
@@ -156,7 +158,7 @@ async def test_a_marked_value_is_left_out_when_no_passphrase_is_given(
     manifest = manifest_of(members)
     assert manifest.secrets == "omitted" and manifest.sealed is None
     assert SECRET_VALUE not in archive_text(members) and PLAIN_VALUE in archive_text(members)
-    (finished,) = await rows_of(rig.db, "container_exported")
+    (finished,) = await rows_of(rig.db, FINISHED)
     assert finished["detail"]["secrets"] == "omitted"
 
 
@@ -179,9 +181,13 @@ async def test_no_secret_value_or_passphrase_reaches_the_archive_a_log_line_or_a
         logged_text(caplog),
         json.dumps(host.bodies()),
     ]
-    assert [r["detail"].get("reason") for r in await rows_of(rig.db, "container_exported")] == [
+    assert [r["detail"].get("reason") for r in await rows_of(rig.db, STARTED)] == [
         None,
         "ValidationFailed",
+        None,
+    ]
+    assert [r["detail"].get("reason") for r in await rows_of(rig.db, FINISHED)] == [
+        None,
         "malformed_stream",
     ]
     assert PLAIN_VALUE in seen[0]
@@ -190,12 +196,31 @@ async def test_no_secret_value_or_passphrase_reaches_the_archive_a_log_line_or_a
     assert NETWORK_PASSWORD not in seen[0] and host.helpers() == []
 
 
+async def test_the_started_row_is_written_when_the_stream_opens_before_any_byte_is_read(
+    rig: ContainerRig, host: VolumeEngine
+) -> None:
+    stream = await begin(exporter(rig))
+
+    (started,) = await rows_of(rig.db, STARTED)
+    assert await rows_of(rig.db, FINISHED) == []
+    assert (started["result"], started["target_type"], started["target_id"]) == (
+        "success",
+        "container",
+        SOURCE,
+    )
+    detail = started["detail"]
+    assert (detail["secrets"], detail["format_version"], detail["volumes"]) == ("sealed", 1, 1)
+    assert "completed" not in detail and "bytes" not in detail
+    await drain(stream)
+    assert len(await rows_of(rig.db, FINISHED)) == 1
+
+
 async def test_the_finished_row_names_counts_and_the_secrets_mode_and_no_values(
     rig: ContainerRig, host: VolumeEngine
 ) -> None:
     archive = await drain(await begin(exporter(rig)))
 
-    (row,) = await rows_of(rig.db, "container_exported")
+    (row,) = await rows_of(rig.db, FINISHED)
     assert (row["result"], row["target_type"], row["target_id"]) == ("success", "container", SOURCE)
     detail = row["detail"]
     assert (detail["secrets"], detail["format_version"], detail["secret_values"]) == (
@@ -214,8 +239,9 @@ async def test_a_container_that_changed_since_the_review_is_refused_before_a_hel
     with pytest.raises(ContainerChangedSinceReview):
         await begin(exporter(rig), digest=STALE_DIGEST)
 
-    (row,) = await rows_of(rig.db, "container_exported")
+    (row,) = await rows_of(rig.db, STARTED)
     assert (row["result"], row["detail"]["reason"]) == ("failure", "changed_since_review")
+    assert await rows_of(rig.db, FINISHED) == []
     assert "create" not in host.verbs()
 
 
@@ -230,7 +256,7 @@ async def test_dockmins_own_container_is_refused_by_the_confirmation_and_the_exp
     with pytest.raises(SelfProtected):
         await service.export(ADMIN, ENV_A, SELF_ID, STALE_DIGEST, None, (), ())
 
-    (row,) = await rows_of(rig.db, "container_exported")
+    (row,) = await rows_of(rig.db, STARTED)
     assert row["detail"]["reason"] == "self_protected" and "create" not in host.verbs()
 
 
@@ -244,7 +270,7 @@ async def test_every_export_is_refused_while_dockmins_own_mounts_are_unknown(
     with pytest.raises(SelfProtected):
         await service.export(ADMIN, ENV_A, SOURCE, STALE_DIGEST, None, (), ())
 
-    (row,) = await rows_of(rig.db, "container_exported")
+    (row,) = await rows_of(rig.db, STARTED)
     assert row["detail"]["reason"] == "self_protected" and "create" not in host.verbs()
 
 
@@ -258,7 +284,7 @@ async def test_a_standard_user_is_refused_without_a_row_or_a_helper(
     with pytest.raises(PermissionDenied):
         await service.export(STANDARD, ENV_A, SOURCE, STALE_DIGEST, None, (), ())
 
-    assert await rows_of(rig.db, "container_exported") == []
+    assert await rows_of(rig.db, STARTED) == [] and await rows_of(rig.db, FINISHED) == []
     assert "create" not in host.verbs()
 
 
@@ -339,7 +365,7 @@ async def test_a_second_export_on_the_environment_is_refused_until_the_first_end
     await drain(first)
     await drain(await begin(service, volumes=()))
 
-    busy = [r for r in await rows_of(rig.db, "container_exported") if r["result"] == "failure"]
+    busy = [r for r in await rows_of(rig.db, STARTED) if r["result"] == "failure"]
     assert [r["detail"]["reason"] for r in busy] == ["export_busy"]
 
 
@@ -355,6 +381,6 @@ async def test_a_client_that_leaves_part_way_ends_the_export_and_releases_what_i
     await stream.aclose()
     await stream.aclose()
 
-    (finished,) = await rows_of(rig.db, "container_exported")
+    (finished,) = await rows_of(rig.db, FINISHED)
     assert (finished["result"], finished["detail"]["reason"]) == ("failure", "interrupted")
     assert host.helpers() == [] and slots.acquire(ENV_A) is not None

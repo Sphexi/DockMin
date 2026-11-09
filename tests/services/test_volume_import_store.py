@@ -12,6 +12,7 @@ from app.services.volume_import_store import (
     CAPACITY,
     LIFETIME_SECONDS,
     SPOOL_DIRECTORY,
+    ImportStoreFull,
     SpooledUpload,
     SpoolFailure,
     VolumeImportStore,
@@ -235,12 +236,50 @@ async def test_a_newer_upload_by_the_same_user_replaces_the_earlier_one(
     await store.aclose()
 
 
-async def test_holds_past_the_capacity_drop_the_oldest_and_remove_its_file(
+async def test_a_new_hold_is_refused_when_other_users_fill_the_store_and_theirs_survive(
     tmp_path: Path, summary: ArchiveSummary
 ) -> None:
     store = VolumeImportStore(Clock())
     uploads = [await make_upload(tmp_path, f"u{index}") for index in range(CAPACITY + 1)]
-    for index, upload in enumerate(uploads):
+    for index, upload in enumerate(uploads[:CAPACITY]):
+        await store.hold(
+            f"{index:032x}",
+            user_id=index,
+            session_id=SESSION,
+            environment_id=ENVIRONMENT,
+            upload=upload,
+            summary=summary,
+        )
+    newcomer = CAPACITY
+
+    assert not await store.has_room(newcomer)
+    with pytest.raises(ImportStoreFull):
+        await store.hold(
+            f"{newcomer:032x}",
+            user_id=newcomer,
+            session_id=SESSION,
+            environment_id=ENVIRONMENT,
+            upload=uploads[newcomer],
+            summary=summary,
+        )
+
+    survivors = [
+        await store.get(
+            f"{index:032x}", user_id=index, session_id=SESSION, environment_id=ENVIRONMENT
+        )
+        for index in range(CAPACITY)
+    ]
+    assert all(upload.path.exists() for upload in uploads[:CAPACITY])
+    assert all(held is not None for held in survivors)
+    await store.aclose()
+
+
+async def test_a_full_store_still_takes_a_replacement_from_a_user_who_holds_one(
+    tmp_path: Path, summary: ArchiveSummary
+) -> None:
+    store = VolumeImportStore(Clock())
+    uploads = [await make_upload(tmp_path, f"u{index}") for index in range(CAPACITY + 1)]
+    for index, upload in enumerate(uploads[:CAPACITY]):
         await store.hold(
             f"{index:032x}",
             user_id=index,
@@ -250,8 +289,17 @@ async def test_holds_past_the_capacity_drop_the_oldest_and_remove_its_file(
             summary=summary,
         )
 
-    assert not uploads[0].path.exists()
-    assert all(upload.path.exists() for upload in uploads[1:])
+    assert await store.has_room(0)
+    await store.hold(
+        f"{CAPACITY:032x}",
+        user_id=0,
+        session_id=SESSION,
+        environment_id=ENVIRONMENT,
+        upload=uploads[CAPACITY],
+        summary=summary,
+    )
+
+    assert not uploads[0].path.exists() and uploads[CAPACITY].path.exists()
     await store.aclose()
     assert not any(upload.path.exists() for upload in uploads)
 

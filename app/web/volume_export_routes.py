@@ -170,6 +170,7 @@ async def run_export(
     actor: Administrator,
     environment_id: PathId,
     expected_created_at: Field = "",
+    helper_image: Field = "",
 ) -> Response:
     """Stream the reviewed volume as a gzip archive; administrators only."""
     detail_href = _detail_path(request, environment_id, volume_name)
@@ -177,7 +178,11 @@ async def run_export(
     try:
         service = await stack.enter_async_context(open_volume_export_service(request.app))
         stream = await service.start(
-            actor, environment_id, volume_name, expected_created_at=expected_created_at
+            actor,
+            environment_id,
+            volume_name,
+            expected_created_at=expected_created_at,
+            helper_image=helper_image,
         )
     except VolumeExportBusy as busy:
         await stack.aclose()

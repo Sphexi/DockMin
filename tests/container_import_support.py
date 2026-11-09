@@ -5,11 +5,13 @@ import io
 import json
 import tarfile
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.services.export_archive_writer import ExportArchiveStream
 from app.services.export_build import EnvironmentInput
 from app.services.export_manifest import ImageReference, IpamPoolEntry, NetworkEntry
+from tests.docker_engine.fake_engine import Reply
 from tests.export_archive_support import (
     FakeVolume,
     container_description,
@@ -50,11 +52,20 @@ BASE_FORM = {
 
 
 class ImportHost(ImportEngine):
-    """A daemon that holds the helper's image and accepts the tar written into a volume."""
+    """A daemon that holds the helper's image and accepts the tar written into a volume.
+
+    A volume made through the API is stamped with the time it was made, as Docker does.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.add_image(IMAGE, digests=(f"busybox@{DIGEST}",))
+
+    def _volume_create(self, document: dict[str, object]) -> Reply:
+        name = str(document["Name"])
+        if name not in self.volumes:
+            self.volume_created[name] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return super()._volume_create(document)
 
 
 def network_entry(name: str = NETWORK, **changes: object) -> NetworkEntry:

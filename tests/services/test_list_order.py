@@ -214,6 +214,34 @@ def test_a_cursor_whose_entry_has_gone_resumes_past_its_sort_value() -> None:
     assert idents(resumed.items) == [4, 5, 7]
 
 
+TIED = [Item("bravo", "x", 1, 1), Item("alpha", "x", 1, 2), Item("charlie", "x", 1, 3)]
+
+
+@pytest.mark.parametrize(
+    ("direction", "size", "gone", "expected"),
+    [("asc", 1, 2, [1, 3]), ("desc", 2, 1, [2])],
+)
+def test_a_cursor_whose_entry_has_gone_resumes_in_name_order_among_equal_sort_values(
+    direction: str, size: int, gone: int, expected: list[int]
+) -> None:
+    ordering = ordering_of("kind", direction)
+    cursor = ordering.window(TIED, None, size).next_cursor
+    remaining = [i for i in TIED if i.ident != gone]
+
+    resumed = ordering.window(remaining, ordering.position(cursor), PAGE_SIZE)
+
+    assert idents(resumed.items) == expected
+
+
+def test_an_unsorted_cursor_whose_value_reads_like_a_sort_tag_still_pages() -> None:
+    lookalike = Item("size.desc:5000/x", None, None, 9)
+    entries = [lookalike, *ITEMS]
+
+    pages = walk(ordering_of(None), entries, 1)
+
+    assert [i for page in pages for i in page] == ordering_of(None).ordered(entries)
+
+
 def test_a_cursor_minted_before_sorting_existed_pages_the_unsorted_list() -> None:
     old = encode_cursor(CursorPosition("beta", 1))
     ordering = ordering_of(None)

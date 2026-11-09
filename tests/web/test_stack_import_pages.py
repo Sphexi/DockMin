@@ -1,6 +1,7 @@
 """The stack import pages: upload, review, passphrase, import and the deployment that follows."""
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -357,3 +358,90 @@ async def test_an_invalid_name_is_shown_on_the_field_and_nothing_is_imported(
 
     assert checked.status_code == OK and 'value="Not A Name!"' in checked.text
     assert "aria-invalid" in checked.text and import_host.calls("POST", "/volumes/create") == []
+
+
+DEVICE_FILE = (
+    "services:\n  web:\n    image: nginx:1\n    volumes:\n      - data:/var/lib/data\n"
+    "volumes:\n  data:\n    driver_opts:\n      type: none\n      o: bind\n"
+    "      device: /mnt/data\n"
+)
+
+
+async def test_the_review_always_shows_the_stack_file_and_says_when_nothing_protects_the_archive(
+    admin_client: AsyncClient, world: World, import_host: StackImportEngine
+) -> None:
+    sealed = await admin_client.get(await reviewed(admin_client, world))
+    plain = await build_archive(passphrase=None, secrets=False)
+    unprotected = await admin_client.get(await reviewed(admin_client, world, plain))
+
+    assert "image: nginx:1" in sealed.text and "image: nginx:1" in unprotected.text
+    assert "no integrity protection" not in visible_text(sealed)
+    assert "no integrity protection" in visible_text(unprotected)
+
+
+async def test_a_collision_still_shows_the_archives_volumes_and_when_the_volume_plan_comes(
+    admin_client: AsyncClient, world: World, import_host: StackImportEngine
+) -> None:
+    import_host.add_volume(DATA_VOLUME)
+    review = await admin_client.get(await reviewed(admin_client, world))
+    text = visible_text(review)
+
+    assert "in the archive" in text and "1 volume" in text and "0 volumes" not in text
+    assert "The volume plan is shown once the stack name is free" in text
+    assert "The host paths are listed once the stack name above is free" in text
+
+
+async def test_a_volume_that_mounts_a_host_path_asks_for_its_own_confirmation_on_the_review(
+    admin_client: AsyncClient, world: World, import_host: StackImportEngine
+) -> None:
+    archive = await build_archive(text=DEVICE_FILE)
+    location = await reviewed(admin_client, world, archive)
+    await unlocked(admin_client, location)
+    review = await admin_client.get(location)
+    fields = import_fields(admin_client, review) | {
+        "path-0-source": "/mnt/data",
+        "path-0-choice": "keep",
+    }
+    found = re.search(r'name="mount-0-confirm" value="([0-9a-f]+)"', review.text)
+
+    refused = await admin_client.post(location, data=fields)
+    assert found is not None
+    confirmed = await admin_client.post(location, data=fields | {"mount-0-confirm": found[1]})
+
+    assert "type=none" in visible_text(review) and "device=/mnt/data" in visible_text(review)
+    assert refused.status_code == CONFLICT
+    assert "Confirm writing onto" in visible_text(refused)
+    assert confirmed.status_code == SEE_OTHER
+    assert import_host.volume_docs[DATA_VOLUME][1]["device"] == "/mnt/data"
+
+
+async def test_a_validation_failure_is_a_check_the_request_page_not_an_unavailable_host() -> None:
+    from app.auth.errors import ValidationFailed
+    from app.services.volume_views import VolumeNameInUse
+    from app.web.stack_import_routes import _failure_of
+
+    invalid = _failure_of(ValidationFailed({"secrets": "Not UTF-8."}), None, None)  # type: ignore[arg-type]
+    in_use = _failure_of(VolumeNameInUse(), None, None)  # type: ignore[arg-type]
+
+    assert (invalid.status, invalid.message) == (400, "Not UTF-8.")
+    assert in_use.status == CONFLICT and "already exists" in in_use.message
+
+
+async def test_a_review_that_cannot_be_made_for_a_validation_reason_answers_with_a_problem_page(
+    admin_client: AsyncClient,
+    world: World,
+    import_host: StackImportEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.auth.errors import ValidationFailed
+    from app.services.stack_import import StackImportService
+
+    location = await reviewed(admin_client, world)
+
+    async def refuse(self: StackImportService, *args: object, **kwargs: object) -> None:
+        raise ValidationFailed({"secrets": "A secret value is not UTF-8 text."})
+
+    monkeypatch.setattr(StackImportService, "review", refuse)
+    page = await admin_client.get(location)
+
+    assert page.status_code == BAD_REQUEST and "not UTF-8 text" in visible_text(page)

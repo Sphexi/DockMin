@@ -16,12 +16,7 @@ from app.auth.principal import Principal
 from app.db.engine import Database, Session, retry_busy
 from app.db.repositories.activity_event import DetailValue
 from app.db.repositories.clocked import Clock
-from app.db.repositories.pagination import (
-    MAX_PAGE_SIZE,
-    CursorPosition,
-    InvalidCursorError,
-    decode_cursor,
-)
+from app.db.repositories.pagination import MAX_PAGE_SIZE
 from app.docker_engine.client import EngineClient
 from app.docker_engine.errors import (
     Conflict,
@@ -69,7 +64,6 @@ __all__ = [
     "busy_view",
     "check_limit",
     "create_failure",
-    "decode_position",
     "describe_service_users",
     "describe_users",
     "failure_reason",
@@ -366,19 +360,6 @@ def describe_users(
 def row_id(text: str) -> int:
     """Return the integer a keyset cursor pairs with a sort value for the object `text`."""
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:ROW_ID_HEX_DIGITS], 16)
-
-
-def decode_position(cursor: str | None) -> CursorPosition | None:
-    """Decode a page cursor whose sort value is text; ValidationFailed when it is not."""
-    if cursor is None:
-        return None
-    try:
-        position = decode_cursor(cursor)
-    except InvalidCursorError:
-        raise ValidationFailed({"cursor": "The page link is not valid."}) from None
-    if not isinstance(position.sort_value, str):
-        raise ValidationFailed({"cursor": "The page link is not valid."})
-    return position
 
 
 def check_limit(limit: int) -> int:

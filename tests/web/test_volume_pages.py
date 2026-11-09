@@ -550,3 +550,15 @@ async def test_a_container_users_name_and_state_are_listed_on_the_volume_detail(
     page = await admin_client.get(volumes_path(world, "/seeded?tab=containers"))
 
     assert all(name in visible_text(page) for name in (USER, "extra", "job"))
+
+
+async def test_the_list_offers_import_even_when_the_volumes_cannot_be_read(
+    admin_client: AsyncClient, world: World, container_host: ContainerEngine
+) -> None:
+    container_host.route("GET", "/volumes", Refuse())
+
+    listing = await admin_client.get(volumes_path(world))
+
+    assert listing.status_code == UNAVAILABLE
+    assert f'href="{volumes_path(world, "/-/import")}"' in listing.text
+    assert "Prune volumes" not in listing.text

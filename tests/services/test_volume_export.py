@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import json
+import random
 import tarfile
 from collections.abc import Iterator, MutableMapping
 from contextlib import AsyncExitStack
@@ -24,14 +25,17 @@ from app.services.volume_export import (
 )
 from app.services.volume_export_writer import StreamMalformed
 from app.services.volume_views import VolumeChangedSinceReview
+from app.web.limits import SendIdleTimeoutMiddleware
 from app.web.volume_export_routes import _ExportResponse
 from tests.access_support import ADMIN, ENV_A, ENV_B, STANDARD
 from tests.archive_support import Member
 from tests.docker_engine.container_engine import VOLUME_CREATED
+from tests.docker_engine.fake_engine import error_reply
 from tests.object_support import add_container, rows_of, volume_mount
 from tests.self_support import SELF_VOLUME, Held, home_identity
 from tests.services.conftest import ContainerRig
 from tests.volume_export_support import (
+    MOUNT_POINT,
     NOTE,
     NOTE_FILE,
     VolumeEngine,
@@ -47,6 +51,9 @@ OTHER_CREATED_AT = "2024-06-01T00:00:00Z"
 RUNNING_NAME = "web"
 STOPPED_NAME = "old"
 KEY = ObjectKey(ENV_A, "volume", VOLUME)
+OTHER_IMAGE_ID = "sha256:" + "b" * 64
+UNUSABLE_IMAGE_ID = "sha256:" + "c" * 64
+STALL_SECONDS = 0.1
 
 
 @pytest.fixture
@@ -349,8 +356,8 @@ async def test_a_local_volume_with_a_cifs_password_exports_without_the_password_
     rows = json.dumps(await rows_of(rig.db))
     manifest = json.loads(unpack(archive)["manifest.json"][1])
     assert SENTINEL not in rows and SENTINEL not in json.dumps(host.bodies())
-    assert manifest["removed_option_keys"] == ["o.password"]
-    assert manifest["options"]["o"] == "username=u"
+    assert manifest["removed_option_keys"] == ["o"]
+    assert "o" not in manifest["options"] and manifest["options"]["type"] == "cifs"
     assert SENTINEL not in json.dumps(manifest)
 
 
@@ -468,3 +475,100 @@ async def test_a_response_that_never_started_still_releases_the_export(
         await response(scope, receive, send)
 
     assert host.helpers() == [] and slots.acquire(ENV_A) is not None
+
+
+async def test_a_status_from_docker_when_the_helper_is_created_is_a_refusal_not_an_unreachable_host(
+    rig: ContainerRig, host: VolumeEngine
+) -> None:
+    host.fail("create", 500)
+
+    with pytest.raises(VolumeExportRefused) as refused:
+        await begin(exporter(rig))
+
+    assert refused.value.reason == "helper_refused"
+    assert str(refused.value) == "Docker could not mount or read the volume."
+    (row,) = await rows_of(rig.db, "volume_export_started")
+    assert row["detail"]["reason"] == "helper_refused" and host.helpers() == []
+    assert rig.locks.holder_of(KEY) is None
+
+
+async def test_a_status_from_docker_when_the_volume_is_read_is_a_refusal_and_removes_the_helper(
+    rig: ContainerRig, host: VolumeEngine
+) -> None:
+    host.serve_volume(VOLUME, error_reply(500))
+
+    with pytest.raises(VolumeExportRefused) as refused:
+        await begin(exporter(rig))
+
+    assert refused.value.reason == "unreadable"
+    assert str(refused.value) == "Docker could not mount or read the volume."
+    assert host.helpers() == [] and rig.locks.holder_of(KEY) is None
+
+
+async def test_the_helper_is_created_from_the_image_the_confirmation_named(
+    rig: ContainerRig, host: VolumeEngine
+) -> None:
+    host.add_image("other:1", OTHER_IMAGE_ID, size=9000)
+
+    stream = await exporter(rig).start(
+        ADMIN, ENV_A, VOLUME, expected_created_at=VOLUME_CREATED, helper_image=OTHER_IMAGE_ID
+    )
+    await drain(stream)
+
+    assert [body["Image"] for body in host.bodies()] == [OTHER_IMAGE_ID]
+
+
+@pytest.mark.parametrize(
+    ("image", "reason"),
+    [
+        pytest.param(UNUSABLE_IMAGE_ID, "helper_image_unusable", id="declares-a-volume-under-it"),
+        pytest.param(OTHER_IMAGE_ID, "helper_image_missing", id="gone-from-the-host"),
+        pytest.param("", "helper_image_missing", id="none-named"),
+    ],
+)
+async def test_an_image_the_confirmation_did_not_name_validly_is_refused_before_a_helper_exists(
+    rig: ContainerRig, host: VolumeEngine, image: str, reason: str
+) -> None:
+    host.add_image("bad:1", UNUSABLE_IMAGE_ID, {"Volumes": {f"{MOUNT_POINT}/data": {}}}, size=1)
+
+    with pytest.raises(VolumeExportRefused) as refused:
+        await exporter(rig).start(
+            ADMIN, ENV_A, VOLUME, expected_created_at=VOLUME_CREATED, helper_image=image
+        )
+
+    assert refused.value.reason == reason and "create" not in host.verbs()
+    assert rig.locks.holder_of(KEY) is None
+
+
+async def test_a_response_whose_client_stops_reading_frees_the_slot_and_removes_the_helper(
+    rig: ContainerRig, host: VolumeEngine
+) -> None:
+    host.serve_volume(VOLUME, volume_tar({"big": random.Random(7).randbytes(512 * 1024)}))
+    slots = ExportSlots()
+    stream = await begin(exporter(rig, slots=slots))
+    sent: list[MutableMapping[str, Any]] = []
+
+    async def stalling_send(message: MutableMapping[str, Any]) -> None:
+        if message["type"] == "http.response.body" and any(
+            earlier["type"] == "http.response.body" for earlier in sent
+        ):
+            await asyncio.Event().wait()
+        sent.append(message)
+
+    async def receive() -> MutableMapping[str, Any]:
+        await asyncio.Event().wait()
+        return {}
+
+    response = _ExportResponse(stream, AsyncExitStack(), "volume.tar.gz")
+    scope = {"type": "http", "asgi": {"spec_version": "2.4"}, "method": "POST", "headers": []}
+    await asyncio.wait_for(
+        SendIdleTimeoutMiddleware(response, seconds=STALL_SECONDS)(scope, receive, stalling_send),
+        timeout=10,
+    )
+
+    bodies = [m for m in sent if m["type"] == "http.response.body"]
+    assert len(bodies) == 1 and bodies[0]["more_body"] is True
+    assert host.helpers() == [] and rig.locks.holder_of(KEY) is None
+    assert slots.acquire(ENV_A) is not None
+    (finished,) = await rows_of(rig.db, "volume_exported")
+    assert finished["detail"]["completed"] is False and finished["detail"]["helper_removed"] is True

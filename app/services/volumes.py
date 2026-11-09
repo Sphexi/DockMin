@@ -344,7 +344,8 @@ def _matches(entry: _Entry, criteria: _Criteria, used: int) -> bool:
     return criteria.q is None or criteria.q in volume.name.casefold()
 
 
-def _is_plain(created: Volume, request: VolumeRequest) -> bool:
+def created_as_requested(created: Volume, request: VolumeRequest) -> bool:
+    """Report whether the volume Docker returned has the request's driver, options and labels."""
     return (
         created.driver == request.driver
         and dict(created.options) == dict(request.options)
@@ -943,7 +944,7 @@ class VolumeService:
                     name_in_use=VolumeNameInUse,
                     refused=VolumeRefused,
                 ) from None
-            if not _is_plain(created, request):
+            if not created_as_requested(created, request):
                 audit.detail.update(preexisting=True, control_created=False)
                 return VolumeCreated(environment_id, request.name, created.driver, False, True)
             claimed = await self._claim(actor, environment_id, request.name)
@@ -1490,7 +1491,7 @@ class VolumeService:
             finished, error = await settled(task, SETTLE_SECONDS)
             detail: dict[str, DetailValue] = {**audit.detail, "interrupted": True}
             if run.created and finished and error is None:
-                if _is_plain(task.result(), request):
+                if created_as_requested(task.result(), request):
                     await self._write_settled(
                         actor, "volume_created", environment_id, name, detail, claim=True
                     )
@@ -1529,7 +1530,7 @@ class VolumeService:
     ) -> None:
         if task.cancelled() or task.exception() is not None:
             return
-        plain = _is_plain(task.result(), request)
+        plain = created_as_requested(task.result(), request)
         future = asyncio.ensure_future(
             self._write_settled(
                 actor,

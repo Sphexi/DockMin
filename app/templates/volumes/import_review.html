@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/checkbox_field.html" import checkbox_field %}
 {% from "partials/error_summary.html" import error_summary %}
 {% from "partials/form_field.html" import form_field %}
 {% from "partials/key_value_rows.html" import key_value_rows %}
@@ -42,13 +43,14 @@
 <form class="form create-form" method="post" action="{{ post_href }}" data-submit-once>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="expected_digest" value="{{ review.digest }}">
+  <input type="hidden" name="helper_image" value="{{ review.helper_image or '' }}">
 
   <section class="panel create-section" aria-labelledby="volume-title">
     <h2 class="create-section__title" id="volume-title">The volume this creates</h2>
     <div class="create-section__body">
       {% if review.name_taken and not errors.get("name") %}
       <div class="panel panel--alert" role="note">
-        <p>A volume named <span class="mono">{{ review.name|visible_text }}</span> already exists on this host. An existing volume is never written to. Choose another name.</p>
+        <p>A volume named <span class="mono">{{ review.name|visible_text }}</span> already exists on this host and is left as it is. Choose another name.</p>
       </div>
       {% endif %}
       {{ form_field("name", "Name", value=values.get("name", ""), error=errors.get("name"), required=true, help="At least two characters: letters, digits, underscore, period and hyphen, starting with a letter or digit. The name must not exist on the host.") }}
@@ -58,6 +60,23 @@
       <p class="field__help">Left out when the volume was exported, because they can hold credentials: <span class="mono">{{ review.removed_option_keys|join(", ") }}</span>. Enter them above if the volume needs them.</p>
       {% else %}
       <p class="field__help">No driver option was left out of the archive.</p>
+      {% endif %}
+      {% if mount %}
+      <div class="panel panel--alert" role="note" id="mount-confirmation">
+        <h3>This volume uses storage outside Docker's volume directory</h3>
+        <dl class="facts">
+          {% if mount.type %}
+          <dt>Type</dt>
+          <dd class="mono">{{ mount.type|visible_text }}</dd>
+          {% endif %}
+          {% if mount.device %}
+          <dt>Host path or share</dt>
+          <dd class="mono cell-wrap">{{ mount.device|visible_text }}</dd>
+          {% endif %}
+        </dl>
+        <p>The archive's files are written onto it, with the owners and modes archived. Removing a volume does not remove files written to a host path or share, so they stay there if the import fails or the volume is removed later. The import refuses unless the path or share is empty.</p>
+        {{ checkbox_field("confirm_mount", "Write the archive's files to the host path or share named above.", value=mount.token, checked=values.get("confirm_mount") == mount.token, error=errors.get("confirm_mount")) }}
+      </div>
       {% endif %}
     </div>
   </section>
@@ -100,7 +119,8 @@
         <li>Files are written as archived: their numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.</li>
         <li>The data directory's own owner and mode are not applied; the new volume's root keeps Docker's defaults.</li>
         <li>Extended attributes other than <span class="mono">user.</span> ones are not applied{% if review.summary.xattr_members_dropped %} ({{ review.summary.xattr_members_dropped }} entries carried some){% endif %}.</li>
-        <li>If the data cannot be written, the volume this import created is removed.</li>
+        <li>The new volume is read before anything is written. If it holds any file, nothing is written and the volume this import created is removed.</li>
+        <li>If the data cannot be written, the volume this import created is removed{% if mount %}. Files already written to the host path or share are not removed with it{% endif %}.</li>
       </ul>
       {% if review.can_import %}
       <p>dockmin creates a container named <span class="mono">{{ review.helper_name_prefix }}</span> followed by twelve characters from the image <span class="mono">{{ review.helper_image|replace("sha256:", "")|truncate(12, true, "") }}</span>, which is already on the host. The container is never started. It mounts the new volume, has no network and no capabilities, and appears in the container list until the import ends. It is removed when the import ends, however it ends.</p>

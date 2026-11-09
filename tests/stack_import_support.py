@@ -2,8 +2,10 @@
 
 import dataclasses
 from collections.abc import AsyncIterator, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 
+from app.self_identity import SelfIdentitySource
 from app.services.activity import ActivityRecorder
 from app.services.assembly import (
     StackServices,
@@ -14,9 +16,11 @@ from app.services.assembly import (
 from app.services.export_archive_writer import ExportArchiveStream
 from app.services.export_build import ContextInput, FileInput, VariableInput
 from app.services.export_manifest import ImageReference
+from app.services.export_unlock import UnlockGate
 from app.services.object_inspector import EngineObjectInspector
 from app.services.stack_import import StackImportService
 from tests.access_support import ADMIN
+from tests.docker_engine.fake_engine import Reply
 from tests.docker_engine.swarm_engine import SwarmEngine
 from tests.export_archive_support import (
     FILE_CONTENT,
@@ -79,7 +83,16 @@ volumes:
 
 
 class StackImportEngine(SwarmEngine, ImportEngine):
-    """A Swarm manager that also accepts the tar a helper container receives into a volume."""
+    """A Swarm manager that also accepts the tar a helper container receives into a volume.
+
+    A volume made through the API is stamped with the time it was made, as Docker does.
+    """
+
+    def _volume_create(self, document: dict[str, object]) -> Reply:
+        name = str(document["Name"])
+        if name not in self.volumes:
+            self.volume_created[name] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return super()._volume_create(document)
 
 
 async def build_archive(
@@ -122,7 +135,11 @@ async def parts(content: bytes) -> AsyncIterator[bytes]:
 
 
 def build_importer(
-    rig: Rig, directory: Path | None = None
+    rig: Rig,
+    directory: Path | None = None,
+    *,
+    gate: UnlockGate | None = None,
+    self_identity: SelfIdentitySource | None = None,
 ) -> tuple[StackImportService, StackServices]:
     """Wire the import service the way a request would, over the rig's stack services."""
     recorder = ActivityRecorder(rig.db, rig.clock)
@@ -152,5 +169,7 @@ def build_importer(
         store=rig.engine.stack_imports,
         imported=rig.engine.imported_volumes,
         data_dir=directory or rig.data_dir,
+        gate=gate,
+        self_identity=self_identity,
     )
     return service, services

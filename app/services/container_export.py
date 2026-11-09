@@ -420,10 +420,10 @@ class ContainerExportService:
         """Check the container, seal what is secret and return the archive stream.
 
         `passphrase` None leaves the values of `secret_names` out of the archive. Everything that
-        can refuse the export has run before this returns, and no volume has been read; the
-        caller must close the stream. ResourceNotFound, SelfProtected, ContainerChangedSinceReview,
-        ContainerExportRefused, ContainerExportBusy, ValidationFailed, ObjectBusy,
-        EnvironmentUnavailable.
+        can refuse the export has run, and the started row is written, before this returns; no
+        volume has been read. The caller must close the stream. ResourceNotFound, SelfProtected,
+        ContainerChangedSinceReview, ContainerExportRefused, ContainerExportBusy,
+        ValidationFailed, ObjectBusy, EnvironmentUnavailable.
         """
         opened: list[ContainerExportStream] = []
         try:
@@ -444,7 +444,7 @@ class ContainerExportService:
             raise
 
     @audited(
-        action="container_exported",
+        action="container_export_started",
         target_type="container",
         target_id=_target_id,
         environment_id=environment_argument,
@@ -503,7 +503,6 @@ class ContainerExportService:
             slot.release()
             raise
         opened.append(stream)
-        audit.unchanged()
         return stream
 
     async def _prepare(

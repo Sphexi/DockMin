@@ -99,17 +99,26 @@ class SelfIdentity:
     def protects_path(self, environment_id: int, path: str) -> bool:
         """Report whether the path holds, lies inside, or is a source of dockmin's mounts.
 
-        True for every path while `mounts_unknown`.
+        The path is compared after repeated slashes and `.` components are collapsed, a relative
+        path being read from `/`. True for a path containing `..` or a control character, which
+        cannot be normalised, and for every path while `mounts_unknown`.
         """
         if self.mounts_unknown(environment_id):
             return True
-        return any(
-            source == path
-            or source == "/"
-            or path.startswith(f"{source}/")
-            or source.startswith(f"{path}/")
-            for source in self.mount_sources.get(environment_id, frozenset())
-        )
+        candidate = _normalised(path)
+        if candidate is None:
+            return True
+        for raw in self.mount_sources.get(environment_id, frozenset()):
+            source = _normalised(raw)
+            if (
+                source is None
+                or "/" in (source, candidate)
+                or source == candidate
+                or candidate.startswith(f"{source}/")
+                or source.startswith(f"{candidate}/")
+            ):
+                return True
+        return False
 
     def protects_stack(self, environment_id: int, name: str) -> bool:
         """Report whether the Compose project is the one dockmin's container belongs to."""
@@ -123,6 +132,15 @@ class SelfIdentity:
     def protects_node(self, environment_id: int, node_id: str) -> bool:
         """Report whether the Swarm node is the one running dockmin's container."""
         return self.swarm_node.get(environment_id) == node_id
+
+
+def _normalised(path: str) -> str | None:
+    if any(ord(character) < 32 or ord(character) == 127 for character in path):
+        return None
+    parts = path.split("/")
+    if ".." in parts:
+        return None
+    return "/" + "/".join(part for part in parts if part not in ("", "."))
 
 
 NOT_CONTAINERISED: Final = SelfIdentity()

@@ -18,7 +18,7 @@
 {% elif failure %}
 {{ error_state("Stacks cannot be listed", failure, retry_href=retry_href, region_id="stacks-results", swap="innerHTML") }}
 {% else %}
-{{ dismissed_line(dismissed_hidden, show_dismissed, list_href) }}
+{{ dismissed_line(dismissed_hidden, show_dismissed, list_href, pager.sort, pager.direction) }}
 {% set empty_body = "Change the name, or clear the filter to see every stack." if q else ("No stack is managed here and no object on this cluster carries a stack name." if principal.is_administrator else "You cannot see any stack on this cluster. Ask an administrator for access to more stacks.") %}
 {% call data_table("stacks-table", "Swarm stacks", columns, pager, empty_title=("No matching stacks" if q else "No stacks"), empty_body=empty_body, empty_action_label=("Create stack" if principal.is_administrator and can_create and not q else none), empty_action_href=(route_path("environment_swarm_stack_new", environment_id=environment_id) if principal.is_administrator and can_create and not q else none), filtered=(q|length > 0), clear_href=list_href, region_id="stacks-results") %}
 {% for row in rows %}
@@ -73,7 +73,7 @@
 {% endfor %}
 {% endcall %}
 {% if page.truncated %}
-<p class="field__help">{{ page.total }} stacks match; the first {{ rows|length }} are listed. Narrow the filter to see the others.</p>
+<p class="field__help">{{ page.total }} stacks match; the first {{ rows|length }}{{ " by name" if pager.sort else "" }} are listed.{% if pager.sort %} The sort applies only to the entries shown.{% endif %} Narrow the filter to see the others.</p>
 {% endif %}
 {% endif %}
 {% endmacro %}

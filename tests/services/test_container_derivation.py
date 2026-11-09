@@ -869,6 +869,23 @@ def test_a_network_mode_holding_a_network_id_becomes_a_row_named_for_that_networ
     assert [n.name for n in result.spec.networks] == ["front"]
 
 
+@pytest.mark.parametrize(
+    "mode",
+    [NETWORK_ID[:11], NETWORK_ID[:2], "f" * 12 + "z", NETWORK_ID.upper()],
+    ids=["too_short", "two_characters", "not_hex", "upper_case"],
+)
+def test_a_network_mode_that_is_not_a_full_id_or_a_long_enough_hex_prefix_names_no_network(
+    mode: str,
+) -> None:
+    document = inspected(
+        host={"NetworkMode": mode}, networks={"front": {"NetworkID": NETWORK_ID, "Aliases": []}}
+    )
+
+    result = spec_from_inspect(document, is_administrator=False)
+
+    assert result.spec.networks[0].name == mode
+
+
 def test_a_duplicate_with_nothing_to_report_has_no_notices() -> None:
     assert spec_from_inspect(inspected(), is_administrator=False).notices == ()
 

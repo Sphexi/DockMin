@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
-from tests.archive_support import FILE_MODE
+from tests.archive_support import FILE_MODE, Member, build_tar
 from tests.docker_engine.fake_engine import Reply, Scope, error_reply, json_reply, split_version
-from tests.volume_export_support import MOUNT_POINT, VolumeEngine
+from tests.volume_export_support import MOUNT_POINT, ROOT, VolumeEngine
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "volume_export" / "format_version_1.tar.gz"
 EXPORTED_AT = "2024-05-06T07:08:09Z"
@@ -151,8 +151,16 @@ class Written:
     data: bytes
 
 
+def empty_volume_tar() -> bytes:
+    """Return the archive the Engine sends for a volume that holds nothing."""
+    return build_tar(Member(f"{ROOT}/", type=tarfile.DIRTYPE, mode=0o755))
+
+
 class ImportEngine(VolumeEngine):
-    """A daemon that extracts the tar `PUT` into a volume the helper mounts."""
+    """A daemon that extracts the tar `PUT` into a volume the helper mounts.
+
+    A volume with no archive served for it reads as empty.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -174,7 +182,19 @@ class ImportEngine(VolumeEngine):
         if scope["method"] == "PUT" and parts[0] == "containers" and parts[2:] == ["archive"]:
             query = {k: v[-1] for k, v in parse_qs(scope["query_string"].decode()).items()}
             return await self._put_archive(parts[1], query, body)
+        if scope["method"] == "GET" and parts[0] == "containers" and parts[2:] == ["archive"]:
+            self._serve_empty_by_default(parts[1])
         return await super()._reply(scope, body)
+
+    def _serve_empty_by_default(self, reference: str) -> None:
+        box = self.resolve(reference)
+        mounted = (
+            None
+            if box is None
+            else next((m["Name"] for m in box.mounts if m["Destination"] == MOUNT_POINT), None)
+        )
+        if mounted is not None and mounted not in self.volume_archives:
+            self.volume_archives[mounted] = empty_volume_tar()
 
     async def _put_archive(self, reference: str, query: dict[str, str], body: bytes) -> Reply:
         box = self.resolve(reference)

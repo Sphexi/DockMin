@@ -21,6 +21,7 @@ __all__ = [
     "SPOOL_DIRECTORY",
     "UPLOAD_ID",
     "HeldImport",
+    "ImportStoreFull",
     "SpoolFailure",
     "SpooledUpload",
     "VolumeImportStore",
@@ -46,6 +47,10 @@ class SpoolFailure(Exception):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class ImportStoreFull(Exception):
+    """Every hold belongs to another user or to an import in progress."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,7 +177,8 @@ class VolumeImportStore:
     """In-memory holds on spooled uploads: one per user, four in all, 30 minutes each.
 
     A hold is dropped, and its file removed, on a newer upload by the same user, on discard, and
-    on expiry; a hold whose import has begun does not expire.
+    on expiry; a hold whose import has begun does not expire. A new hold is refused while the
+    other users' holds fill the store, so one user's upload never evicts another's.
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
@@ -186,6 +192,11 @@ class VolumeImportStore:
         """Return a fresh upload id."""
         return secrets.token_hex(_ID_BYTES)
 
+    async def has_room(self, user_id: int) -> bool:
+        """Report whether a new hold by this user would be accepted now."""
+        await self._remove(self._expire())
+        return self._others(user_id) < CAPACITY
+
     async def hold(
         self,
         upload_id: str,
@@ -196,8 +207,11 @@ class VolumeImportStore:
         upload: SpooledUpload,
         summary: ArchiveSummary,
     ) -> HeldImport:
-        """Hold a validated upload, dropping the user's earlier one and the oldest past four."""
+        """Hold a validated upload, dropping the user's earlier one; ImportStoreFull if no room."""
         doomed = self._expire()
+        if self._others(user_id) >= CAPACITY:
+            await self._remove(doomed)
+            raise ImportStoreFull
         held = HeldImport(
             upload_id,
             user_id,
@@ -213,14 +227,12 @@ class VolumeImportStore:
             if other.user_id == user_id and not other.importing:
                 doomed.append(self._held.pop(token))
         self._held[upload_id] = held
-        while len(self._held) > CAPACITY:
-            oldest = next((t for t, h in self._held.items() if not h.importing), None)
-            if oldest is None:
-                break
-            doomed.append(self._held.pop(oldest))
         await self._remove(doomed)
         self._arm()
         return held
+
+    def _others(self, user_id: int) -> int:
+        return sum(1 for h in self._held.values() if h.user_id != user_id or h.importing)
 
     async def get(
         self, upload_id: str, *, user_id: int, session_id: int, environment_id: int

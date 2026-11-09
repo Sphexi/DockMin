@@ -313,3 +313,30 @@ async def test_no_more_than_the_slot_count_of_archives_run_at_once(
     await asyncio.gather(*tasks)
 
     assert peak == 2
+
+
+async def test_a_cancelled_caller_keeps_its_slot_until_the_thread_has_ended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(archive_module, "_slots", asyncio.Semaphore(1))
+    entered = threading.Event()
+    gate = threading.Event()
+    ran: list[str] = []
+
+    def blocked() -> None:
+        entered.set()
+        gate.wait()
+
+    first = asyncio.ensure_future(run_limited(blocked))
+    await asyncio.to_thread(entered.wait)
+
+    first.cancel()
+    second = asyncio.ensure_future(run_limited(lambda: ran.append("second")))
+    await asyncio.sleep(0.05)
+    waiting = ran == [] and not first.done()
+    gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    await second
+
+    assert waiting and ran == ["second"]

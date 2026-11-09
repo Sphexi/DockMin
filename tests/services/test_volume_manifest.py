@@ -72,35 +72,38 @@ def test_stack_namespace_and_product_labels_are_not_exported(label: str) -> None
     [
         pytest.param({"type": "nfs", "device": ":/x"}, {"type": "nfs", "device": ":/x"}, []),
         pytest.param(
+            {"type": "nfs", "device": "10.0.0.5:/exports/data", "o": "addr=10.0.0.5,vers=4"},
+            {"type": "nfs", "device": "10.0.0.5:/exports/data", "o": "addr=10.0.0.5,vers=4"},
+            [],
+            id="a-colon-without-an-at-sign-is-not-userinfo",
+        ),
+        pytest.param(
             {"type": "cifs", "o": SMB_OPTIONS},
-            {"type": "cifs", "o": "addr=10.0.0.5,username=svc,vers=3.0"},
-            ["o.password"],
+            {"type": "cifs"},
+            ["o"],
             id="password-inside-the-mount-options",
         ),
         pytest.param(
-            {"o": "username=svc%swordfish,addr=1"},
-            {"o": "username=svc,addr=1"},
-            ["o.password"],
-            id="user-percent-password",
+            {"o": f"addr=1,password={PASSWORD},tail,more"},
+            {},
+            ["o"],
+            id="a-password-containing-commas-leaves-no-tail",
         ),
-        pytest.param(
-            {"o": "credentials=/root/.smb,addr=1"},
-            {"o": "addr=1"},
-            ["o.credentials"],
-            id="credentials-file",
-        ),
+        pytest.param({"o": "username=svc%swordfish,addr=1"}, {}, ["o"], id="user-percent-password"),
+        pytest.param({"o": "credentials=/root/.smb,addr=1"}, {}, ["o"], id="credentials-file"),
         pytest.param(
             {"password": "x", "type": "cifs"}, {"type": "cifs"}, ["password"], id="own-key"
         ),
+        pytest.param({"device": "//svc:swordfish@host/share"}, {}, ["device"], id="userinfo"),
         pytest.param(
-            {"device": "//svc:swordfish@host/share"},
-            {"device": "//svc@host/share"},
-            ["device.password"],
-            id="userinfo",
+            {"device": "//svc:sword/fish@host/share"}, {}, ["device"], id="slash-in-the-password"
+        ),
+        pytest.param(
+            {"device": "//svc:sword@fish@host/share"}, {}, ["device"], id="at-sign-in-the-password"
         ),
     ],
 )
-def test_driver_options_lose_credentials_and_the_removal_is_listed_by_key(
+def test_driver_options_that_carry_a_credential_are_dropped_whole_and_listed_by_key(
     options: dict[str, str], kept: dict[str, str], removed: list[str]
 ) -> None:
     result = filter_options(options)
@@ -111,7 +114,9 @@ def test_driver_options_lose_credentials_and_the_removal_is_listed_by_key(
 def test_no_removed_value_appears_anywhere_in_the_manifest() -> None:
     written = manifest_bytes(manifest(options={"o": SMB_OPTIONS})).decode("utf-8")
 
-    assert PASSWORD not in written and "o.password" in written
+    assert (
+        PASSWORD not in written and "svc" not in written and '"removed_option_keys": [' in written
+    )
 
 
 def test_a_manifest_without_a_format_version_is_refused() -> None:

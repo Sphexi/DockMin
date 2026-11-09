@@ -1,17 +1,19 @@
 """Imports a stack export archive as a managed stack on an environment; administrators only."""
 
 import asyncio
+import secrets
 import unicodedata
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Final, Literal
 
 import anyio
 
-from app.auth.errors import ProductError, ValidationFailed
+from app.auth.errors import SELF_PROTECTED_REASON, ProductError, SelfProtected, ValidationFailed
 from app.auth.principal import Principal
 from app.db.engine import Database
 from app.db.repositories.activity_event import DetailValue
@@ -22,6 +24,7 @@ from app.docker_engine.client import EngineClient
 from app.docker_engine.errors import EngineError, NotFound
 from app.docker_engine.models import Volume
 from app.logging import get_logger
+from app.self_identity import SelfIdentitySource, no_identity
 from app.services.access import COMPOSE_PROJECT_LABEL, SWARM_NAMESPACE_LABEL, canonical_stack_key
 from app.services.activity import (
     ActivityRecorder,
@@ -34,8 +37,13 @@ from app.services.activity import (
 from app.services.authorisation import Authoriser
 from app.services.build_context_archive import run_limited
 from app.services.containers import display_name
-from app.services.export_manifest import ContextEntry, sealed_name
-from app.services.export_sealing import SealError, open_sealed
+from app.services.export_manifest import ContextEntry, open_manifest_secrets, sealed_name
+from app.services.export_sealing import SealError
+from app.services.export_unlock import (
+    UnlockAttemptsExhausted,
+    UnlockGate,
+    shared_unlock_gate,
+)
 from app.services.guards import require_administrator
 from app.services.host_files import (
     HelperImageMissing,
@@ -51,44 +59,56 @@ from app.services.host_objects import (
 )
 from app.services.image_bindings import parse_pull_reference
 from app.services.image_listing import read_containers, read_images
-from app.services.imported_volumes import ImportedVolumes
+from app.services.imported_volumes import (
+    RUN_LABEL,
+    ImportedVolumes,
+    MountNotEmpty,
+    created_by_this_call,
+    mount_point_is_empty,
+)
 from app.services.object_inspector import EngineObjectInspector, unavailable_from
 from app.services.object_locks import LockHolder, ObjectKey, ObjectLockRegistry
 from app.services.stack_collisions import REASON_NAME, REASON_PORT
 from app.services.stack_common import declared_service_images
 from app.services.stack_deploy import PreexistingObjects, StackNameInUse, StackRejected
-from app.services.stack_document import CompanionFile, VariableInput
+from app.services.stack_document import (
+    CompanionFile,
+    ComposeDocumentRejected,
+    VariableInput,
+    swarm_stack_name,
+)
 from app.services.stack_export_host import image_references
 from app.services.stack_import_archive import (
     MAX_UPLOAD_BYTES,
+    ContextFacts,
     StackArchiveRefused,
+    VolumeFeed,
     VolumeSummary,
     inspect_stack_archive,
     read_contexts,
-    stack_volume_tar,
 )
 from app.services.stack_import_plan import (
     HOST_PATH_CHOICES,
     Collision,
     HostPath,
+    HostPathUnresolved,
+    HostUse,
     ImageEntry,
     ImportChoices,
     ImportPlan,
     PlanObject,
+    Rewrite,
     SecretEntry,
     SkippedVolume,
     VolumePlan,
-    host_path_uses,
+    compose_host_uses,
     match_volumes,
+    mount_target,
     replace_host_paths,
+    swarm_host_uses,
     volume_key_for_path,
 )
-from app.services.stack_import_store import (
-    SPOOL_DIRECTORY,
-    UNSEAL_FAILURE_LIMIT,
-    HeldStack,
-    StackImportStore,
-)
+from app.services.stack_import_store import SPOOL_DIRECTORY, HeldStack, StackImportStore
 from app.services.stack_queries import StackQueryService
 from app.services.stack_views import checked_name
 from app.services.stacks import StackService
@@ -185,9 +205,14 @@ class UnlockLimited(ProductError):
 
 
 class StackImportFailed(ProductError):
-    """The volumes could not be written; the ones this import created were removed if it could."""
+    """The import failed after volumes were created; the ones it made were removed if it could.
 
-    def __init__(self, reason: str, *, removed: Sequence[str], kept: Sequence[str]) -> None:
+    `cause` is the product's own text for the refusal that followed, when there was one.
+    """
+
+    def __init__(
+        self, reason: str, *, removed: Sequence[str], kept: Sequence[str], cause: str = ""
+    ) -> None:
         tail = (
             " Every volume this import created was removed."
             if removed and not kept
@@ -196,7 +221,8 @@ class StackImportFailed(ProductError):
             else f" These volumes could not be removed; remove them from the volumes list: "
             f"{', '.join(kept)}."
         )
-        super().__init__(f"The archive's data could not be written to the host.{tail}")
+        head = cause or "The archive's data could not be written to the host."
+        super().__init__(f"{head}{tail}")
         self.reason = reason
         self.removed = tuple(removed)
         self.kept = tuple(kept)
@@ -218,6 +244,7 @@ class ImportReview:
     secrets_mode: str
     opened: bool
     unlock_remaining: int
+    integrity_protected: bool
     plan: ImportPlan
     helper_image: str | None
     pull_references: tuple[str, ...]
@@ -257,6 +284,7 @@ class _Made:
 
 @dataclass(slots=True)
 class _Run:
+    token: str = field(default_factory=lambda: secrets.token_hex(16))
     made: list[_Made] = field(default_factory=list)
     bytes_written: int = 0
     helpers: int = 0
@@ -287,6 +315,8 @@ class StackImportService:
         store: StackImportStore,
         imported: ImportedVolumes,
         data_dir: Path,
+        gate: UnlockGate | None = None,
+        self_identity: SelfIdentitySource | None = None,
     ) -> None:
         self._database = database
         self._authoriser = authoriser
@@ -301,7 +331,8 @@ class StackImportService:
         self._store = store
         self._imported = imported
         self._data_dir = data_dir
-        self._unseal_slots = asyncio.Semaphore(2)
+        self._gate = gate or shared_unlock_gate()
+        self._self_identity = self_identity or no_identity
 
     async def receive(
         self,
@@ -384,7 +415,7 @@ class StackImportService:
         typed_name = chosen.name
         name_error: str | None = None
         try:
-            checked_name(chosen.name)
+            _checked_name(kind, chosen.name)
         except StackRejected as bad:
             name_error = "; ".join(bad.fields.values())
             chosen = replace(chosen, name=manifest.name)
@@ -410,7 +441,8 @@ class StackImportService:
             instance_version=manifest.instance_version,
             secrets_mode=manifest.secrets,
             opened=held.opened is not None,
-            unlock_remaining=max(0, UNSEAL_FAILURE_LIMIT - self._store.failures(session_id)),
+            unlock_remaining=self._gate.remaining(session_id),
+            integrity_protected=manifest.integrity_protected,
             plan=plan,
             helper_image=image,
             pull_references=tuple(
@@ -432,7 +464,8 @@ class StackImportService:
         """Open the sealed values with the passphrase and keep them with the held upload.
 
         The passphrase is used once, in a worker thread, and kept nowhere. UnlockFailed counts
-        against the session's attempts; UnlockLimited once they are used.
+        against the session's attempts; UnlockLimited once they are used. The manifest's MAC is
+        verified first, so a modified archive does not open.
         """
         await self._require_environment(actor, environment_id, kind)
         held = await self._held(actor, session_id, environment_id, kind, upload_id)
@@ -441,18 +474,19 @@ class StackImportService:
             raise ValidationFailed({"passphrase": "This archive holds no sealed values."})
         if not passphrase:
             raise ValidationFailed({"passphrase": "Enter the passphrase."})
-        if self._store.failures(session_id) >= UNSEAL_FAILURE_LIMIT:
-            raise UnlockLimited()
-        async with self._unseal_slots:
+        try:
+            reservation = self._gate.reserve(session_id)
+        except UnlockAttemptsExhausted:
+            raise UnlockLimited() from None
+        async with self._gate.slot():
             try:
-                opened = await asyncio.to_thread(
-                    open_sealed, manifest.sealed, passphrase, manifest.archive_id
-                )
+                opened = await asyncio.to_thread(open_manifest_secrets, manifest, passphrase)
             except SealError:
                 logger.warning(
                     "stack_import_unlock_failed", extra={"environment_id": environment_id}
                 )
-                raise UnlockFailed(self._store.note_failure(session_id)) from None
+                raise UnlockFailed(reservation.remaining) from None
+        reservation.refund()
         held.opened = opened
 
     async def cancel(
@@ -490,115 +524,116 @@ class StackImportService:
         checks of a create. Each volume the archive fills is created, labelled as the stack's own
         and written before the stack row is, so a failure leaves nothing but what this import
         removed: those volumes are named on the failure row. The held upload is removed once any
-        volume has been created. ImportBlocked, StackImportChanged, StackUploadGone, StackRejected,
-        StackNameInUse, StackImportFailed, VolumeNameInUse, EnvironmentUnavailable, ObjectBusy.
+        volume has been created. An upload already being imported is refused. ImportBlocked,
+        StackImportChanged, StackUploadGone, StackRejected, StackNameInUse, StackImportFailed,
+        VolumeNameInUse, EnvironmentUnavailable, ObjectBusy.
         """
-        audit = current_audit()
         require_administrator(actor)
         await self._require_environment(actor, environment_id, kind)
         held = await self._held_for(actor, environment_id, kind, upload_id)
-        manifest = held.summary.manifest
-        audit.detail.update(
-            stack_kind=kind,
-            format_version=manifest.format_version,
-            volumes_archived=len(held.summary.volumes),
-        )
-        name = checked_name(choices.name)
-        audit.target_id = name
-        plan = await self._plan(actor, held, environment_id, kind, choices)
-        audit.detail.update(
-            renamed=name != manifest.name,
-            host_paths_kept=sum(1 for item in plan.host_paths if item.choice == "keep"),
-            host_paths_replaced=sum(1 for item in plan.host_paths if item.choice == "volume"),
-            volumes_filled=sum(1 for item in plan.volumes if item.filled),
-            volumes_skipped=len(plan.skipped_volumes),
-            images=len(plan.images),
-            secrets=sum(1 for item in plan.secrets),
-        )
-        if plan.digest != expected_plan:
-            audit.reason = "changed_since_review"
-            raise StackImportChanged()
-        self._require_clear(plan)
-        self._require_choices(plan, choices)
-        audit.detail.update(volumes_created=0, bytes_written=0, helpers_created=0)
-        client = await audited_client(self._hosts, environment_id)
-        image = await self._image_for(client, plan)
-        contexts = await self._contexts(held)
-        variables, files, _ = self._inputs(held, choices)
-        run = _Run()
-        holder = LockHolder(UserActor.of(actor), actor.username, "import")
-        held.importing = True
-        created: Any = None
         try:
-            async with AsyncExitStack() as volume_locks:
+            audit = current_audit()
+            manifest = held.summary.manifest
+            audit.detail.update(
+                stack_kind=kind,
+                format_version=manifest.format_version,
+                volumes_archived=len(held.summary.volumes),
+            )
+            name = _checked_name(kind, choices.name)
+            audit.target_id = name
+            plan = await self._plan(actor, held, environment_id, kind, choices)
+            audit.detail.update(
+                renamed=name != manifest.name,
+                host_paths_kept=sum(1 for item in plan.host_paths if item.choice == "keep"),
+                host_paths_replaced=sum(1 for item in plan.host_paths if item.choice == "volume"),
+                volumes_filled=sum(1 for item in plan.volumes if item.filled),
+                volumes_skipped=len(plan.skipped_volumes),
+                images=len(plan.images),
+                secrets=sum(1 for item in plan.secrets),
+            )
+            if plan.digest != expected_plan:
+                audit.reason = "changed_since_review"
+                raise StackImportChanged()
+            self._require_clear(plan)
+            self._require_choices(plan, choices)
+            audit.detail.update(volumes_created=0, bytes_written=0, helpers_created=0)
+            client = await audited_client(self._hosts, environment_id)
+            image = await self._image_for(client, plan)
+            contexts = await self._contexts(held)
+            variables, files, _ = self._inputs(held, choices)
+            run = _Run()
+            holder = LockHolder(UserActor.of(actor), actor.username, "import")
+            created: Any = None
+            try:
+                async with AsyncExitStack() as volume_locks:
 
-                async def write_volumes() -> None:
-                    keys = [
-                        ObjectKey(environment_id, "volume", item.name)
-                        for item in plan.volumes
-                        if item.filled
-                    ]
-                    await volume_locks.enter_async_context(hold_all(self._locks, keys, holder))
-                    await self._write_volumes(actor, environment_id, client, plan, held, image, run)
+                    async def write_volumes() -> None:
+                        keys = [
+                            ObjectKey(environment_id, "volume", item.name)
+                            for item in plan.volumes
+                            if item.filled
+                        ]
+                        await volume_locks.enter_async_context(hold_all(self._locks, keys, holder))
+                        await self._write_volumes(
+                            actor, environment_id, client, plan, held, image, run
+                        )
 
-                try:
-                    before_store = write_volumes if plan.has_data else None
-                    if kind == "compose":
-                        created = await self._compose.create_in_scope(
-                            actor,
-                            environment_id,
-                            name=plan.name,
-                            compose_text=plan.compose_text,
-                            variables=variables,
-                            choices=choices.credentials,
-                            resolve_pulls=True,
-                            check_collisions=True,
-                            files=files,
-                            contexts=contexts,
-                            before_store=before_store,
+                    try:
+                        before_store = write_volumes if plan.has_data else None
+                        if kind == "compose":
+                            created = await self._compose.create_in_scope(
+                                actor,
+                                environment_id,
+                                name=plan.name,
+                                compose_text=plan.compose_text,
+                                variables=variables,
+                                choices=choices.credentials,
+                                resolve_pulls=True,
+                                check_collisions=True,
+                                files=files,
+                                contexts=contexts,
+                                before_store=before_store,
+                            )
+                        else:
+                            created = await self._swarm.create_in_scope(
+                                actor,
+                                environment_id,
+                                name=plan.name,
+                                compose_text=plan.compose_text,
+                                variables=variables,
+                                choices=choices.credentials,
+                                files=files,
+                                contexts=contexts,
+                                before_store=before_store,
+                            )
+                    except BaseException as error:
+                        removed, kept = await self._roll_back(
+                            actor, environment_id, client, name, run, error
                         )
-                    else:
-                        created = await self._swarm.create_in_scope(
-                            actor,
-                            environment_id,
-                            name=plan.name,
-                            compose_text=plan.compose_text,
-                            variables=variables,
-                            choices=choices.credentials,
-                            files=files,
-                            contexts=contexts,
-                            before_store=before_store,
-                        )
-                except BaseException as error:
-                    removed, kept = await self._roll_back(
-                        actor, environment_id, client, name, run, error
-                    )
-                    if (
-                        run.made
-                        and isinstance(error, Exception)
-                        and not isinstance(error, ProductError)
-                    ):
-                        audit.reason = _failure_of(error)
-                        raise StackImportFailed(audit.reason, removed=removed, kept=kept) from None
-                    raise
+                        if run.made and isinstance(error, Exception):
+                            failure = _failed(error, removed, kept)
+                            audit.reason = failure.reason
+                            raise failure from None
+                        raise
+            finally:
+                if run.made or created is not None:
+                    with anyio.CancelScope(shield=True):
+                        await self._store.discard(held.id)
+            return StackImported(
+                environment_id,
+                created.name,
+                kind,
+                created.stack_id,
+                tuple(item.name for item in run.made),
+                run.bytes_written,
+                len(variables),
+                len(files),
+                len(contexts),
+                created.warnings,
+                created.control_created,
+            )
         finally:
             held.importing = False
-            if run.made or created is not None:
-                with anyio.CancelScope(shield=True):
-                    await self._store.discard(held.id)
-        return StackImported(
-            environment_id,
-            created.name,
-            kind,
-            created.stack_id,
-            tuple(item.name for item in run.made),
-            run.bytes_written,
-            len(variables),
-            len(files),
-            len(contexts),
-            created.warnings,
-            created.control_created,
-        )
 
     async def _require_environment(self, actor: Principal, environment_id: int, kind: Kind) -> Any:
         require_administrator(actor)
@@ -623,15 +658,24 @@ class StackImportService:
     async def _held_for(
         self, actor: Principal, environment_id: int, kind: Kind, upload_id: str
     ) -> HeldStack:
+        """Return the held upload and mark it as being imported; refuse one already marked.
+
+        The caller clears the mark, and only the request that set it may.
+        """
         audit = current_audit()
         if actor.session_id is None:
             audit.reason = "upload_gone"
             raise StackUploadGone()
         try:
-            return await self._held(actor, actor.session_id, environment_id, kind, upload_id)
+            held = await self._held(actor, actor.session_id, environment_id, kind, upload_id)
         except StackUploadGone:
             audit.reason = "upload_gone"
             raise
+        if held.importing:
+            audit.reason = "import_running"
+            raise ImportBlocked("import_running", "This upload is already being imported.")
+        held.importing = True
+        return held
 
     def _require_clear(self, plan: ImportPlan) -> None:
         audit = current_audit()
@@ -651,7 +695,19 @@ class StackImportService:
         if plan.paths_undecided:
             audit.reason = "paths_undecided"
             raise ImportBlocked(
-                "paths_undecided", "Choose what to do with each host path the stack binds."
+                "paths_undecided", "Choose what to do with each host path the stack uses."
+            )
+        if plan.protected_volumes:
+            audit.reason = SELF_PROTECTED_REASON
+            raise ImportBlocked(SELF_PROTECTED_REASON, str(SelfProtected.import_target()))
+        if plan.unconfirmed_mounts:
+            audit.reason = "mounts_unconfirmed"
+            raise ImportBlocked(
+                "mounts_unconfirmed",
+                "Confirm writing onto each host path or share a volume mounts: "
+                + ", ".join(
+                    item.mount.label for item in plan.unconfirmed_mounts if item.mount is not None
+                ),
             )
 
     def _require_choices(self, plan: ImportPlan, choices: ImportChoices) -> None:
@@ -692,8 +748,16 @@ class StackImportService:
         except StackArchiveRefused:
             current_audit().reason = "archive_invalid"
             raise StackUploadGone() from None
-        by_name = {context.name: context for context in stack.contexts}
-        return {name: _write_of(by_name[name], content) for name, content in data.items()}
+        return {
+            name: ContextWrite(
+                content=found.content,
+                content_digest=found.content_digest,
+                compressed=found.compressed,
+                member_count=found.member_count,
+                extracted_size=found.extracted_size,
+            )
+            for name, found in data.items()
+        }
 
     def _secret_values(
         self, held: HeldStack, choices: ImportChoices
@@ -763,43 +827,40 @@ class StackImportService:
         name = choices.name.strip() or manifest.name
         variables, files, _ = self._inputs(held, choices)
         _, secrets = self._secret_values(held, choices)
-        uses = host_path_uses(held.summary.compose_text, frozenset(item.name for item in files))
-        host_paths, replacements = _host_paths(uses, choices.host_paths)
-        try:
-            text = replace_host_paths(held.summary.compose_text, replacements)
-        except ValueError:
-            raise StackRejected(
-                {"compose_file": "The stack file cannot be rewritten to replace host paths."},
-                "invalid",
-            ) from None
-        stubs = {context.name: _write_of(context, b"") for context in stack.contexts}
-        collisions: list[Collision] = []
-        try:
-            if kind == "compose":
-                found = await self._resolve_compose(
-                    actor, environment_id, name, text, variables, files, stubs
-                )
-            else:
-                found = await self._resolve_swarm(
-                    actor, environment_id, name, text, variables, files
-                )
-        except StackNameInUse:
-            found = _Resolved.unchecked(name, text)
-            collisions.append(Collision("stack", name, _COLLISION_TEXT["stack"]))
-        except PreexistingObjects as clash:
-            found = _Resolved.unchecked(name, text)
-            collisions.extend(_collisions_of_objects(clash.objects))
-        except StackRejected as rejected:
-            if rejected.reason not in (REASON_NAME, REASON_PORT):
-                raise
-            found = _Resolved.unchecked(name, text)
-            collisions.extend(
-                Collision("container" if rejected.reason == REASON_NAME else "port", path, message)
-                for path, message in rejected.fields.items()
-            )
+        stubs = {
+            context.name: _stub_of(context, held.summary.contexts[context.name])
+            for context in stack.contexts
+        }
+        resolve = partial(
+            self._resolve,
+            actor,
+            environment_id,
+            kind,
+            name,
+            variables=variables,
+            files=files,
+            contexts=stubs,
+        )
+        text = held.summary.compose_text
+        found = await resolve(text)
+        host_paths, rewrite = _host_paths(found.host_uses, choices.host_paths)
+        if rewrite:
+            try:
+                text = replace_host_paths(text, rewrite)
+            except ValueError:
+                raise StackRejected(
+                    {
+                        "compose_file": "The stack file cannot be rewritten to replace host "
+                        "paths; keep the paths a file it extends or includes binds."
+                    },
+                    "invalid",
+                ) from None
+            found = await resolve(text)
         name = found.name
-        volumes, skipped = _volumes_of(found, held, host_paths, kind)
+        volumes, skipped = _volumes_of(found, held, host_paths, choices)
+        volumes = self._with_protection(environment_id, volumes)
         client = await self._hosts.client(environment_id)
+        collisions = list(found.collisions)
         if found.checked:
             collisions.extend(await self._held_container_names(client, found.objects))
         images = await self._images(client, manifest, found.references, found.pulls, text)
@@ -820,7 +881,63 @@ class StackImportService:
             contexts=tuple((item.name, item.size) for item in stack.contexts),
             warnings=found.warnings,
             checked=found.checked,
+            archive_volumes=len(held.summary.volumes),
+            archive_bytes=held.summary.data_bytes,
         ).with_digest(held.digest)
+
+    def _with_protection(
+        self, environment_id: int, volumes: tuple[VolumePlan, ...]
+    ) -> tuple[VolumePlan, ...]:
+        identity = self._self_identity()
+        return tuple(
+            replace(item, protected=True)
+            if item.mount is not None
+            and item.mount.device
+            and identity.protects_path(environment_id, item.mount.device)
+            else item
+            for item in volumes
+        )
+
+    async def _resolve(
+        self,
+        actor: Principal,
+        environment_id: int,
+        kind: Kind,
+        name: str,
+        text: str,
+        *,
+        variables: Sequence[VariableInput],
+        files: Sequence[CompanionFile],
+        contexts: Mapping[str, ContextWrite],
+    ) -> "_Resolved":
+        companions = frozenset(item.name for item in files)
+        try:
+            if kind == "compose":
+                return await self._resolve_compose(
+                    actor, environment_id, name, text, variables, files, contexts, companions
+                )
+            return await self._resolve_swarm(actor, environment_id, name, text, variables, files)
+        except StackNameInUse:
+            return _Resolved.unchecked(
+                name, text, (Collision("stack", name, _COLLISION_TEXT["stack"]),)
+            )
+        except PreexistingObjects as clash:
+            return _Resolved.unchecked(name, text, tuple(_collisions_of_objects(clash.objects)))
+        except HostPathUnresolved as unresolved:
+            raise StackRejected({"compose_file": str(unresolved)}, "invalid") from None
+        except StackRejected as rejected:
+            if rejected.reason not in (REASON_NAME, REASON_PORT):
+                raise
+            return _Resolved.unchecked(
+                name,
+                text,
+                tuple(
+                    Collision(
+                        "container" if rejected.reason == REASON_NAME else "port", path, message
+                    )
+                    for path, message in rejected.fields.items()
+                ),
+            )
 
     async def _resolve_compose(
         self,
@@ -831,6 +948,7 @@ class StackImportService:
         variables: Sequence[VariableInput],
         files: Sequence[CompanionFile],
         contexts: Mapping[str, ContextWrite],
+        companions: frozenset[str],
     ) -> "_Resolved":
         checked, validated = await self._queries.resolve_candidate(
             actor,
@@ -858,6 +976,12 @@ class StackImportService:
             references=tuple(validated.images),
             pulls=frozenset(validated.to_pull),
             warnings=tuple(validated.warnings),
+            host_uses=compose_host_uses(
+                validated.project.services,
+                validated.project.volumes,
+                companions,
+                self._queries.server_paths(),
+            ),
         )
 
     async def _resolve_swarm(
@@ -904,6 +1028,9 @@ class StackImportService:
             references=tuple(translation.images),
             pulls=frozenset(translation.images),
             warnings=tuple(plan.warnings),
+            host_uses=swarm_host_uses(
+                [(item.key, item.spec) for item in translation.services], plan.stack_name
+            ),
         )
 
     async def _held_container_names(
@@ -970,27 +1097,41 @@ class StackImportService:
         run: _Run,
     ) -> None:
         audit = current_audit()
-        for item in plan.volumes:
-            if not item.filled or item.prefix is None:
-                continue
-            await self._require_absent(client, item.name)
-            made = _Made(item.name, _labels_of(plan, item))
-            run.made.append(made)
-            volume = await self._create_volume(client, item, made)
-            made.created_at = volume.created_at
-            made.confirmed = True
-            stream = RewrittenArchive(chunks=stack_volume_tar(held.path, item.prefix))
-            try:
-                async with HostFileReader(client).volume_session(
-                    actor, item.name, image=image, writable=True
-                ) as helper:
-                    run.helpers += 1
-                    audit.detail["helper_container"] = helper.container_id
-                    await helper.write(stream)
-            finally:
-                with anyio.CancelScope(shield=True):
-                    await stream.aclose()
-            run.bytes_written += stream.bytes_out
+        order = {item.prefix: position for position, item in enumerate(held.summary.volumes)}
+        filled = sorted(
+            (item for item in plan.volumes if item.filled and item.prefix is not None),
+            key=lambda item: order.get(item.prefix or "", len(order)),
+        )
+        feed = VolumeFeed(held.path)
+        try:
+            for item in filled:
+                await self._require_absent(client, item.name)
+                made = _Made(item.name, _labels_of(plan, item, run.token))
+                run.made.append(made)
+                volume = await self._create_volume(client, item, made)
+                if not created_by_this_call(volume, made.labels):
+                    run.made.pop()
+                    audit.reason = "name_in_use"
+                    raise VolumeNameInUse()
+                made.created_at = volume.created_at
+                made.confirmed = True
+                stream = RewrittenArchive(chunks=feed.tar(item.prefix or ""))
+                try:
+                    async with HostFileReader(client).volume_session(
+                        actor, item.name, image=image, writable=True
+                    ) as helper:
+                        run.helpers += 1
+                        audit.detail["helper_container"] = helper.container_id
+                        if item.mount is not None and not await mount_point_is_empty(helper):
+                            audit.reason = MountNotEmpty.reason
+                            raise MountNotEmpty(item.mount.label)
+                        await helper.write(stream)
+                finally:
+                    with anyio.CancelScope(shield=True):
+                        await stream.aclose()
+                run.bytes_written += stream.bytes_out
+        finally:
+            feed.close()
         audit.detail.update(
             volumes_created=len(run.made),
             bytes_written=run.bytes_written,
@@ -1064,7 +1205,7 @@ class StackImportService:
                         found = await client.volumes.inspect(made.name)
                     except NotFound:
                         return True
-                    if dict(found.labels) != dict(made.labels):
+                    if not created_by_this_call(found, made.labels):
                         return False
                 await client.volumes.remove(made.name, force=False)
         except NotFound:
@@ -1116,33 +1257,47 @@ def _text(raw: bytes) -> str:
         raise ValidationFailed({"secrets": "A secret value is not UTF-8 text."}) from None
 
 
-def _write_of(context: ContextEntry, content: bytes) -> ContextWrite:
+def _stub_of(context: ContextEntry, facts: ContextFacts) -> ContextWrite:
     return ContextWrite(
-        content=content,
+        content=b"",
         content_digest=context.sha256,
-        compressed=context.compressed,
-        member_count=context.member_count,
-        extracted_size=context.extracted_size,
+        compressed=facts.compressed,
+        member_count=facts.member_count,
+        extracted_size=facts.extracted_size,
     )
 
 
+def _checked_name(kind: Kind, name: str) -> str:
+    if kind == "compose":
+        return checked_name(name)
+    try:
+        return swarm_stack_name(name)
+    except ComposeDocumentRejected as rejected:
+        raise StackRejected(rejected.fields, rejected.reason) from None
+
+
 def _host_paths(
-    uses: Mapping[str, tuple[str, ...]], chosen: Mapping[str, str]
-) -> tuple[tuple[HostPath, ...], dict[str, str]]:
+    uses: Mapping[str, HostUse], chosen: Mapping[str, str]
+) -> tuple[tuple[HostPath, ...], Rewrite]:
     paths: list[HostPath] = []
-    replacements: dict[str, str] = {}
+    binds: dict[tuple[str, str], str] = {}
+    plain: list[str] = []
+    declare: list[str] = []
     index = 0
-    for source, users in uses.items():
+    for source, use in uses.items():
         choice = chosen.get(source)
         if choice not in HOST_PATH_CHOICES:
             choice = None
         volume = None
         if choice == "volume":
-            index += 1
-            volume = volume_key_for_path(index)
-            replacements[source] = volume
-        paths.append(HostPath(source, users, choice, volume))
-    return tuple(paths), replacements
+            plain.extend(use.volumes)
+            if use.binds:
+                index += 1
+                volume = volume_key_for_path(index)
+                declare.append(volume)
+                binds.update(dict.fromkeys(use.binds, volume))
+        paths.append(HostPath(source, use.users, choice, volume, use))
+    return tuple(paths), Rewrite(binds, plain, declare)
 
 
 def _compose_containers(
@@ -1188,17 +1343,33 @@ def _is_local(declaration: Mapping[str, Any]) -> bool:
     return driver in (None, "", "local")
 
 
-def _labels_of(plan: ImportPlan, item: VolumePlan) -> dict[str, str]:
+def _labels_of(plan: ImportPlan, item: VolumePlan, token: str) -> dict[str, str]:
     if plan.kind == "swarm":
-        return {SWARM_NAMESPACE_LABEL: plan.name, **item.labels}
-    return {**item.labels, COMPOSE_PROJECT_LABEL: plan.name, _COMPOSE_VOLUME_LABEL: item.key}
+        return {SWARM_NAMESPACE_LABEL: plan.name, **item.labels, RUN_LABEL: token}
+    return {
+        **item.labels,
+        COMPOSE_PROJECT_LABEL: plan.name,
+        _COMPOSE_VOLUME_LABEL: item.key,
+        RUN_LABEL: token,
+    }
+
+
+def _options_of(declaration: Mapping[str, Any]) -> dict[str, str]:
+    options = declaration.get("driver_opts")
+    return {str(k): str(v) for k, v in options.items()} if isinstance(options, dict) else {}
 
 
 def _volume_plan(
-    key: str, target: str, archived: VolumeSummary, declaration: Mapping[str, Any]
+    key: str,
+    target: str,
+    archived: VolumeSummary,
+    declaration: Mapping[str, Any],
+    archive_digest: str,
+    confirmed: frozenset[str],
 ) -> VolumePlan:
-    options = declaration.get("driver_opts")
     labels = declaration.get("labels")
+    options = _options_of(declaration)
+    mount = mount_target(options, name=target, archive_digest=archive_digest)
     return VolumePlan(
         key=key,
         name=target,
@@ -1208,8 +1379,10 @@ def _volume_plan(
         size=archived.summary.bytes,
         origin="archive",
         driver="local",
-        options={str(k): str(v) for k, v in options.items()} if isinstance(options, dict) else {},
+        options=options,
         labels={str(k): str(v) for k, v in labels.items()} if isinstance(labels, dict) else {},
+        mount=mount,
+        mount_confirmed=mount is not None and mount.token in confirmed,
     )
 
 
@@ -1225,6 +1398,19 @@ def _failure_of(error: Exception) -> str:
     return type(error).__name__
 
 
+def _failed(error: Exception, removed: Sequence[str], kept: Sequence[str]) -> StackImportFailed:
+    """Describe a failure after volumes were created, keeping the reason a refusal carried."""
+    if isinstance(error, ProductError):
+        reason = getattr(error, "reason", None)
+        return StackImportFailed(
+            reason if isinstance(reason, str) else type(error).__name__,
+            removed=removed,
+            kept=kept,
+            cause=str(error),
+        )
+    return StackImportFailed(_failure_of(error), removed=removed, kept=kept)
+
+
 @dataclass(frozen=True, slots=True)
 class _Resolved:
     """What validating the file settled: names, objects, images and the volumes it declares."""
@@ -1237,18 +1423,34 @@ class _Resolved:
     references: tuple[str, ...]
     pulls: frozenset[str]
     warnings: tuple[str, ...]
+    host_uses: Mapping[str, HostUse] = field(default_factory=dict)
+    collisions: tuple[Collision, ...] = ()
 
     @classmethod
-    def unchecked(cls, name: str, text: str) -> "_Resolved":
+    def unchecked(cls, name: str, text: str, collisions: tuple[Collision, ...]) -> "_Resolved":
         """Return what is known without a validation: the images the file names outright."""
-        return cls(name, False, (), {}, (), tuple(_declared_images(text)), frozenset(), ())
+        return cls(
+            name,
+            False,
+            (),
+            {},
+            (),
+            tuple(_declared_images(text)),
+            frozenset(),
+            (),
+            collisions=collisions,
+        )
 
 
 def _volumes_of(
-    found: _Resolved, held: HeldStack, host_paths: Sequence[HostPath], kind: Kind
+    found: _Resolved, held: HeldStack, host_paths: Sequence[HostPath], choices: ImportChoices
 ) -> tuple[tuple[VolumePlan, ...], tuple[SkippedVolume, ...]]:
     manifest = held.summary.manifest
-    replaced = {f"{found.name}_{item.volume}" for item in host_paths if item.choice == "volume"}
+    replaced = {
+        f"{found.name}_{item.volume}"
+        for item in host_paths
+        if item.choice == "volume" and item.volume
+    }
     matched, skipped = match_volumes(
         found.declared, held.summary.volumes, found.name, manifest.name
     )
@@ -1260,9 +1462,24 @@ def _volumes_of(
         if target in replaced:
             plans.append(VolumePlan(key, target, None, None, 0, 0, "host_path"))
         elif archived is not None and _is_local(declaration):
-            plans.append(_volume_plan(key, target, archived, declaration))
+            plans.append(
+                _volume_plan(
+                    key, target, archived, declaration, held.digest, choices.confirmed_mounts
+                )
+            )
         else:
-            plans.append(VolumePlan(key, target, None, None, 0, 0, "declared"))
+            plans.append(
+                VolumePlan(
+                    key,
+                    target,
+                    None,
+                    None,
+                    0,
+                    0,
+                    "declared",
+                    options=_options_of(declaration),
+                )
+            )
             if archived is not None:
                 left_out.append(
                     SkippedVolume(

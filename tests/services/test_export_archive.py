@@ -2,15 +2,14 @@
 
 import asyncio
 import gzip
-import io
 import json
 import random
+import sys
 import tarfile
 from typing import Any
 
 import pytest
 
-from app.services.export_archive_reader import ExportReader
 from app.services.export_archive_writer import ExportArchiveStream
 from app.services.export_build import ExportDescription
 from app.services.export_manifest import (
@@ -23,18 +22,14 @@ from app.services.export_manifest import (
     parse_manifest,
     secret_names,
 )
-from app.services.export_sealing import SealError, open_sealed
 from app.services.volume_export_writer import StreamMalformed
+from app.services.volume_manifest import FORMAT_VERSION as VOLUME_FORMAT_VERSION
 from app.services.volume_manifest import VolumeManifest
 from tests.archive_support import Member
 from tests.export_archive_support import (
     COMPOSE,
     FILE_CONTENT,
     FILE_NAME,
-    FIXTURE,
-    FIXTURE_PASSPHRASE,
-    FIXTURE_SECRET_NAME,
-    FIXTURE_SECRET_VALUE,
     PASSPHRASE,
     PLAIN_VALUE,
     SECRET_ENVIRONMENT_VALUE,
@@ -136,6 +131,8 @@ def test_environment_rows_in_the_container_form_are_refused() -> None:
         lambda d: d.update(secrets="none"),
         lambda d: d.update(sealed=None),
         lambda d: d["sealed"]["records"].pop(),
+        lambda d: d["sealed"].pop("mac"),
+        lambda d: d["sealed"].update(mac="AAAA"),
         lambda d: d.update(kind="swarm_stack"),
         lambda d: d.update(kind="container"),
         lambda d: d.update(archive_id="xyz"),
@@ -191,6 +188,32 @@ def test_a_newer_nested_volume_version_is_refused_naming_it() -> None:
         parse_document(document)
 
     assert (raised.value.reason, raised.value.version) == (ExportRefusal.NEWER_VERSION, 2)
+    assert raised.value.nested
+    assert str(raised.value) == (
+        f"A volume's format version in the archive is 2; "
+        f"this build reads up to {VOLUME_FORMAT_VERSION}."
+    )
+
+
+@pytest.mark.parametrize("volumes", [5, True, "volumes", {"manifest": {}}])
+def test_a_volumes_entry_that_is_not_a_list_is_invalid(volumes: object) -> None:
+    document = as_document(prepared(stack_description()).manifest)
+    document["volumes"] = volumes
+
+    with pytest.raises(ExportFormatError) as raised:
+        parse_document(document)
+
+    assert raised.value.reason is ExportRefusal.MANIFEST_INVALID
+
+
+def test_a_manifest_nested_beyond_the_recursion_limit_is_invalid() -> None:
+    depth = sys.getrecursionlimit() * 2
+    data = b'{"format_version": 1, "deep": ' + b"[" * depth + b"]" * depth + b"}"
+
+    with pytest.raises(ExportFormatError) as raised:
+        parse_manifest(data)
+
+    assert raised.value.reason is ExportRefusal.MANIFEST_INVALID
 
 
 @pytest.mark.parametrize(
@@ -296,128 +319,6 @@ async def test_closing_the_stream_mid_volume_leaves_the_context_and_ends_the_wor
 def test_the_writer_refuses_volume_sources_that_do_not_match_the_manifest() -> None:
     with pytest.raises(ValueError):
         ExportArchiveStream(prepared(stack_description(volumes=(volume_manifest(),))), [])
-
-
-async def test_the_reader_returns_the_manifest_documents_and_volume_members_in_order() -> None:
-    archive = await stack_archive()
-
-    reader = ExportReader(io.BytesIO(archive))
-    documents = reader.documents()
-    volume = {m.name: (m.info, m.body.read() if m.body else b"") for m in reader.volume_members()}
-
-    assert reader.manifest.name == "shop"
-    assert documents["stack/compose.yaml"] == COMPOSE.encode()
-    assert documents[f"stack/files/{FILE_NAME}"] == FILE_CONTENT
-    assert volume[f"data/{VOLUME_FILE}"][1] == VOLUME_NOTE
-    assert "manifest.json" in volume and "skipped.json" in volume
-
-
-async def test_the_reader_opens_sealed_values_with_the_passphrase_only() -> None:
-    reader = ExportReader(io.BytesIO(await stack_archive()))
-    sealed, archive_id = reader.manifest.sealed, reader.manifest.archive_id
-    assert sealed is not None
-
-    opened = open_sealed(sealed, PASSPHRASE, archive_id)
-
-    assert opened["variable:DB_PASSWORD"] == SECRET_VALUE.encode()
-    assert opened["file:tls.key"] == SECRET_FILE_CONTENT
-    with pytest.raises(SealError):
-        open_sealed(sealed, "some other passphrase", archive_id)
-
-
-def test_the_reader_refuses_a_file_that_is_not_gzip() -> None:
-    with pytest.raises(ExportFormatError) as raised:
-        ExportReader(io.BytesIO(b"plain text, not an archive"))
-
-    assert raised.value.reason is ExportRefusal.NOT_GZIP
-
-
-def tar_gz(*members: tuple[str, bytes]) -> bytes:
-    out = io.BytesIO()
-    with tarfile.open(fileobj=out, mode="w:gz") as tar:
-        for name, data in members:
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
-    return out.getvalue()
-
-
-def test_the_reader_refuses_an_archive_that_does_not_start_with_the_manifest() -> None:
-    with pytest.raises(ExportFormatError) as raised:
-        ExportReader(io.BytesIO(tar_gz(("other.txt", b"x"))))
-
-    assert raised.value.reason is ExportRefusal.NOT_AN_EXPORT
-
-
-def test_the_reader_refuses_a_newer_version_before_reading_further() -> None:
-    document = as_document(prepared(stack_description()).manifest)
-    document["format_version"] = 2
-    archive = tar_gz(("manifest.json", json.dumps(document).encode()))
-
-    with pytest.raises(ExportFormatError) as raised:
-        ExportReader(io.BytesIO(archive))
-
-    assert (raised.value.reason, raised.value.version) == (ExportRefusal.NEWER_VERSION, 2)
-
-
-def rebuilt(archive: bytes, change: Any) -> bytes:
-    members = list(members_of(archive).items())
-    kept = [(name, data) for name, (_, data) in members]
-    return tar_gz(*change(kept))
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        lambda m: [(n, b"tampered" if n == "stack/compose.yaml" else d) for n, d in m],
-        lambda m: [x for x in m if x[0] != f"stack/files/{FILE_NAME}"],
-        lambda m: [*m[:1], ("stack/undeclared", b"x"), *m[1:]],
-    ],
-)
-async def test_the_reader_refuses_documents_that_differ_from_the_manifest(change: Any) -> None:
-    archive = rebuilt(await stack_archive(), change)
-
-    reader = ExportReader(io.BytesIO(archive))
-
-    with pytest.raises(ExportFormatError) as raised:
-        reader.documents()
-    assert raised.value.reason is ExportRefusal.MEMBER_MISMATCH
-
-
-async def test_the_reader_refuses_a_volume_member_outside_the_declared_prefixes() -> None:
-    archive = rebuilt(await stack_archive(), lambda m: [*m, ("volumes/7/data/x", b"x")])
-    reader = ExportReader(io.BytesIO(archive))
-
-    with pytest.raises(ExportFormatError) as raised:
-        for member in reader.volume_members():
-            _ = member
-
-    assert raised.value.reason is ExportRefusal.MEMBER_MISMATCH
-
-
-def test_the_format_version_1_fixture_is_read_and_its_secret_opens_with_the_test_passphrase() -> (
-    None
-):
-    reader = ExportReader(io.BytesIO(FIXTURE.read_bytes()))
-    manifest = reader.manifest
-    documents = reader.documents()
-    names = [member.name for member in reader.volume_members()]
-
-    assert (manifest.format_version, manifest.kind, manifest.secrets) == (
-        1,
-        "compose_stack",
-        "sealed",
-    )
-    assert manifest.stack is not None and manifest.sealed is not None
-    assert {v.name: v.value for v in manifest.stack.variables} == {
-        "DB_PASSWORD": None,
-        "PLAIN": "plain-value",
-    }
-    assert documents[f"stack/files/{FILE_NAME}"] == FILE_CONTENT
-    assert names == ["manifest.json", "data", "data/a.txt", "data/dir/b.txt", "skipped.json"]
-    assert manifest.volumes[0].manifest.name == "shop-data"
-    opened = open_sealed(manifest.sealed, FIXTURE_PASSPHRASE, manifest.archive_id)
-    assert opened == {FIXTURE_SECRET_NAME: FIXTURE_SECRET_VALUE}
 
 
 async def archive_of(description: ExportDescription, passphrase: str | None) -> bytes:

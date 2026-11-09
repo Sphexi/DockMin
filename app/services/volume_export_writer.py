@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import gzip
 import json
+import math
 import tarfile
 import threading
 from collections.abc import AsyncIterator, Callable, Coroutine
@@ -16,6 +17,7 @@ BLOCK: Final = tarfile.BLOCKSIZE
 OUTPUT_CHUNK_BYTES: Final = 64 * 1024
 OUTPUT_QUEUE_CHUNKS: Final = 4
 EXTENSION_MAX_BYTES: Final = 1024 * 1024
+MAX_ENTRY_EXTENSIONS: Final = 16
 SKIPPED_LIST_MAX: Final = 10_000
 GZIP_LEVEL: Final = 6
 XATTR_PREFIX: Final = "SCHILY.xattr."
@@ -28,12 +30,28 @@ _SKIPPED_TYPES: Final = {
     tarfile.BLKTYPE: "block_device",
 }
 _COPIED_TYPES: Final = (*_REGULAR, tarfile.DIRTYPE, tarfile.SYMTYPE, tarfile.LNKTYPE)
+_EXTENSION_TYPES: Final = (
+    tarfile.GNUTYPE_LONGNAME,
+    tarfile.GNUTYPE_LONGLINK,
+    tarfile.XHDTYPE,
+    tarfile.SOLARIS_XHDTYPE,
+    tarfile.XGLTYPE,
+)
 _PAX_TEXT: Final = ("path", "linkpath", "uname", "gname")
 _PAX_INTEGER: Final = ("uid", "gid", "size")
+_PAX_SPARSE_PREFIX: Final = "GNU.sparse."
 
 
 class StreamMalformed(Exception):
     """The Engine's tar is not the archive of one directory; the message names no member."""
+
+
+class UnsupportedMember(StreamMalformed):
+    """A member uses a tar feature the readers refuse: a sparse file."""
+
+
+class TooManyHeaders(StreamMalformed):
+    """More extension headers than the reader was allowed."""
 
 
 class _Aborted(Exception):
@@ -127,11 +145,17 @@ class ReadEntry:
 
 
 class TarReader:
-    """Reads tar members one at a time, holding at most `EXTENSION_MAX_BYTES` for any header."""
+    """Reads tar members one at a time.
 
-    def __init__(self, source: ChunkSource) -> None:
+    Extension headers are held at most `EXTENSION_MAX_BYTES` and `MAX_ENTRY_EXTENSIONS` for one
+    member, and `max_extensions` bounds them over the whole stream when it is given.
+    """
+
+    def __init__(self, source: ChunkSource, *, max_extensions: int | None = None) -> None:
         self._source = source
         self._current: EntryBody | None = None
+        self._max_extensions = max_extensions
+        self._extensions = 0
 
     def next(self) -> ReadEntry | None:
         """Return the next member, or None after the end-of-archive marker."""
@@ -141,6 +165,8 @@ class TarReader:
         long_name: str | None = None
         long_link: str | None = None
         records: dict[str, str] = {}
+        held = 0
+        count = 0
         while True:
             block = self._source.read_exact(BLOCK)
             if len(block) < BLOCK:
@@ -151,21 +177,27 @@ class TarReader:
                 info = tarfile.TarInfo.frombuf(block, "utf-8", "surrogateescape")
             except tarfile.HeaderError:
                 raise StreamMalformed("the archive has a header that cannot be read") from None
+            if info.type not in _EXTENSION_TYPES:
+                return self._entry(info, long_name, long_link, records)
+            count += 1
+            self._extensions += 1
+            if count > MAX_ENTRY_EXTENSIONS:
+                raise StreamMalformed("the archive has too many headers for one member")
+            if self._max_extensions is not None and self._extensions > self._max_extensions:
+                raise TooManyHeaders("the archive has more headers than the limit allows")
+            data = self._extension(info, EXTENSION_MAX_BYTES - held)
+            held += len(data)
             if info.type in (tarfile.GNUTYPE_LONGNAME, tarfile.GNUTYPE_LONGLINK):
-                text = self._extension(info).split(b"\0", 1)[0].decode("utf-8", "surrogateescape")
+                text = data.split(b"\0", 1)[0].decode("utf-8", "surrogateescape")
                 if info.type == tarfile.GNUTYPE_LONGNAME:
                     long_name = text
                 else:
                     long_link = text
             elif info.type in (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE):
-                records.update(_pax_records(self._extension(info)))
-            elif info.type == tarfile.XGLTYPE:
-                self._extension(info)
-            else:
-                return self._entry(info, long_name, long_link, records)
+                records.update(_pax_records(data))
 
-    def _extension(self, info: tarfile.TarInfo) -> bytes:
-        if info.size > EXTENSION_MAX_BYTES:
+    def _extension(self, info: tarfile.TarInfo, allowance: int) -> bytes:
+        if info.size < 0 or info.size > allowance:
             raise StreamMalformed("the archive has a header that is too large")
         data = self._source.read_exact(info.size)
         if len(data) < info.size:
@@ -185,6 +217,9 @@ class TarReader:
         if long_link is not None:
             info.linkname = long_link
         _apply_pax(info, records)
+        if info.size < 0 or info.uid < 0 or info.gid < 0:
+            raise StreamMalformed("the archive has a header with a negative number")
+        info.mtime = max(0, info.mtime)
         info.name = info.name.rstrip("/") or info.name
         carries_data = (
             info.type in tarfile.REGULAR_TYPES or info.type not in tarfile.SUPPORTED_TYPES
@@ -212,6 +247,8 @@ def _pax_records(data: bytes) -> dict[str, str]:
 
 
 def _apply_pax(info: tarfile.TarInfo, records: dict[str, str]) -> None:
+    if any(key.startswith(_PAX_SPARSE_PREFIX) for key in records):
+        raise UnsupportedMember("the archive holds a sparse file")
     try:
         for key in _PAX_TEXT:
             if key in records:
@@ -221,6 +258,8 @@ def _apply_pax(info: tarfile.TarInfo, records: dict[str, str]) -> None:
                 setattr(info, key, int(records[key]))
         if "mtime" in records:
             info.mtime = float(records["mtime"])
+            if not math.isfinite(info.mtime):
+                raise ValueError("mtime")
     except ValueError:
         raise StreamMalformed("the archive has a header that cannot be read") from None
     info.pax_headers = {k: v for k, v in records.items() if k.startswith(XATTR_PREFIX)}

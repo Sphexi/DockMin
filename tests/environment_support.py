@@ -31,6 +31,7 @@ from app.services.engine_setup import EngineRuntime
 from app.services.environment_connector import ProbeCoordinator
 from app.services.environments import ConnectionInput, EnvironmentSpec, TlsInput
 from app.services.image_jobs import ImageJobRegistry
+from app.services.imported_volumes import ImportedVolumes
 from app.services.object_locks import ObjectLockRegistry, StreamSlots
 from app.services.stack_jobs import StackJobRegistry
 from app.services.terminals import RestrictedCache, TerminalTickets
@@ -162,6 +163,7 @@ class FakeEngineRuntime:
     restricted_containers: RestrictedCache = field(default_factory=RestrictedCache)
     image_jobs: ImageJobRegistry = field(default_factory=ImageJobRegistry)
     stack_jobs: StackJobRegistry = field(default_factory=StackJobRegistry)
+    imported_volumes: ImportedVolumes = field(default_factory=ImportedVolumes)
     compose: Any = None
     instance_name: str = "dockmin"
 

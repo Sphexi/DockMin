@@ -87,7 +87,7 @@
 {% else %}
 <p class="field__help">Only bound tags can be checked. Pull a tag to bind it to a credential set.</p>
 {% endif %}
-{{ update_results(none) }}
+{{ update_results(none, announce=false) }}
 {% endmacro %}
 
 {% macro configuration_tab(detail) %}

@@ -36,8 +36,9 @@ _CREDENTIAL_NAMES: Final = frozenset(
         "apikey",
     }
 )
-_USERINFO_PASSWORD: Final = re.compile(r"(?<![\w.:+-])(?P<user>[^\s:/@,;]{1,128}):[^\s@,;/]+(?=@)")
-_PASSWORD_REMOVED: Final = "password"
+_USER_NAMES: Final = frozenset({"user", "username"})
+_USERINFO: Final = re.compile(r"(?:^|[/\s,;=])[^\s:/@,;=]{1,128}:\S*@")
+_ENTRY_SEPARATORS: Final = re.compile(r"[,;\s]+")
 
 
 class VolumeManifest(BaseModel):
@@ -72,7 +73,7 @@ def build_manifest(
     labels: Mapping[str, str],
     options: Mapping[str, str],
 ) -> VolumeManifest:
-    """Build the manifest of a volume, keeping its labels and options as far as Q4 allows."""
+    """Build a volume's manifest without credential options or access and product labels."""
     kept, removed = filter_options(options)
     return VolumeManifest(
         format_version=FORMAT_VERSION,
@@ -101,20 +102,17 @@ def filter_labels(labels: Mapping[str, str]) -> dict[str, str]:
 def filter_options(options: Mapping[str, str]) -> tuple[dict[str, str], list[str]]:
     """Return the options without credentials, and the keys that were removed.
 
-    An option whose own key names a credential is dropped whole. In every other value, a
-    comma-separated entry that names a credential is dropped, the password of a `user%password`
-    pair and the password of `user:password@host` are cut, and each is listed as `key.name`.
-    No value is ever listed.
+    An option is dropped whole when its key names a credential or its value carries one: an
+    entry that names a credential, the password of a `user%password` pair, or the password of
+    `user:password@host`. Each dropped option is listed by its key; no value is ever listed.
     """
     kept: dict[str, str] = {}
     removed: list[str] = []
     for key, value in sorted(options.items()):
-        if _is_credential(key):
+        if _is_credential(key) or _carries_credential(value):
             removed.append(key)
-            continue
-        cleaned, cut = _clean_value(value)
-        kept[key] = cleaned
-        removed.extend(f"{key}.{name}" for name in cut)
+        else:
+            kept[key] = value
     return kept, removed
 
 
@@ -122,20 +120,11 @@ def _is_credential(name: str) -> bool:
     return name.strip().casefold() in _CREDENTIAL_NAMES or DEFAULT_SCRUBBER.is_sensitive(name)
 
 
-def _clean_value(value: str) -> tuple[str, list[str]]:
-    cut: list[str] = []
-    entries: list[str] = []
-    for entry in value.split(","):
+def _carries_credential(value: str) -> bool:
+    for entry in _ENTRY_SEPARATORS.split(value):
         name, separator, text = entry.partition("=")
-        if separator and _is_credential(name):
-            cut.append(name.strip())
+        if not separator:
             continue
-        if separator and name.strip().casefold() in {"user", "username"} and "%" in text:
-            entry = f"{name}={text.partition('%')[0]}"
-            cut.append(_PASSWORD_REMOVED)
-        entries.append(entry)
-    cleaned = ",".join(entries)
-    without_userinfo = _USERINFO_PASSWORD.sub(lambda match: match["user"], cleaned)
-    if without_userinfo != cleaned:
-        cut.append(_PASSWORD_REMOVED)
-    return without_userinfo, cut
+        if _is_credential(name) or (name.casefold() in _USER_NAMES and "%" in text):
+            return True
+    return _USERINFO.search(value) is not None

@@ -28,17 +28,13 @@ FORM_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
 STREAMED_UPLOAD_ROUTES: Final[frozenset[tuple[str, str]]] = frozenset(
     {("POST", "/restore/archive")}
 )
-# Streamed upload routes whose path carries identifiers, with a body cap of their own.
 CONTEXT_UPLOAD_PATH: Final = re.compile(
     r"/environments/[1-9][0-9]{0,18}/stacks/[a-z0-9][a-z0-9_-]{0,62}/contexts/-/upload"
 )
-# The volume import upload, with a body cap and deadline of its own.
 VOLUME_IMPORT_UPLOAD_PATH: Final = re.compile(r"/environments/[1-9][0-9]{0,18}/volumes/-/import")
-# The stack import upload, Compose and Swarm, with a body cap and deadline of its own.
 STACK_IMPORT_UPLOAD_PATH: Final = re.compile(
     r"/environments/[1-9][0-9]{0,18}/(?:swarm/)?stacks/-/import"
 )
-# The container import upload, with a body cap and deadline of its own.
 CONTAINER_IMPORT_UPLOAD_PATH: Final = re.compile(
     r"/environments/[1-9][0-9]{0,18}/containers/-/import"
 )

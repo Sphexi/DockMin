@@ -37,9 +37,10 @@ class RewrittenArchive:
     async def __anext__(self) -> bytes:
         if self._done:
             raise StopAsyncIteration
-        self._pending = asyncio.ensure_future(asyncio.to_thread(next, self._chunks, None))
+        pending = asyncio.ensure_future(asyncio.to_thread(next, self._chunks, None))
+        self._pending = pending
         try:
-            chunk = await self._pending
+            chunk = await asyncio.shield(pending)
         except BaseException:
             self._done = True
             raise

@@ -20,6 +20,8 @@ from app.services.volume_export_writer import (
     ReadEntry,
     StreamMalformed,
     TarReader,
+    TooManyHeaders,
+    UnsupportedMember,
 )
 from app.services.volume_manifest import (
     DATA_DIRECTORY,
@@ -34,6 +36,8 @@ MAX_MEMBERS: Final = 2_000_000
 MAX_EXTRACTED_BYTES: Final = 64 * 1024**3
 MAX_PATH_BYTES: Final = 4096
 MAX_COMPONENT_BYTES: Final = 255
+MAX_PATH_DEPTH: Final = 128
+MAX_NAME_BYTES: Final = 64 * 1024 * 1024
 MANIFEST_MAX_BYTES: Final = 1024 * 1024
 SKIPPED_MAX_BYTES: Final = 16 * 1024 * 1024
 OUTPUT_CHUNK_BYTES: Final = 256 * 1024
@@ -44,6 +48,7 @@ _HEADER_ALLOWANCE: Final = 8192
 _SETID_BITS: Final = 0o6000
 _MODE_BITS: Final = 0o7777
 _ID_LIMIT: Final = 2**32
+_NAME_OVERHEAD: Final = 32
 _MTIME_LIMIT: Final = 2**34
 _USER_XATTR: Final = "SCHILY.xattr.user."
 _XATTR: Final = "SCHILY.xattr."
@@ -66,6 +71,8 @@ class ArchiveRefusal(StrEnum):
     ABSOLUTE_NAME = "absolute_name"
     PARENT_COMPONENT = "parent_component"
     NAME_TOO_LONG = "name_too_long"
+    PATH_TOO_DEEP = "path_too_deep"
+    NAMES_TOO_LARGE = "names_too_large"
     BAD_NAME = "bad_name"
     OUTSIDE_DATA = "outside_data"
     DUPLICATE_NAME = "duplicate_name"
@@ -94,6 +101,8 @@ MESSAGES: Final = {
     ArchiveRefusal.ABSOLUTE_NAME: "The archive holds an entry with an absolute name.",
     ArchiveRefusal.PARENT_COMPONENT: "The archive holds an entry whose name contains `..`.",
     ArchiveRefusal.NAME_TOO_LONG: "The archive holds an entry with a name that is too long.",
+    ArchiveRefusal.PATH_TOO_DEEP: "The archive holds an entry nested too deeply.",
+    ArchiveRefusal.NAMES_TOO_LARGE: "The archive's entry names take more space than allowed.",
     ArchiveRefusal.BAD_NAME: "The archive holds an entry with an unusable name or link target.",
     ArchiveRefusal.OUTSIDE_DATA: "The archive holds an entry outside its data directory.",
     ArchiveRefusal.DUPLICATE_NAME: "The archive holds the same name twice.",
@@ -136,10 +145,11 @@ class VolumeArchiveRefused(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ArchiveLimits:
-    """Bounds on an archive: entries, bytes of file data, and bytes of the gzip stream."""
+    """Bounds on an archive: entries, bytes of file data, and bytes held for entry names."""
 
     max_members: int = MAX_MEMBERS
     max_bytes: int = MAX_EXTRACTED_BYTES
+    max_name_bytes: int = MAX_NAME_BYTES
 
     @property
     def ceiling(self) -> int:
@@ -220,6 +230,8 @@ def _relative_path(raw: str, *, member: str) -> str:
     if parts[0] != DATA_DIRECTORY:
         raise VolumeArchiveRefused(ArchiveRefusal.OUTSIDE_DATA, member)
     rest = parts[1:]
+    if len(rest) > MAX_PATH_DEPTH:
+        raise VolumeArchiveRefused(ArchiveRefusal.PATH_TOO_DEEP, member)
     if any(part in ("", ".") for part in rest):
         raise VolumeArchiveRefused(ArchiveRefusal.BAD_NAME, member)
     if any(_utf8_size(part, member) > MAX_COMPONENT_BYTES for part in rest):
@@ -227,35 +239,74 @@ def _relative_path(raw: str, *, member: str) -> str:
     return "/".join(rest)
 
 
+class _Node:
+    __slots__ = ("children", "kind")
+
+    def __init__(self) -> None:
+        self.kind: Kind | None = None
+        self.children: dict[str, _Node] | None = None
+
+
+def _name_cost(part: str) -> int:
+    return (len(part) if part.isascii() else len(part.encode("utf-8"))) + _NAME_OVERHEAD
+
+
 class _Layout:
-    """Tracks the names seen so far, so conflicts and writes through links are caught."""
+    """Tracks the names seen so far as a tree of components, within a budget of held bytes."""
 
     def __init__(self, limits: ArchiveLimits) -> None:
         self._limits = limits
-        self.kinds: dict[str, Kind] = {}
-        self._directories: set[str] = set()
+        self._root = _Node()
+        self._held = 0
+        self.root_seen = False
         self.members = 0
         self.total = 0
 
+    def kind_of(self, name: str) -> Kind | None:
+        """Return the kind an accepted entry of this name has, or None."""
+        node: _Node | None = self._root
+        for part in name.split("/") if name else ():
+            node = None if node is None or node.children is None else node.children.get(part)
+            if node is None:
+                return None
+        return None if node is None else node.kind
+
     def accept_name(self, name: str, kind: Kind, size: int, display: str) -> None:
-        if name in self.kinds:
-            raise VolumeArchiveRefused(ArchiveRefusal.DUPLICATE_NAME, display)
         parts = name.split("/")
-        for end in range(1, len(parts)):
-            prefix = "/".join(parts[:end])
-            owner = self.kinds.get(prefix)
-            if owner == "symlink":
-                raise VolumeArchiveRefused(ArchiveRefusal.SYMLINK_PARENT, display)
-            if owner is not None and owner != "directory":
+        last = len(parts) - 1
+        node = self._root
+        depth = 0
+        while depth <= last:
+            child = None if node.children is None else node.children.get(parts[depth])
+            if child is None:
+                break
+            if depth < last:
+                if child.kind == "symlink":
+                    raise VolumeArchiveRefused(ArchiveRefusal.SYMLINK_PARENT, display)
+                if child.kind is not None and child.kind != "directory":
+                    raise VolumeArchiveRefused(ArchiveRefusal.NAME_CONFLICT, display)
+            node = child
+            depth += 1
+        if depth > last:
+            if node.kind is not None:
+                raise VolumeArchiveRefused(ArchiveRefusal.DUPLICATE_NAME, display)
+            if kind != "directory":
                 raise VolumeArchiveRefused(ArchiveRefusal.NAME_CONFLICT, display)
-        if kind != "directory" and name in self._directories:
-            raise VolumeArchiveRefused(ArchiveRefusal.NAME_CONFLICT, display)
         if self.members >= self._limits.max_members:
             raise VolumeArchiveRefused(ArchiveRefusal.TOO_MANY_MEMBERS, display)
         if self.total + size > self._limits.max_bytes:
             raise VolumeArchiveRefused(ArchiveRefusal.TOTAL_TOO_LARGE, display)
-        self._directories.update("/".join(parts[:end]) for end in range(1, len(parts)))
-        self.kinds[name] = kind
+        cost = sum(_name_cost(part) for part in parts[depth:])
+        if self._held + cost > self._limits.max_name_bytes:
+            raise VolumeArchiveRefused(ArchiveRefusal.NAMES_TOO_LARGE, display)
+        for part in parts[depth:]:
+            child = _Node()
+            if node.children is None:
+                node.children = {}
+            node.children[part] = child
+            node = child
+        node.kind = kind
+        self._held += cost
         self.members += 1
         self.total += size
 
@@ -275,7 +326,7 @@ def _hardlink_target(raw: str, layout: _Layout, display: str) -> str:
         target = _relative_path(raw, member=display)
     except VolumeArchiveRefused:
         raise VolumeArchiveRefused(ArchiveRefusal.HARDLINK_TARGET, display) from None
-    if layout.kinds.get(target) != "file":
+    if layout.kind_of(target) != "file":
         raise VolumeArchiveRefused(ArchiveRefusal.HARDLINK_TARGET, display)
     return target
 
@@ -320,6 +371,8 @@ class VolumeChecker:
         else:
             raise VolumeArchiveRefused(ArchiveRefusal.MEMBER_TYPE, raw)
         name = _relative_path(raw, member=raw)
+        if info.size < 0:
+            raise VolumeArchiveRefused(ArchiveRefusal.MALFORMED, raw)
         if not 0 <= info.uid < _ID_LIMIT or not 0 <= info.gid < _ID_LIMIT:
             raise VolumeArchiveRefused(ArchiveRefusal.BAD_OWNER, raw)
         linkname = ""
@@ -329,9 +382,9 @@ class VolumeChecker:
         elif kind == "hardlink":
             linkname = _hardlink_target(info.linkname, self.layout, raw)
         if not name:
-            if kind != "directory" or "" in self.layout.kinds:
+            if kind != "directory" or self.layout.root_seen:
                 raise VolumeArchiveRefused(ArchiveRefusal.NAME_CONFLICT, raw)
-            self.layout.kinds[""] = "directory"
+            self.layout.root_seen = True
             return self._member("root", name, entry, linkname, size=0)
         size = info.size if kind == "file" else 0
         if kind == "directory" and info.size != 0:
@@ -394,6 +447,10 @@ class VolumeArchive:
             try:
                 with gzip.GzipFile(fileobj=raw, mode="rb") as unzipped:
                     yield from self._walk(self._source(unzipped))
+            except UnsupportedMember:
+                raise VolumeArchiveRefused(ArchiveRefusal.MEMBER_TYPE) from None
+            except TooManyHeaders:
+                raise VolumeArchiveRefused(ArchiveRefusal.TOO_MANY_MEMBERS) from None
             except (OSError, EOFError, zlib.error, StreamMalformed):
                 raise VolumeArchiveRefused(ArchiveRefusal.MALFORMED) from None
 
@@ -412,7 +469,7 @@ class VolumeArchive:
         return ChunkSource(pull)
 
     def _walk(self, source: ChunkSource) -> Iterator[Member]:
-        reader = TarReader(source)
+        reader = TarReader(source, max_extensions=self._limits.max_members)
         self.manifest = self._read_manifest(reader.next())
         finished = False
         while (entry := reader.next()) is not None:

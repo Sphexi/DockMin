@@ -1,9 +1,10 @@
 """Imports a container export archive: its networks and volumes, then the create form's state."""
 
 import asyncio
+import secrets
 import unicodedata
 from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -56,9 +57,15 @@ from app.services.export_manifest import (
     ContainerSection,
     ExportManifest,
     NetworkEntry,
+    open_manifest_secrets,
     sealed_name,
 )
-from app.services.export_sealing import SealError, open_sealed
+from app.services.export_sealing import SealError
+from app.services.export_unlock import (
+    UnlockAttemptsExhausted,
+    UnlockGate,
+    shared_unlock_gate,
+)
 from app.services.guards import require_administrator
 from app.services.host_files import (
     HelperImageMissing,
@@ -77,6 +84,7 @@ from app.services.host_objects import (
     write_settled_row,
 )
 from app.services.image_listing import read_containers, read_images
+from app.services.imported_volumes import RUN_LABEL, created_by_this_call
 from app.services.network_addressing import (
     NetworkRequest,
     overlapping,
@@ -97,16 +105,11 @@ from app.services.stack_import import (
 from app.services.stack_import_archive import (
     MAX_UPLOAD_BYTES,
     StackArchiveRefused,
+    VolumeFeed,
     VolumeSummary,
     inspect_container_archive,
-    stack_volume_tar,
 )
-from app.services.stack_import_store import (
-    SPOOL_DIRECTORY,
-    UNSEAL_FAILURE_LIMIT,
-    HeldStack,
-    StackImportStore,
-)
+from app.services.stack_import_store import SPOOL_DIRECTORY, HeldStack, StackImportStore
 from app.services.volume_import_store import SpoolFailure, spool_upload
 from app.services.volume_import_stream import RewrittenArchive
 from app.services.volume_views import VolumeNameInUse, VolumeRefused
@@ -134,9 +137,14 @@ _PATH_VOLUME: Final = "hostpath"
 
 
 class ContainerImportFailed(ProductError):
-    """Objects could not be created; the ones this import created were removed if it could."""
+    """The import failed after objects were created; the ones it made were removed if it could.
 
-    def __init__(self, reason: str, *, removed: Sequence[str], kept: Sequence[str]) -> None:
+    `cause` is the product's own text for the refusal that followed, when there was one.
+    """
+
+    def __init__(
+        self, reason: str, *, removed: Sequence[str], kept: Sequence[str], cause: str = ""
+    ) -> None:
         tail = (
             " Every object this import created was removed."
             if removed and not kept
@@ -145,7 +153,8 @@ class ContainerImportFailed(ProductError):
             else " These could not be removed; remove them from the networks and volumes "
             f"lists: {', '.join(kept)}."
         )
-        super().__init__(f"The archive's networks and volumes could not be created.{tail}")
+        head = cause or "The archive's networks and volumes could not be created."
+        super().__init__(f"{head}{tail}")
         self.reason = reason
         self.removed = tuple(removed)
         self.kept = tuple(kept)
@@ -166,6 +175,7 @@ class ContainerImportReview:
     secrets_mode: str
     opened: bool
     unlock_remaining: int
+    integrity_protected: bool
     plan: ContainerImportPlan
 
 
@@ -195,6 +205,7 @@ class _Run:
     made: list[_Made] = field(default_factory=list)
     bytes_written: int = 0
     helpers: int = 0
+    token: str = field(default_factory=lambda: secrets.token_hex(16))
 
 
 def _section(manifest: ExportManifest) -> ContainerSection:
@@ -248,6 +259,23 @@ def _network_request(entry: NetworkEntry, environment_type: str | None) -> Netwo
     return request
 
 
+def _settings_of(entry: NetworkEntry) -> dict[str, Any]:
+    return {
+        "flags": tuple(
+            label
+            for label, on in (
+                ("internal", entry.internal),
+                ("attachable", entry.attachable),
+                ("IPv6", entry.enable_ipv6),
+            )
+            if on
+        ),
+        "pools": tuple((pool.subnet, pool.gateway, pool.ip_range) for pool in entry.pools),
+        "options": tuple(entry.options.items()),
+        "labels": tuple(entry.labels.items()),
+    }
+
+
 def _differences(entry: NetworkEntry, found: Network) -> tuple[str, ...]:
     archived = {pool.subnet for pool in entry.pools if pool.subnet}
     present = {pool.subnet for pool in found.ipam if pool.subnet}
@@ -279,6 +307,19 @@ def _failure_of(error: Exception) -> str:
     return type(error).__name__
 
 
+def _failed(error: Exception, removed: Sequence[str], kept: Sequence[str]) -> ContainerImportFailed:
+    """Describe a failure after objects were created, keeping the reason a refusal carried."""
+    if isinstance(error, ProductError):
+        reason = getattr(error, "reason", None)
+        return ContainerImportFailed(
+            reason if isinstance(reason, str) else type(error).__name__,
+            removed=removed,
+            kept=kept,
+            cause=str(error),
+        )
+    return ContainerImportFailed(_failure_of(error), removed=removed, kept=kept)
+
+
 class ContainerImportService:
     """Receives, reviews and imports container archives; each import is one audited operation."""
 
@@ -296,6 +337,7 @@ class ContainerImportService:
         store: StackImportStore,
         prepared: PreparedContainerStore,
         data_dir: Path,
+        gate: UnlockGate | None = None,
     ) -> None:
         self._db = db
         self._database = database
@@ -308,7 +350,7 @@ class ContainerImportService:
         self._store = store
         self._prepared = prepared
         self._data_dir = data_dir
-        self._unseal_slots = asyncio.Semaphore(2)
+        self._gate = gate or shared_unlock_gate()
 
     async def receive(
         self,
@@ -385,7 +427,8 @@ class ContainerImportService:
             instance_version=manifest.instance_version,
             secrets_mode=manifest.secrets,
             opened=held.opened is not None,
-            unlock_remaining=max(0, UNSEAL_FAILURE_LIMIT - self._store.failures(session_id)),
+            unlock_remaining=self._gate.remaining(session_id),
+            integrity_protected=manifest.integrity_protected,
             plan=plan,
         )
 
@@ -400,7 +443,8 @@ class ContainerImportService:
         """Open the sealed values with the passphrase and keep them with the held upload.
 
         The passphrase is used once, in a worker thread, and kept nowhere. UnlockFailed counts
-        against the session's attempts; UnlockLimited once they are used.
+        against the session's attempts; UnlockLimited once they are used. The manifest's MAC is
+        verified first, so a modified archive does not open.
         """
         await self._require_environment(actor, environment_id)
         held = await self._held(actor, session_id, environment_id, upload_id)
@@ -409,18 +453,19 @@ class ContainerImportService:
             raise ValidationFailed({"passphrase": "This archive holds no sealed values."})
         if not passphrase:
             raise ValidationFailed({"passphrase": "Enter the passphrase."})
-        if self._store.failures(session_id) >= UNSEAL_FAILURE_LIMIT:
-            raise UnlockLimited()
-        async with self._unseal_slots:
+        try:
+            reservation = self._gate.reserve(session_id)
+        except UnlockAttemptsExhausted:
+            raise UnlockLimited() from None
+        async with self._gate.slot():
             try:
-                opened = await asyncio.to_thread(
-                    open_sealed, manifest.sealed, passphrase, manifest.archive_id
-                )
+                opened = await asyncio.to_thread(open_manifest_secrets, manifest, passphrase)
             except SealError:
                 logger.warning(
                     "container_import_unlock_failed", extra={"environment_id": environment_id}
                 )
-                raise UnlockFailed(self._store.note_failure(session_id)) from None
+                raise UnlockFailed(reservation.remaining) from None
+        reservation.refund()
         held.opened = opened
 
     async def cancel(
@@ -456,14 +501,28 @@ class ContainerImportService:
         created from the archive's options, and each archived volume is created and written
         before the form state is produced. A failure removes, in reverse order, what this import
         created and names it on the failure row. The held upload is removed once anything has
-        been created. ImportBlocked, StackImportChanged, StackUploadGone, ValidationFailed,
-        ContainerImportFailed, NetworkNameInUse, NetworkRefused, VolumeNameInUse, VolumeRefused,
-        EnvironmentUnavailable, ObjectBusy.
+        been created. An upload already being imported is refused. ImportBlocked,
+        StackImportChanged, StackUploadGone, ValidationFailed, ContainerImportFailed,
+        NetworkNameInUse, NetworkRefused, VolumeNameInUse, VolumeRefused, EnvironmentUnavailable,
+        ObjectBusy.
         """
-        audit = current_audit()
         require_administrator(actor)
         await self._require_environment(actor, environment_id)
         held = await self._held_for(actor, environment_id, upload_id)
+        try:
+            return await self._prepare(actor, environment_id, held, choices, expected_plan)
+        finally:
+            held.importing = False
+
+    async def _prepare(
+        self,
+        actor: Principal,
+        environment_id: int,
+        held: HeldStack,
+        choices: ContainerChoices,
+        expected_plan: str,
+    ) -> ContainerPrepared:
+        audit = current_audit()
         manifest = held.summary.manifest
         section = _section(manifest)
         audit.target_id = manifest.name[:_NAME_LIMIT]
@@ -502,7 +561,6 @@ class ContainerImportService:
             for item in plan.host_paths
             if item.choice == VOLUME
         )
-        held.importing = True
         try:
             async with AsyncExitStack() as stack:
                 await stack.enter_async_context(hold_all(self._locks, keys, holder))
@@ -512,33 +570,26 @@ class ContainerImportService:
                     await self._claim(actor, environment_id, run)
                 except BaseException as error:
                     await self._roll_back(actor, environment_id, client, run, error)
-                    if (
-                        run.made
-                        and isinstance(error, Exception)
-                        and not isinstance(error, ProductError)
-                    ):
-                        audit.reason = _failure_of(error)
-                        raise ContainerImportFailed(
-                            audit.reason,
-                            removed=_names(audit.detail, "objects_removed"),
-                            kept=_names(audit.detail, "objects_kept"),
-                        ) from None
+                    if run.made and isinstance(error, Exception):
+                        failure = _failed(
+                            error,
+                            _names(audit.detail, "objects_removed"),
+                            _names(audit.detail, "objects_kept"),
+                        )
+                        audit.reason = failure.reason
+                        raise failure from None
                     raise
         finally:
-            held.importing = False
             if run.made:
                 with anyio.CancelScope(shield=True):
                     await self._store.discard(held.id)
         await self._store.discard(held.id)
-        session_id = actor.session_id
-        if session_id is None:
-            raise StackUploadGone()
         prepared_id = self._prepared.new_id()
         self._prepared.hold(
             PreparedContainer(
                 id=prepared_id,
                 user_id=actor.user_id,
-                session_id=session_id,
+                session_id=held.session_id,
                 environment_id=environment_id,
                 source_name=manifest.name,
                 exported=manifest.exported_at.isoformat(),
@@ -580,15 +631,24 @@ class ContainerImportService:
         return held
 
     async def _held_for(self, actor: Principal, environment_id: int, upload_id: str) -> HeldStack:
+        """Return the held upload and mark it as being imported; refuse one already marked.
+
+        The caller clears the mark, and only the request that set it may.
+        """
         audit = current_audit()
         if actor.session_id is None:
             audit.reason = "upload_gone"
             raise StackUploadGone()
         try:
-            return await self._held(actor, actor.session_id, environment_id, upload_id)
+            held = await self._held(actor, actor.session_id, environment_id, upload_id)
         except StackUploadGone:
             audit.reason = "upload_gone"
             raise
+        if held.importing:
+            audit.reason = "import_running"
+            raise ImportBlocked("import_running", "This upload is already being imported.")
+        held.importing = True
+        return held
 
     def _require_clear(self, plan: ContainerImportPlan) -> None:
         audit = current_audit()
@@ -732,9 +792,12 @@ class ContainerImportService:
         plans: list[NetworkPlan] = []
         for entry in section.networks:
             found = present.get(entry.name)
+            settings = _settings_of(entry)
             if found is not None:
                 plans.append(
-                    NetworkPlan(entry.name, found.driver, "reuse", _differences(entry, found))
+                    NetworkPlan(
+                        entry.name, found.driver, "reuse", _differences(entry, found), **settings
+                    )
                 )
                 continue
             problem: str | None = None
@@ -745,7 +808,7 @@ class ContainerImportService:
                     problem = f"its subnet overlaps the existing network {clash[0]}."
             except ValidationFailed as invalid:
                 problem = "; ".join(invalid.fields.values())
-            plans.append(NetworkPlan(entry.name, entry.driver, "create", (), problem))
+            plans.append(NetworkPlan(entry.name, entry.driver, "create", (), problem, **settings))
         return tuple(plans)
 
     def _volumes(
@@ -904,22 +967,26 @@ class ContainerImportService:
         for path in plan.host_paths:
             if path.choice == VOLUME:
                 await self._require_absent(client, path.volume)
-        for item in plan.volumes:
-            await self._require_absent(client, item.name)
-            await self._create_volume(client, item.name, run)
-            if item.entries > 0:
-                stream = RewrittenArchive(chunks=stack_volume_tar(held.path, item.prefix))
-                try:
-                    async with HostFileReader(client).volume_session(
-                        actor, item.name, image=image, writable=True
-                    ) as helper:
-                        run.helpers += 1
-                        audit.detail["helper_container"] = helper.container_id
-                        await helper.write(stream)
-                finally:
-                    with anyio.CancelScope(shield=True):
-                        await stream.aclose()
-                run.bytes_written += stream.bytes_out
+        feed = VolumeFeed(held.path)
+        try:
+            for item in plan.volumes:
+                await self._require_absent(client, item.name)
+                await self._create_volume(client, item.name, run)
+                if item.entries > 0:
+                    stream = RewrittenArchive(chunks=feed.tar(item.prefix))
+                    try:
+                        async with HostFileReader(client).volume_session(
+                            actor, item.name, image=image, writable=True
+                        ) as helper:
+                            run.helpers += 1
+                            audit.detail["helper_container"] = helper.container_id
+                            await helper.write(stream)
+                    finally:
+                        with anyio.CancelScope(shield=True):
+                            await stream.aclose()
+                    run.bytes_written += stream.bytes_out
+        finally:
+            feed.close()
         volumes = sum(1 for made in run.made if made.kind == "volume")
         audit.detail.update(
             volumes_created=volumes,
@@ -938,8 +1005,9 @@ class ContainerImportService:
         raise VolumeNameInUse()
 
     async def _create_volume(self, client: EngineClient, name: str, run: _Run) -> Volume:
+        labels = {RUN_LABEL: run.token}
         task: asyncio.Future[Volume] = asyncio.ensure_future(
-            client.volumes.create(name=name, driver="local", driver_opts={}, labels={})
+            client.volumes.create(name=name, driver="local", driver_opts={}, labels=labels)
         )
         try:
             volume = await asyncio.shield(task)
@@ -953,11 +1021,21 @@ class ContainerImportService:
                 name_in_use=VolumeNameInUse,
                 refused=VolumeRefused,
             ) from None
+        if not volume.created_at:
+            with suppress(EngineError):
+                volume = await client.volumes.inspect(name)
+        if not created_by_this_call(volume, labels):
+            current_audit().reason = "name_in_use"
+            raise VolumeNameInUse()
         run.made.append(_Made("volume", name, name, volume.created_at))
         return volume
 
     async def _settle_creation(
-        self, task: asyncio.Future[Any], kind: str, name: str, run: _Run
+        self,
+        task: asyncio.Future[Any],
+        kind: str,
+        name: str,
+        run: _Run,
     ) -> None:
         with anyio.CancelScope(shield=True):
             done, _ = await asyncio.wait({task}, timeout=_REMOVE_SECONDS)
@@ -965,7 +1043,7 @@ class ContainerImportService:
                 result = task.result()
                 if kind == "network":
                     run.made.append(_Made("network", name, str(result)))
-                else:
+                elif created_by_this_call(result, {RUN_LABEL: run.token}):
                     run.made.append(_Made("volume", name, name, getattr(result, "created_at", "")))
 
     async def _claim(self, actor: Principal, environment_id: int, run: _Run) -> None:

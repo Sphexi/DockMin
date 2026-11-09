@@ -1504,7 +1504,7 @@ Export downloads one container's configuration as a gzip archive: the state of t
 | Lock | Each chosen volume, from the confirmed download until it ends. The container is not locked ([Busy](#busy)) |
 | Concurrency | One export at a time on an environment, two in all, shared with volume and stack exports ([Export limits](Usage-Stacks#export-limits)) |
 | Import | [Import](#import) |
-| Recorded | `container_exported` ([Export rows](#export-rows)) |
+| Recorded | `container_export_started` and `container_exported` ([Export rows](#export-rows)) |
 
 ### Export confirmation
 
@@ -1557,7 +1557,7 @@ A tar archive compressed with gzip, written as a [volume export](Usage-Volumes#a
 | `name` | string | The container's name |
 | `description` | string | `Container {name}` |
 | `secrets` | string | `none` (no variable marked), `sealed` or `omitted` ([Export secret values](#export-secret-values)) |
-| `sealed` | object | Present when `secrets` is `sealed`: `cipher`, `kdf` and `records` ([Export sealing](Reference-Security#export-sealing)) |
+| `sealed` | object | Present when `secrets` is `sealed`: `cipher`, `kdf`, `records` and `mac`, an HMAC-SHA-256 over the whole manifest except `sealed.mac` ([Export sealing](Reference-Security#export-sealing)) |
 | `container` | object | `form`, `environment`, `networks` |
 | `images` | array | One entry: `reference`, `tag`, `digest`, `used_by` (the container's name) |
 | `volumes` | array | One entry for each chosen volume: `prefix` (`volumes/{index}`) and `manifest`, the volume's manifest |
@@ -1657,6 +1657,7 @@ A refusal before the download starts renders a page at the real status code, wit
 - The review digest is a keyed hash of the container's form values, including environment values, the user-defined networks, the image reference and the volumes' drivers. The key is held in memory by the dockmin process and the hash reveals no value.
 - A request refused by the page's own checks, before it reaches the service, writes no row.
 - An export that fails after the download started ends the response without the gzip trailer. `container_exported` records `completed` `false` and the reason ([Export rows](#export-rows)).
+- A refusal that reaches the service records a `container_export_started` failure with its reason ([Export rows](#export-rows)).
 
 ### Export limits and format version
 
@@ -1771,6 +1772,7 @@ The other messages (not gzip, unreadable, too large when extracted, no `manifest
 |---|---|
 | Heading | `Review the import`. Subtitle: `Nothing has been created yet. Check what the archive needs, then continue to the create form.` Button `Back to containers` |
 | `The archive` | Environment; Format version (`{N}, written by dockmin {version}`); Exported (time); Source container (the name in the manifest); Size as uploaded; Volume data (`{size} in {N} volumes`); SHA-256 of the uploaded file |
+| Alert `This archive has no integrity protection` | Shown when the archive has no MAC (`secrets` `omitted` or `none`): `Nothing in it can be verified as unmodified: not the form's values, not the networks, not the volume data.` |
 | `Sealed values` | Shown when the archive's `secrets` is `sealed`. [Import secret values](#import-secret-values) |
 | `Networks` | [Import networks](#import-networks) |
 | `Volumes and their data` | [Import volumes](#import-volumes) |
@@ -1792,7 +1794,8 @@ The other messages (not gzip, unreadable, too large when extracted, no `manifest
 
 | Item | Value |
 |---|---|
-| Table | `Network`, `Driver`, `What happens`. One row for each user-defined network the archive names. With none: `The container joins no user-defined network.` |
+| Table | `Network`, `Driver`, `What happens`, `The archive's settings`. One row for each user-defined network the archive names. With none: `The container joins no user-defined network.` |
+| `The archive's settings` | The flags that are on (`internal`, `attachable`, `IPv6`), each address pool (`Pool {subnet}`, with `gateway {gateway}` and `range {range}` when set), each option (`Option {key}={value}`) and each label (`Label {key}={value}`), or `—` when none. Listed for a network that is created and for one that exists |
 | Missing on the host | `Created from the archive's options` |
 | Present on the host | `Exists and is used as it is`. When the host's network differs from the archive's in the driver, `internal`, IPv6 or the set of subnets: `Exists and is used as it is. It differs from the archive in: {aspects}.`, the aspects being `driver`, `internal`, `IPv6` and `subnets` |
 | Created with | The archive's driver, `internal`, `attachable` and IPv6 settings, address pool, options and labels, and the default address management driver, as the [network create form](Usage-Networks#create) sends them |
@@ -1809,7 +1812,7 @@ The other messages (not gzip, unreadable, too large when extracted, no `manifest
 | Table | `Archived volume`, `Created as`, `Mounted at`, `Entries`, `Size`. `Created as` is a text input holding the name the volume is created under, defaulting to the archived name |
 | Volumes offered | Archived volumes of driver `local` that a `volume` mount of the form uses |
 | Not written | `Archived volumes that are not written:` lists a volume with a driver other than `local` (`Only volumes of the local driver are written.`) and a volume no mount uses (`No mount of the container uses this volume.`) |
-| Created with | Driver `local`, no driver options and no labels. Archived driver options and labels are not applied, so an archive cannot create a volume backed by a path on the host |
+| Created with | Driver `local`, no driver options and one label, `dockmin.import`, with a value unique to the import. Archived driver options and labels are not applied, so an archive cannot create a volume backed by a path on the host |
 | Written | Before the form opens. A helper container, created from an image already on the host and never started, mounts the volume read-write and receives the files ([Import helper](Usage-Volumes#import-helper)) |
 | Files | Written as archived: numeric owner ids and modes are kept, setuid and setgid bits are cleared, owner names are emptied. The volume's root owner and mode are not applied. Only `user.` extended attributes are applied ([Modes and owners](Usage-Volumes#modes-and-owners)) |
 | Empty volume | A volume with no entries is created empty and needs no helper |
@@ -1818,9 +1821,9 @@ The other messages (not gzip, unreadable, too large when extracted, no `manifest
 | Invalid name | The rules of the [volume create form](Usage-Volumes#create). The message of the rule is shown under the field. Two volumes of the import cannot take one name (`another volume of this import uses this name.`) |
 | Rename | A new name is posted with `Check the choices`. The `volume` mounts of the form that used the archived name use the new one |
 | Helper image | `dockmin creates a helper container from the image {first 12 digits of the image id}, which is already on the host, once for each volume. It is never started, has no network and no capabilities, and is removed when its volume has been written.` With no image on the host and data to write: the alert `The host has no image to use`, `The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then check the import again.` The import is not offered |
-| Statements | `Each volume is created with the local driver, without the archive's driver options or labels, and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.` `If anything cannot be created or written, everything this import created is removed and nothing else changes.` |
+| Statements | `Each volume is created with the local driver, without the archive's driver options or labels (it carries one label that identifies this import), and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.` `If anything cannot be created or written, everything this import created is removed and nothing else changes.` |
 | No data | With no archived volume: `The archive carries no volume data.` Nothing is written and no helper image is needed |
-| Name check | Each volume is checked absent on the host under its lock, when its turn comes. One that exists refuses the import (reason `name_in_use`) |
+| Name check | Each volume is checked absent on the host under its lock, when its turn comes, and the created volume must carry this import's `dockmin.import` label. One that exists, or that Docker answers the create with without the label, refuses the import (reason `name_in_use`) and is left untouched |
 
 #### Import host paths
 
@@ -1861,8 +1864,8 @@ A host path is the source of a `bind` mount of the form.
 | Field | `Passphrase`, a password field with `autocomplete="off"`. Never put back into a page |
 | Open | `POST /environments/{id}/containers/-/import/{upload_id}/unlock`. The passphrase is applied in a worker thread and used once. The opened values are held in memory with the upload |
 | Success | `303` to the review with the notice `The sealed values were opened.` |
-| Wrong passphrase, or a sealed value that was altered | `422`, the review with `The passphrase did not open the archive. {N} attempts left in this session.` at `Passphrase`. The sealed values stay unopened |
-| Attempt limit | 5 failed attempts for each session, counted for the life of the process, whatever the upload, and shared with stack import: a failed attempt against either kind counts toward the same five. A success does not reset the count. Further attempts answer `429` with `Too many wrong passphrases in this session. Sign in again to try more, or enter the secret values by hand.` Signing in again starts a new session |
+| Wrong passphrase, a sealed value that was altered, or a modified archive | `422`, the review with `The passphrase did not open the archive. {N} attempts left in this session.` at `Passphrase`. The sealed values stay unopened. The manifest's MAC is verified first, so a modified archive reads as a wrong passphrase |
+| Attempt limit | 5 attempts for each sign-in session, counted for the life of the process, whatever the upload, and shared with stack import: an attempt against either kind comes from the same five. An attempt is taken before the key derivation starts. A success returns it. A failure, and a request that is cancelled, keep it. One key derivation runs at a time in the instance. Further attempts answer `429` with `Too many wrong passphrases in this session. Sign in again to try more, or enter the secret values by hand.` Signing in again starts a new session |
 | Empty passphrase | `422`, `Enter the passphrase.` Not counted |
 | Archive with no sealed values | `422`, `This archive holds no sealed values.` |
 | Entry | One password field `Value of {name}`, `autocomplete="off"`, for each secret not opened. Help: `Not opened. Open the archive above, or enter the value.` for a sealed archive, `The archive carries only the name. Enter the value.` for one that left them out. An opened value reads `Opened from the archive` |
@@ -1896,7 +1899,7 @@ The algorithm: [Export sealing](Reference-Security#export-sealing).
 
 | Item | Value |
 |---|---|
-| Plan binding | `expected_plan` is a keyed SHA-256 over the archive's digest, the container's name, the image reference and its status, whether the name is in use, each network (name, driver, action, differences, problem), each volume (source, chosen name, prefix, entries, whether the name is in use, problem), the skipped volumes, the host path sources and mount targets, the environment names and secret flags, and the helper image. The key is random for each process and is never stored, so a restart between the review and the confirmation answers `changed_since_review` |
+| Plan binding | `expected_plan` is a keyed SHA-256 over the archive's digest, the container's name, the image reference and its status, whether the name is in use, each network (name, driver, action, differences, problem, flags, address pools, options, labels), each volume (source, chosen name, prefix, entries, whether the name is in use, problem), the skipped volumes, the host path sources and mount targets, the environment names and secret flags, and the helper image. The key is random for each process and is never stored, so a restart between the review and the confirmation answers `changed_since_review` |
 | Not in the plan | The choice and the name for each host path, and the secret values. Deciding them does not change the plan |
 | Rename | A volume's name is in the plan. `Create networks and volumes, then open the form` after a rename without a check answers `The plan changed since you reviewed it; nothing was changed.` (`409`, reason `changed_since_review`) |
 | Control claim | A claim that cannot be saved is logged as `container_import_control_claim_failed` and the import continues. The object has no control, and the row records `controls_created` `0` |
@@ -1967,6 +1970,7 @@ A refusal at the confirmation renders the review again at the status shown, with
 | A network cannot be created, or a volume name is in use, invalid or repeated | 409 | The review | `Network {name}: {problem}; Volume {name}: {problem}; Host path {path}: {problem}; ...` for up to ten, as `Volume {name}: a volume with this name already exists.` for a name in use | `collision` |
 | A secret is neither opened nor entered | 409 | The review | `The values of some secrets are neither opened nor entered.` | `secrets_needed` |
 | A host path has no choice | 409 | The review | `Choose what to do with each host path the container binds.` | `paths_undecided` |
+| The upload is already being imported | 409 | The review | `This upload is already being imported.` | `import_running` |
 | The host has no image for the helper | 409 | The review | `The host has no image to create the helper container from. Pull or load an image on the host, then try again.` | `helper_image_missing` |
 | An opened value is not UTF-8 | 409 | The review | `A secret value is not UTF-8 text.` | `ValidationFailed` |
 | A volume or network of the name exists when its turn comes | 409 | The review when nothing had been created, else `The upload is gone` | `A volume with this name already exists.` or `A network with this name already exists.` | `name_in_use` |
@@ -1986,10 +1990,10 @@ A refusal at the confirmation renders the review again at the status shown, with
 | File data | 64 GiB across every volume |
 | Volumes | At most 64, the limit of the manifest |
 | Validation at once | 2 archives across the process, shared with volume import, stack import and build context validation |
-| Held uploads | 1 for each user, 4 in all, 30 minutes, shared with stack import. A newer upload by the same user, of either kind, replaces the earlier one; the oldest is dropped past four. An upload whose import is running is never dropped and does not expire |
+| Held uploads | 1 for each user and kind, 4 in all, 30 minutes, shared with stack import. A container upload and a stack upload by the same user are held together. A newer upload by the same user of the same kind replaces the earlier one; the oldest is dropped past four. An upload whose import is running is never dropped and does not expire |
 | Removed | On a refused archive, a failed upload, a newer upload by the same user, discard, expiry, shutdown, and at start, when the whole directory is deleted. When any object has been created, and when the import succeeds |
 | Usable by | The user, the session and the environment that uploaded it |
-| Unlock | 5 failed attempts for each session, shared with stack import |
+| Unlock | 5 attempts for each session, shared with stack import |
 | Held form state | 8 in all, 1 for each user and environment, 30 minutes, in memory |
 | Write stall | The import fails when the host accepts no byte for 60 seconds. The host's reply is waited for 600 seconds |
 | Write time | No total limit |
@@ -2366,13 +2370,14 @@ No row is written when the original could not be restored (`rollback_failed` on 
 
 | Action | Target | Written |
 |---|---|---|
-| `container_exported` | The container's full id | When the download ends, by completion, failure or client disconnect, and as a failure when the export is refused after the request reached the service. No row is written when the export starts |
+| `container_export_started` | The container's full id | After every check that can refuse the export has passed and the archive's manifest is sealed, before any volume is read, and as a failure when the export is refused after the request reached the service |
+| `container_exported` | The container's full id | When the download ends, by completion, failure or client disconnect, for every export that wrote a successful `container_export_started` |
 
 | Detail key | Present when |
 |---|---|
 | `format_version` | Every row |
-| `environment`, `secret_values`, `secrets`, `networks`, `bind_mounts`, `volumes`, `not_exported_groups`, `running` | Once the export was checked: counts, the secret mode (`none`, `sealed` or `omitted`) and whether the container is running, paused or restarting |
-| `bytes`, `skipped`, `volumes_copied`, `completed` | The download ended |
+| `environment`, `secret_values`, `secrets`, `networks`, `bind_mounts`, `volumes`, `not_exported_groups`, `running` | Once the export was checked: counts, the secret mode (`none`, `sealed` or `omitted`) and whether the container is running, paused or restarting. `container_exported` repeats them |
+| `bytes`, `skipped`, `volumes_copied`, `completed` | `container_exported`: the download ended |
 | `holder_action` | Failure row for a busy volume |
 | `reason`, `message` | Failure rows |
 

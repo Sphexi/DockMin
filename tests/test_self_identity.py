@@ -678,3 +678,47 @@ def test_the_mounts_are_unknown_only_where_the_identity_cannot_say_what_the_cont
     identity: SelfIdentity, environment_id: int, unknown: bool
 ) -> None:
     assert identity.mounts_unknown(environment_id) is unknown
+
+
+DATA_SOURCE = "/srv/dockmin-data"
+
+
+def data_identity() -> SelfIdentity:
+    return SelfIdentity(
+        container_id=CONTAINER,
+        verified=(HOME,),
+        mount_sources={1: frozenset({DATA_SOURCE, "/srv//other/./mount"})},
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("/srv//dockmin-data", id="repeated-slash"),
+        pytest.param("/srv/./dockmin-data/", id="dot-component-and-trailing-slash"),
+        pytest.param("//srv/dockmin-data/inner", id="leading-double-slash-below"),
+        pytest.param("/srv/x/../dockmin-data", id="parent-component"),
+        pytest.param("/srv/dockmin-data/../../etc", id="parent-component-leaving"),
+        pytest.param("srv/dockmin-data", id="relative-path-is-read-from-the-root"),
+        pytest.param("/srv/other/mount/deeper", id="below-a-source-spelled-unclean"),
+        pytest.param("/srv", id="above-a-source"),
+        pytest.param("/", id="the-root"),
+        pytest.param("/srv/dockmin\x00-data", id="control-character"),
+    ],
+)
+def test_a_path_spelled_around_a_mount_source_is_still_protected(path: str) -> None:
+    assert data_identity().protects_path(1, path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/srv/dockmin-data-other",
+        "/srv2/dockmin-data",
+        "10.0.0.5:/exports/dockmin-data",
+        ":/export",
+        "//10.0.0.5/share",
+    ],
+)
+def test_a_path_that_is_not_a_mount_source_or_inside_one_is_not_protected(path: str) -> None:
+    assert not data_identity().protects_path(1, path)

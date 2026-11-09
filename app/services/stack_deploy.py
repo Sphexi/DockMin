@@ -913,7 +913,9 @@ class StackValidator:
                 objects.append(f"Volume {volume_name}")
                 continue
             control = await self._controls.get_for(environment_id, "volume", volume.name)
-            if self._imported is not None and self._imported.registered(environment_id, stack):
+            if self._imported is not None and self._imported.holds(
+                environment_id, stack, volume.name
+            ):
                 own = self._imported.accepts(environment_id, stack, volume.name, volume.created_at)
             else:
                 own = in_project(volume.labels, stack)

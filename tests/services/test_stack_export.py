@@ -11,8 +11,8 @@ from app.auth.errors import PermissionDenied, ResourceNotFound, SelfProtected, V
 from app.db.repositories.stack import StackRepository, StoredStack, VariableWrite
 from app.self_identity import SelfIdentity
 from app.services.activity import UserActor
-from app.services.export_manifest import ImageReference, parse_manifest
-from app.services.export_sealing import MINIMUM_COST, SealError, open_sealed
+from app.services.export_manifest import ImageReference, open_manifest_secrets, parse_manifest
+from app.services.export_sealing import MINIMUM_COST, SealError
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey
 from app.services.stack_export import (
     StackChangedSinceReview,
@@ -165,13 +165,13 @@ async def test_sealed_secrets_open_with_the_passphrase_only(
 
     manifest = parse_manifest(members["manifest.json"][1])
     assert manifest.sealed is not None
-    opened = open_sealed(manifest.sealed, PASSPHRASE, manifest.archive_id)
+    opened = open_manifest_secrets(manifest, PASSPHRASE)
     assert opened == {
         f"variable:{SECRET_NAME}": SECRET_VALUE.encode(),
         f"file:{SECRET_FILE}": SECRET_FILE_BODY.encode(),
     }
     with pytest.raises(SealError):
-        open_sealed(manifest.sealed, PASSPHRASE + "x", manifest.archive_id)
+        open_manifest_secrets(manifest, PASSPHRASE + "x")
     assert f"stack/files/{SECRET_FILE}" not in members and "create" not in host.verbs()
 
 

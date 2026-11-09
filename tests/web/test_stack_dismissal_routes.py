@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient, Response
 
 import app.services.stack_dismissal_assembly as assembly
+import app.services.swarm_stacks as swarm_stacks
 from app.db.repositories.stack_dismissal import StackDismissalRepository
 from app.services.stack_dismissal_views import HostMembers
 from app.services.stack_dismissals import MAX_DISMISSED_OBJECTS
@@ -49,6 +50,9 @@ CHANGED_NOTE = "Dismissed earlier; it has changed since"
 ANCHOR = re.compile(r'<a class="mono cell-wrap" href="([^"]*)">([^<]*)</a>')
 PLAIN = re.compile(r'<span class="mono cell-wrap">([^<]*)</span>')
 ACTIONS = "'stack_dismissed', 'stack_dismissal_cleared'"
+DISMISSED_LINE = re.compile(r'<p class="field__help" id="dismissed-line">(.*?)</p>', re.DOTALL)
+SORT_QUERY = "sort=name&dir=desc"
+SORT_NOTE = "The sort applies only to the entries shown."
 
 
 def compose_base(world: World) -> str:
@@ -65,6 +69,12 @@ def dismiss_path(base: str, name: str) -> str:
 
 def restore_path(base: str, name: str) -> str:
     return f"{base}/-/unmanaged/{name}/restore"
+
+
+def dismissed_line_links(html: str) -> list[str]:
+    line = DISMISSED_LINE.search(html)
+    assert line is not None, "no dismissed line"
+    return [unescape(href) for href in re.findall(r'<a href="([^"]*)"', line.group(1))]
 
 
 def digest_of(html: str, action: str) -> str:
@@ -390,3 +400,55 @@ async def test_a_namespace_with_a_service_a_stale_digest_or_a_standard_user_is_r
         ("stack_dismissed", LIVE.lower(), "failure"),
         ("stack_dismissed", OLD.lower(), "failure"),
     ]
+
+
+async def dismissed_list_links(client: AsyncClient, base: str, name: str) -> tuple[list[str], ...]:
+    action = dismiss_path(base, name)
+    form = digest_of((await client.get(base)).text, action)
+    await post_form(client, action, HTMX, expected_objects=form)
+    hidden = await client.get(f"{base}?{SORT_QUERY}")
+    shown = await client.get(f"{base}?dismissed=1&{SORT_QUERY}")
+    return dismissed_line_links(hidden.text), dismissed_line_links(shown.text)
+
+
+async def test_the_project_lists_dismissed_line_links_carry_the_active_sort(
+    admin_client: AsyncClient, world: World, stack_host: ContainerEngine
+) -> None:
+    leave_compose_objects(stack_host)
+    base = compose_base(world)
+
+    hidden, shown = await dismissed_list_links(admin_client, base, GONE)
+
+    assert hidden == [f"{base}?dismissed=1&{SORT_QUERY}"]
+    assert shown == [f"{base}?{SORT_QUERY}"]
+
+
+async def test_the_namespace_lists_dismissed_line_links_carry_the_active_sort(
+    admin_client: AsyncClient, world: World, swarm_stacks_world: World, swarm_host: SwarmEngine
+) -> None:
+    leave_swarm_objects(swarm_host)
+    base = swarm_base(world)
+
+    hidden, shown = await dismissed_list_links(admin_client, base, OLD)
+
+    assert hidden == [f"{base}?dismissed=1&{SORT_QUERY}"]
+    assert shown == [f"{base}?{SORT_QUERY}"]
+
+
+async def test_a_truncated_namespace_list_under_a_sort_says_the_sort_covers_the_entries_shown(
+    admin_client: AsyncClient,
+    world: World,
+    swarm_stacks_world: World,
+    swarm_host: SwarmEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    leave_swarm_objects(swarm_host)
+    monkeypatch.setattr(swarm_stacks, "MAX_NAMESPACES", 1)
+    base = swarm_base(world)
+
+    sorted_listing = await admin_client.get(f"{base}?{SORT_QUERY}")
+    unsorted_listing = await admin_client.get(base)
+
+    assert SORT_NOTE in text_of(sorted_listing)
+    assert "are listed. Narrow the filter" in text_of(unsorted_listing)
+    assert SORT_NOTE not in text_of(unsorted_listing)

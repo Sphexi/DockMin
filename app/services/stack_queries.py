@@ -687,7 +687,9 @@ class StackQueryService:
         next_cursor = None
         if page.next_cursor is not None:
             last = decode_cursor(page.next_cursor)
-            next_cursor = ordering.encode(str(last.sort_value), last.row_id)
+            next_cursor = ordering.encode(
+                str(last.sort_value), last.row_id, str(last.sort_value).casefold()
+            )
         items = tuple(_row_of(item) for item in page.items)
         unmanaged: tuple[UnmanagedProject, ...] = ()
         dismissed_hidden = 0

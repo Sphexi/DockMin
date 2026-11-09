@@ -7,16 +7,20 @@ import pytest
 from app.auth.errors import ValidationFailed
 from app.services.export_sealing import (
     DEFAULT_COST,
+    MAX_ITERATIONS,
+    MAX_MEMORY_KIB,
     MINIMUM_COST,
     PASSPHRASE_MAX_CHARS,
     PASSPHRASE_MIN_CHARS,
     KdfParameters,
+    SealCost,
     SealedRecord,
     SealedValues,
     SealError,
     new_archive_id,
     open_sealed,
     seal,
+    verify_sealed,
 )
 
 PASSPHRASE = "correct horse battery"
@@ -219,9 +223,11 @@ def test_the_default_cost_is_recorded_and_the_set_round_trips_through_json() -> 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"memory_kib": 1_048_577},
+        {"memory_kib": MAX_MEMORY_KIB + 1},
+        {"memory_kib": 1_048_576},
         {"memory_kib": 1024},
-        {"iterations": 17},
+        {"iterations": MAX_ITERATIONS + 1},
+        {"iterations": 16},
         {"lanes": 17},
         {"algorithm": "argon2i"},
         {"salt": "AAAA"},
@@ -242,3 +248,97 @@ def test_duplicate_record_names_are_invalid() -> None:
 
     with pytest.raises(ValueError):
         SealedValues.model_validate({**sealed.model_dump(), "records": [record, record]})
+
+
+def test_recorded_parameters_at_the_caps_are_accepted() -> None:
+    good = seal({"a": b"1"}, PASSPHRASE, new_archive_id(), cost=MINIMUM_COST).kdf.model_dump()
+
+    parsed = KdfParameters.model_validate(
+        {**good, "memory_kib": MAX_MEMORY_KIB, "iterations": MAX_ITERATIONS}
+    )
+
+    assert (parsed.memory_kib, parsed.iterations) == (262_144, 8)
+
+
+@pytest.mark.parametrize(
+    "cost",
+    [
+        SealCost(MAX_MEMORY_KIB + 1, 1, 1),
+        SealCost(MINIMUM_COST.memory_kib, MAX_ITERATIONS + 1, 1),
+    ],
+)
+def test_sealing_at_a_cost_the_reader_would_refuse_is_refused(cost: SealCost) -> None:
+    with pytest.raises(ValueError):
+        seal({"a": b"1"}, PASSPHRASE, new_archive_id(), cost=cost)
+
+
+def test_the_default_export_cost_is_64_mib_and_three_iterations() -> None:
+    assert (DEFAULT_COST.memory_kib, DEFAULT_COST.iterations) == (65_536, 3)
+
+
+AUTHENTICATED = b"the whole manifest except the mac"
+
+
+def authenticated_set(archive_id: str) -> SealedValues:
+    return seal(
+        VALUES,
+        PASSPHRASE,
+        archive_id,
+        cost=MINIMUM_COST,
+        authenticate=lambda _: AUTHENTICATED,
+    )
+
+
+def test_authenticated_values_open_when_the_bytes_match_the_mac() -> None:
+    archive_id = new_archive_id()
+    sealed = authenticated_set(archive_id)
+
+    opened = open_sealed(sealed, PASSPHRASE, archive_id, authenticated=AUTHENTICATED)
+
+    assert sealed.mac is not None
+    assert opened == VALUES
+    verify_sealed(sealed, PASSPHRASE, archive_id, AUTHENTICATED)
+
+
+def test_the_callback_receives_the_section_without_a_mac() -> None:
+    seen: list[SealedValues] = []
+
+    def authenticate(sealed: SealedValues) -> bytes:
+        seen.append(sealed)
+        return AUTHENTICATED
+
+    seal(VALUES, PASSPHRASE, new_archive_id(), cost=MINIMUM_COST, authenticate=authenticate)
+
+    assert len(seen) == 1 and seen[0].mac is None and len(seen[0].records) == len(VALUES)
+
+
+@pytest.mark.parametrize("failure", ["bytes", "passphrase", "no_mac", "moved_mac", "no_names"])
+def test_authenticated_values_are_refused_with_the_one_error(failure: str) -> None:
+    archive_id = new_archive_id()
+    sealed = authenticated_set(archive_id)
+    authenticated, passphrase = AUTHENTICATED, PASSPHRASE
+    names: list[str] | None = None
+    if failure == "bytes":
+        authenticated = AUTHENTICATED + b" "
+    if failure == "passphrase":
+        passphrase = "another passphrase!"
+    if failure == "no_mac":
+        sealed = sealed.model_copy(update={"mac": None})
+    if failure == "moved_mac":
+        sealed = sealed.model_copy(update={"mac": authenticated_set(archive_id).mac})
+    if failure == "no_names":
+        authenticated, names = AUTHENTICATED + b" ", []
+
+    with pytest.raises(SealError) as raised:
+        open_sealed(sealed, passphrase, archive_id, names, authenticated=authenticated)
+
+    assert str(raised.value) == "The sealed values could not be opened."
+    assert raised.value.__cause__ is None
+
+
+def test_a_mac_over_nothing_is_still_checked_when_no_value_is_asked_for() -> None:
+    archive_id = new_archive_id()
+    sealed = authenticated_set(archive_id)
+
+    with pytest.raises(SealError):
+        verify_sealed(sealed, PASSPHRASE, archive_id, b"different bytes")

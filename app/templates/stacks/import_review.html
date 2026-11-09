@@ -29,11 +29,25 @@
     <dd class="mono cell-wrap">{{ plan.source_name|visible_text }}</dd>
     <dt>Size as uploaded</dt>
     <dd>{{ review.archive_size|filesize }}</dd>
-    <dt>Volume data</dt>
-    <dd>{{ plan.data_bytes|filesize }} in {{ plan.volumes|selectattr("filled")|list|length }} {{ "volume" if plan.volumes|selectattr("filled")|list|length == 1 else "volumes" }}</dd>
+    <dt>Volume data in the archive</dt>
+    <dd>{{ plan.archive_bytes|filesize }} in {{ plan.archive_volumes }} {{ "volume" if plan.archive_volumes == 1 else "volumes" }}</dd>
+    <dt>Integrity</dt>
+    <dd>{% if review.integrity_protected %}Protected by a MAC that opening the sealed values verifies{% else %}None{% endif %}</dd>
     <dt>SHA-256</dt>
     <dd class="mono cell-wrap">{{ review.archive_digest }}</dd>
   </dl>
+</section>
+
+{% if not review.integrity_protected %}
+<div class="panel panel--alert" role="note">
+  <h2>This archive has no integrity protection</h2>
+  <p>Nothing in it can be verified as unmodified: not the stack file below, not the volume data, not the variables. Read the stack file before importing.</p>
+</div>
+{% endif %}
+
+<section class="panel" aria-labelledby="file-heading">
+  <h2 id="file-heading">The stack file</h2>
+  <pre class="content-view" role="region" tabindex="0" aria-label="The stack file as it will be stored">{{ plan.compose_text }}</pre>
 </section>
 
 {% if review.secrets_mode == "sealed" %}
@@ -117,7 +131,7 @@
       <div class="data-table__scroll" role="region" aria-label="Volumes of the stack" tabindex="0">
         <table class="table">
           <caption class="visually-hidden">The volumes of the stack and what is written into each</caption>
-          <thead><tr><th scope="col">Volume</th><th scope="col">Filled from</th><th scope="col">Entries</th><th scope="col">Size</th></tr></thead>
+          <thead><tr><th scope="col">Volume</th><th scope="col">Filled from</th><th scope="col">Entries</th><th scope="col">Size</th><th scope="col">Declared options</th></tr></thead>
           <tbody>
             {% for item in plan.volumes %}
             <tr>
@@ -125,14 +139,29 @@
               <td>{% if item.filled %}<span class="mono cell-wrap">{{ item.source|visible_text }}</span>{% elif item.origin == "host_path" %}A new empty volume replacing a host path{% else %}Created empty when the stack is deployed{% endif %}</td>
               <td>{{ item.entries if item.filled else "—" }}</td>
               <td>{{ item.size|filesize if item.filled else "—" }}</td>
+              <td>{% if item.options %}{% for key, value in item.options.items() %}<span class="mono cell-wrap">{{ key|visible_text }}={{ value|visible_text }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+      {% elif not plan.checked %}
+      <p>The volume plan is shown once the stack name is free.</p>
       {% else %}
       <p>The stack declares no volume.</p>
       {% endif %}
+      {% for item in plan.volumes if item.filled and item.mount %}
+      <div class="panel panel--alert" role="note">
+        <h3>Volume {{ item.name|visible_text }} is backed by {{ item.mount.label|visible_text }}</h3>
+        <p>The stack file gives this volume the options above, so data written into it lands on {% if item.mount.device %}the host path or share <span class="mono cell-wrap">{{ item.mount.device|visible_text }}</span>{% else %}a filesystem of type <span class="mono cell-wrap">{{ item.mount.kind|visible_text }}</span>{% endif %}. The import writes only into an empty location and refuses otherwise.{% if item.protected %} This is a path dockmin's own container mounts, so it is refused.{% endif %}</p>
+        {% if not item.protected %}
+        <div class="choice">
+          <input class="choice__input" type="checkbox" id="mount-{{ loop.index0 }}-confirm" name="mount-{{ loop.index0 }}-confirm" value="{{ item.mount.token }}"{% if item.mount_confirmed %} checked{% endif %}>
+          <label class="choice__label" for="mount-{{ loop.index0 }}-confirm">Write the archive's data onto <span class="mono cell-wrap">{{ item.mount.label|visible_text }}</span></label>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
       {% if plan.skipped_volumes %}
       <p>Archived volumes that are not written:</p>
       <ul>
@@ -163,7 +192,7 @@
   <section class="panel create-section" aria-labelledby="paths-title">
     <h2 class="create-section__title" id="paths-title">Host paths</h2>
     <div class="create-section__body">
-      <p>The stack file binds these paths on the host. Choose what happens to each. Keeping a path leaves the file as it is, and the deployment can create the directory on the host if it is missing. Replacing it rewrites the file to use a new, empty named volume, and no directory is created.</p>
+      <p>The stack, once its variables and any extended files are resolved, uses these paths on the host as bind mounts or volume devices. Choose what happens to each. Keeping a path leaves the file as it is, and the deployment can create the directory on the host if it is missing. Replacing it rewrites the file: a bind mount uses a new, empty named volume, and a volume's driver options are dropped. No directory is created.</p>
       {% for item in plan.host_paths %}
       {% set number = loop.index0 %}
       <fieldset class="choice-group">
@@ -180,6 +209,13 @@
         </div>
       </fieldset>
       {% endfor %}
+    </div>
+  </section>
+  {% elif not plan.checked %}
+  <section class="panel create-section" aria-labelledby="paths-title">
+    <h2 class="create-section__title" id="paths-title">Host paths</h2>
+    <div class="create-section__body">
+      <p>The host paths are listed once the stack name above is free.</p>
     </div>
   </section>
   {% endif %}

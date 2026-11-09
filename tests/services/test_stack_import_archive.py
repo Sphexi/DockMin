@@ -4,7 +4,7 @@ import gzip
 import io
 import json
 import tarfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
@@ -12,6 +12,7 @@ import pytest
 from app.services.stack_import_archive import (
     StackArchiveRefused,
     StackLimits,
+    VolumeFeed,
     inspect_stack_archive,
     read_contexts,
     stack_volume_tar,
@@ -91,6 +92,51 @@ async def test_a_volume_streams_as_a_tar_rooted_at_the_volume(tmp_path: Path) ->
         assert (
             names[-1] == NOTE_FILE and (tar.extractfile(NOTE_FILE) or io.BytesIO()).read() == NOTE
         )
+
+
+THREE_VOLUMES = {
+    "shop_a": {"a.txt": b"a"},
+    "shop_b": {"b.txt": b"b"},
+    "shop_c": {"c.txt": b"c"},
+}
+
+
+def names_of(chunks: Iterable[bytes]) -> list[str]:
+    with tarfile.open(fileobj=io.BytesIO(b"".join(chunks))) as tar:
+        return [member.name for member in tar]
+
+
+async def test_a_feed_serves_volumes_in_order_from_one_read_and_can_skip_one(
+    tmp_path: Path,
+) -> None:
+    path = stored(tmp_path, await build_archive(volumes=THREE_VOLUMES))
+    feed = VolumeFeed(path)
+
+    first = names_of(feed.tar("volumes/0"))
+    third = names_of(feed.tar("volumes/2"))
+    feed.close()
+
+    assert first == ["a.txt"] and third == ["c.txt"]
+
+
+async def test_a_feed_refuses_a_volume_out_of_order_or_asked_for_twice(tmp_path: Path) -> None:
+    path = stored(tmp_path, await build_archive(volumes=THREE_VOLUMES))
+    feed = VolumeFeed(path)
+    names_of(feed.tar("volumes/1"))
+
+    with pytest.raises(StackArchiveRefused):
+        feed.tar("volumes/0")
+    with pytest.raises(StackArchiveRefused):
+        feed.tar("volumes/1")
+    feed.close()
+
+
+async def test_a_single_volume_stops_at_the_next_one_and_ignores_earlier_ones(
+    tmp_path: Path,
+) -> None:
+    path = stored(tmp_path, await build_archive(volumes=THREE_VOLUMES))
+
+    assert names_of(stack_volume_tar(path, "volumes/1")) == ["b.txt"]
 
 
 async def test_the_fixture_archive_reads(tmp_path: Path) -> None:

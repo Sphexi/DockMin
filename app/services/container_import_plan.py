@@ -70,7 +70,9 @@ class NetworkPlan:
     """A user-defined network the container joins: created from the archive, or already there.
 
     `differences` names what an existing network of that name has otherwise than the archive's;
-    `problem` is set when the archive's options cannot be created here.
+    `problem` is set when the archive's options cannot be created here. The flags, `pools`
+    (subnet, gateway, range), `options` and `labels` are the archive's own: what a created
+    network gets.
     """
 
     name: str
@@ -78,6 +80,10 @@ class NetworkPlan:
     action: NetworkAction
     differences: tuple[str, ...] = ()
     problem: str | None = None
+    flags: tuple[str, ...] = ()
+    pools: tuple[tuple[str, str, str], ...] = ()
+    options: tuple[tuple[str, str], ...] = ()
+    labels: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +247,17 @@ def plan_digest(plan: ContainerImportPlan, archive_digest: str) -> str:
         "image": [plan.image, plan.image_status, plan.local_digest],
         "name_taken": plan.name_taken,
         "networks": [
-            [item.name, item.driver, item.action, list(item.differences), item.problem]
+            [
+                item.name,
+                item.driver,
+                item.action,
+                list(item.differences),
+                item.problem,
+                list(item.flags),
+                [list(pool) for pool in item.pools],
+                [list(pair) for pair in item.options],
+                [list(pair) for pair in item.labels],
+            ]
             for item in plan.networks
         ],
         "volumes": [

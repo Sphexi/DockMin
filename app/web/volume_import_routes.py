@@ -53,9 +53,12 @@ router = APIRouter(
 
 HEADING: Final = "Import volume"
 UPLOAD_ID_PATTERN: Final = re.compile(UPLOAD_ID)
-IMPORT_FIELDS: Final = frozenset({"name", "driver", "rows", "expected_digest"})
+IMPORT_FIELDS: Final = frozenset(
+    {"name", "driver", "rows", "expected_digest", "confirm_mount", "helper_image"}
+)
 NAME_FIELD_MAX: Final = 512
 CANCELLED: Final = "The upload was discarded. Nothing was changed."
+RUNNING: Final = "The upload is being imported and was not discarded."
 Administrator = Annotated[Principal, Depends(require_administrator_or_not_found)]
 
 REFUSALS: Final = (
@@ -228,6 +231,7 @@ def _review_page(
         "volumes/import_review.html",
         {
             "review": review,
+            "mount": review.mount_for(values),
             "values": values,
             "errors": errors,
             "option_count": row_count(values, "option", add=adding),
@@ -300,6 +304,8 @@ async def run_import(
             expected_digest,
             driver=values.get("driver", ""),
             options=options,
+            confirm_mount=values.get("confirm_mount", ""),
+            helper_image=values.get("helper_image", ""),
         )
     except (VolumeNameInUse, ValidationFailed) as invalid:
         status = 409 if isinstance(invalid, VolumeNameInUse) else 400
@@ -312,7 +318,9 @@ async def run_import(
             error,
             actor,
             environment_id,
-            review_href=route(
+            review_href=None
+            if isinstance(error, VolumeImportFailed)
+            else route(
                 request,
                 "environment_volume_import_review",
                 environment_id=environment_id,
@@ -376,7 +384,18 @@ async def cancel_import(
 ) -> Response:
     """Discard the held upload and remove its file."""
     try:
-        await imports.cancel(actor, _session_id(actor), environment_id, upload_id)
+        discarded = await imports.cancel(actor, _session_id(actor), environment_id, upload_id)
     except REFUSALS as error:
         return _problem(request, error, actor, environment_id)
+    if not discarded:
+        return redirect(
+            request,
+            route(
+                request,
+                "environment_volume_import_review",
+                environment_id=environment_id,
+                upload_id=upload_id,
+            ),
+            [Flash("warn", RUNNING)],
+        )
     return redirect(request, _list_href(request, environment_id), [Flash("ok", CANCELLED)])

@@ -17,7 +17,6 @@ from app.auth.dependencies import CurrentAdministrator, require_administrator
 from app.auth.errors import ResourceNotFound, ValidationFailed
 from app.auth.principal import Principal
 from app.db.repositories.activity_event import (
-    REQUEST_ID_PATTERN,
     ActivityFilter,
     ActorType,
     Category,
@@ -26,7 +25,7 @@ from app.db.repositories.activity_event import (
 from app.db.repositories.pagination import MAX_PAGE_SIZE, MAX_ROW_ID, InvalidCursorError
 from app.db.repositories.resource_control import canonical_stack_key
 from app.db.repositories.stack import StackKind
-from app.logging import get_logger
+from app.logging import REQUEST_ID_PATTERN, REQUEST_ID_RULE, get_logger
 from app.services.activity import SUBSYSTEMS
 from app.services.activity_csv import EXPORT_FORMATS, ExportFormat
 from app.services.activity_log import (
@@ -243,7 +242,7 @@ async def read_query(
         )
     check(
         "request_id",
-        "Request id: use 1 to 64 letters, digits, dots, hyphens or underscores.",
+        f"Request id: use {REQUEST_ID_RULE}.",
         REQUEST_ID_PATTERN.fullmatch(values["request_id"]) is not None,
     )
     for name, label in (("from", "From"), ("to", "To")):

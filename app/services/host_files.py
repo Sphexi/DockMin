@@ -64,6 +64,12 @@ class HelperImageMissing(Exception):
     reason: Final = "helper_image_missing"
 
 
+class HelperImageUnusable(Exception):
+    """The image declares a volume at or below the helper's mount point."""
+
+    reason: Final = "helper_image_unusable"
+
+
 class FileRefusalReason(StrEnum):
     """Why one path was not returned; the values of the archive errors' `code` are included."""
 
@@ -212,24 +218,54 @@ def volume_helper_body(image: str, volume: str, *, writable: bool = False) -> di
     }
 
 
+def _declares_volume_under_mount(config: Mapping[str, Any]) -> bool:
+    for declared in config.get("Volumes") or {}:
+        parts = [part for part in str(declared).split("/") if part not in ("", ".")]
+        if ".." in parts:
+            return True
+        cleaned = "/" + "/".join(parts)
+        if cleaned == MOUNT_POINT or cleaned.startswith(f"{MOUNT_POINT}/"):
+            return True
+    return False
+
+
 async def helper_image(client: EngineClient) -> str:
     """Return the id of an image on the host to create a helper from.
 
     Smaller images are inspected first, and the first that declares no volume wins, since a
     declared volume is created anonymously with the helper. With every candidate declaring one
-    the smallest is used. HelperImageMissing when the host has no image.
+    the smallest is used. An image that declares a volume at or below the mount point is never
+    used. HelperImageMissing when the host has no usable image.
     """
     images = sorted(await client.images.list(), key=lambda image: (image.size, image.id))
-    if not images:
-        raise HelperImageMissing
+    fallback: str | None = None
     for image in images[:MAX_IMAGE_INSPECTS]:
         try:
             detail = await client.images.inspect(image.id)
         except NotFound:
             continue
+        if _declares_volume_under_mount(detail.config):
+            continue
         if not detail.config.get("Volumes"):
             return image.id
-    return images[0].id
+        fallback = fallback or image.id
+    if fallback is None:
+        raise HelperImageMissing
+    return fallback
+
+
+async def check_helper_image(client: EngineClient, image_id: str) -> None:
+    """Check that `image_id` is on the host and may be used for a helper.
+
+    HelperImageMissing when the host no longer has it, HelperImageUnusable when it declares a
+    volume at or below the mount point.
+    """
+    try:
+        detail = await client.images.inspect(image_id)
+    except NotFound:
+        raise HelperImageMissing from None
+    if _declares_volume_under_mount(detail.config):
+        raise HelperImageUnusable
 
 
 class HostFileSession:

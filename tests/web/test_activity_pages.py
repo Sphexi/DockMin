@@ -106,6 +106,7 @@ INSERT_REGISTRY = (
 class Seeded:
     rule_id: int
     run_id: int
+    event_ids: frozenset[str]
 
 
 def stamp(minutes_ago: int) -> str:
@@ -138,14 +139,15 @@ def event_row(
     )  # fmt: skip
 
 
-def insert_events(app: FastAPI, rows: list[tuple[Any, ...]]) -> None:
+def insert_events(app: FastAPI, rows: list[tuple[Any, ...]]) -> list[str]:
     connection = app.state.database.connect()
     try:
         connection.execute("BEGIN")
-        connection.executemany(INSERT_EVENT, rows)
+        ids = [str(connection.execute(INSERT_EVENT, row).lastrowid) for row in rows]
         connection.execute("COMMIT")
     finally:
         connection.close()
+    return ids
 
 
 async def seed(app: FastAPI, world: World) -> Seeded:
@@ -212,8 +214,8 @@ async def seed(app: FastAPI, world: World) -> Seeded:
     environment_event = event_row(
         "environment_tested", 3, kind="environment", target=str(world.remote_id)
     )
-    insert_events(app, [*containers, exhausted, login, environment_event])
-    return Seeded(rule.id, run.id)
+    ids = insert_events(app, [*containers, exhausted, login, environment_event])
+    return Seeded(rule.id, run.id, frozenset(ids))
 
 
 @contextmanager
@@ -243,8 +245,10 @@ async def refusals(client: AsyncClient, wanted: dict[str, str]) -> dict[str, tup
     return answers
 
 
-async def ids_for(client: AsyncClient, query: str) -> list[str]:
-    """Follow the log's next links for a query and return every row id."""
+async def ids_for(
+    client: AsyncClient, query: str, *, among: frozenset[str] | None = None
+) -> list[str]:
+    """Follow the log's next links for a query and return the row ids, only `among` if given."""
     found: list[str] = []
     path = f"/activity?{query}&limit=200"
     while path:
@@ -253,7 +257,7 @@ async def ids_for(client: AsyncClient, query: str) -> list[str]:
         found += ROW_LINK.findall(response.text)
         link = NEXT_LINK.search(response.text)
         path = unescape(link.group(1)) if link else ""
-    return found
+    return found if among is None else [row for row in found if row in among]
 
 
 async def test_the_log_lists_newest_first_in_pages_and_shows_hostile_text_inert(
@@ -313,7 +317,9 @@ async def test_each_filter_selects_what_it_names(
         "from=2026-03-01T10:11:00&to=2026-03-01T10:21:00": 10,
     }
 
-    found = {query: len(await ids_for(admin_client, query)) for query in expected}
+    found = {
+        query: len(await ids_for(admin_client, query, among=seeded.event_ids)) for query in expected
+    }
 
     assert found == expected
 
@@ -465,10 +471,12 @@ async def test_only_an_administrator_reaches_the_log_and_the_navigation_link_fol
 async def test_an_anonymous_events_detail_shows_what_was_tried_with_control_characters_visible(
     admin_client: AsyncClient, world: World, app: FastAPI
 ) -> None:
-    await seed(app, world)
-    [anonymous] = await ids_for(admin_client, "actor_type=anonymous")
+    seeded = await seed(app, world)
+    [anonymous] = await ids_for(admin_client, "actor_type=anonymous", among=seeded.event_ids)
     [environment_event] = await ids_for(
-        admin_client, f"target_type=environment&environment_id={world.remote_id}"
+        admin_client,
+        f"target_type=environment&environment_id={world.remote_id}",
+        among=seeded.event_ids,
     )
 
     page = await admin_client.get(f"/activity/{anonymous}")
@@ -599,7 +607,7 @@ async def test_a_subsystem_events_detail_links_its_rule_and_run_until_the_rule_i
     admin_client: AsyncClient, world: World, app: FastAPI
 ) -> None:
     seeded = await seed(app, world)
-    [subsystem_event] = await ids_for(admin_client, "actor_type=subsystem")
+    [subsystem_event] = await ids_for(admin_client, "actor_type=subsystem", among=seeded.event_ids)
     linked = await admin_client.get(f"/activity/{subsystem_event}")
 
     async with job_services(app) as services:

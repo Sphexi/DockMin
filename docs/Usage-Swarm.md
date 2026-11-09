@@ -931,7 +931,7 @@ All paths are under `/environments/{id}/swarm/stacks`.
 | `Name` | Checked against the [Compose stack name](Usage-Stacks#stack-names) grammar, lower case only. A name that breaks it, including an archived name with upper case letters, is shown with the message beside `Name`, and `Import stack` is refused until the name follows it |
 | Collisions | `stack`, `volume`, `network`, `service`, `config`, `secret`. Texts: `A service with this name already exists and does not belong to this stack.` and the same for `config` and `secret`. A Swarm namespace, a Compose project and a stack of either kind with the name in any case is a `stack` collision. |
 | Images | One picker for each image the file names ([Swarm images and credentials](Usage-Stacks#swarm-images-and-credentials)) |
-| Host paths | The same choices, with the text of the Compose review. The import creates no directory |
+| Host paths | The same choices, with the text of the Compose review, for every bind source and every volume `device` of the translated services ([Import host paths](Usage-Stacks#import-host-paths)). The import creates no directory |
 | Digest | `On this host` reports the digest the manager holds for the reference |
 
 ### Import volumes (Swarm stacks)
@@ -939,10 +939,10 @@ All paths are under `/environments/{id}/swarm/stacks`.
 | Item | Value |
 |---|---|
 | Where | On the manager the environment connects to. A Swarm service whose task runs on another node does not see the volume |
-| Created with | Driver `local` and the label `com.docker.stack.namespace` set to the stack name. Archived labels and driver options are not applied |
+| Created with | Driver `local`, the label `com.docker.stack.namespace` set to the stack name and the label `dockmin.import`, with a value unique to the import. Archived labels and driver options are not applied. A volume Docker answers the create with that lacks the `dockmin.import` label is refused as a name in use and left untouched |
 | Written | Before the stack record is stored, through a helper container on the manager ([Import volumes](Usage-Stacks#import-volumes)) |
 | Matching, data rules, helper | As [Import volumes](Usage-Stacks#import-volumes) |
-| First deployment | The [existing-object check of a Swarm stack](Usage-Stacks#swarm-objects-that-already-exist) accepts a volume that exists only when it is one this import created, with the creation time the manager reported then. The binding ends when the first deployment succeeds, when the stack is removed or forgotten, and when the import fails |
+| First deployment | The [existing-object check of a Swarm stack](Usage-Stacks#swarm-objects-that-already-exist) accepts a volume this import created only with the creation time the manager reported then. A project volume the import did not create, such as one a failed first deployment made, is judged by the namespace label, so a failed first deployment can be retried. The binding ends when the first deployment succeeds, when the stack is removed or forgotten, and when the import fails |
 | After a restart before the first deployment | The binding is gone. A volume is accepted when its `com.docker.stack.namespace` label equals the stack name in any case and it has no access control of its own |
 
 ### Import refusals (Swarm stacks)

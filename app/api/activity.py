@@ -10,8 +10,9 @@ from pydantic import BaseModel
 from app.auth.dependencies import require_token_user
 from app.auth.errors import ValidationFailed
 from app.auth.principal import Principal
-from app.db.repositories.activity_event import REQUEST_ID_PATTERN, ActivityFilter
+from app.db.repositories.activity_event import ActivityFilter
 from app.db.repositories.pagination import MAX_PAGE_SIZE, MAX_ROW_ID, InvalidCursorError
+from app.logging import REQUEST_ID_PATTERN, REQUEST_ID_RULE
 from app.services.activity_log import ActivityEventView
 from app.services.assembly import ActivityLog
 from app.services.environments import DEFAULT_PAGE_SIZE
@@ -24,7 +25,7 @@ MAX_SUBSYSTEM: Final = 64
 MAX_TARGET_ID: Final = 256
 NAME_PATTERN: Final = r"^[a-z_]{1,64}$"
 MAX_REQUEST_ID: Final = 256
-REQUEST_ID_MESSAGE: Final = "Use 1 to 64 letters, digits, dots, hyphens or underscores."
+REQUEST_ID_MESSAGE: Final = f"Use {REQUEST_ID_RULE}."
 EARLIEST_TIME: Final = datetime(1970, 1, 1, tzinfo=UTC)
 LATEST_TIME: Final = datetime(9999, 1, 1, tzinfo=UTC)
 

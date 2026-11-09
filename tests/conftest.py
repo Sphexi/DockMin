@@ -30,7 +30,7 @@ from app.db.repositories.environment_access import EnvironmentAccessRepository
 from app.docker_engine.registry import EngineClientRegistry
 from app.logging import DEFAULT_SCRUBBER, configure_logging
 from app.main import AppOptions, attach_state, build_app, create_app
-from app.services import assembly
+from app.services import assembly, environment_snapshots, export_unlock
 from app.services.terminals import TerminalLimits, TerminalService
 from app.subsystems.base import SubsystemFactory
 from app.web.limits import ConcurrencyLimitMiddleware
@@ -346,6 +346,16 @@ def private_app(settings: Settings, log_stream: io.StringIO) -> FastAPI:
 
 
 @pytest.fixture
+def no_status_transition_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop the snapshot refresher from recording reachable and unreachable events."""
+
+    async def record_nothing(*_: object) -> None:
+        return None
+
+    monkeypatch.setattr(environment_snapshots, "_record_transition", record_nothing)
+
+
+@pytest.fixture
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     """Return an HTTP client bound to the app in-process."""
     # Unhandled exceptions must come back as the 500 response, not re-raise into the test.
@@ -602,3 +612,9 @@ async def restricted_stack(world: World, shared_host: ContainerEngine) -> list[s
             host_config={"NetworkMode": "bridge", **host_config},
         )
     return list(HOST_CONFIGS)
+
+
+@pytest.fixture(autouse=True)
+def fresh_unlock_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give each test its own unlock gate, so one test's failed attempts do not reach another."""
+    monkeypatch.setattr(export_unlock, "_GATE", export_unlock.UnlockGate())

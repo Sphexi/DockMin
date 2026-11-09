@@ -1,5 +1,6 @@
 """The container import pages: upload, review, passphrase, networks and volumes, then the form."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -10,8 +11,10 @@ from httpx import AsyncClient, Response
 
 from app.db.repositories.environment_access import EnvironmentAccessRepository
 from app.docker_engine.registry import EngineClientRegistry
+from app.services.container_import import ContainerImportService
 from app.services.export_build import EnvironmentInput
-from app.services.stack_import_store import SPOOL_DIRECTORY, UNSEAL_FAILURE_LIMIT
+from app.services.export_unlock import UNLOCK_ATTEMPT_LIMIT
+from app.services.stack_import_store import SPOOL_DIRECTORY
 from tests.auth_support import ADMIN_ID, STANDARD_ID, csrf_form, csrf_token_of
 from tests.container_import_support import (
     BASE_FORM,
@@ -287,7 +290,7 @@ async def test_the_passphrase_has_five_attempts_then_the_session_is_limited(
     wrong = [await unlocked(admin_client, location, WRONG_PASSPHRASE) for _ in range(5)]
     limited = await unlocked(admin_client, location, PASSPHRASE)
 
-    assert [r.status_code for r in wrong] == [UNPROCESSABLE] * UNSEAL_FAILURE_LIMIT
+    assert [r.status_code for r in wrong] == [UNPROCESSABLE] * UNLOCK_ATTEMPT_LIMIT
     assert "4 attempts left" in visible_text(wrong[0]) and "0 attempts left" in visible_text(
         wrong[4]
     )
@@ -672,3 +675,124 @@ async def test_the_start_option_of_the_archive_decides_whether_the_container_is_
         "created=stopped"
     )
     assert "start" not in import_host.verbs()
+
+
+async def test_the_review_lists_every_option_and_label_of_a_network_the_import_creates(
+    admin_client: AsyncClient, world: World, import_host: ImportHost
+) -> None:
+    network = network_entry(
+        options={"com.docker.network.bridge.name": "br-shop"},
+        labels={"tier": "db"},
+        internal=True,
+    )
+    location = await reviewed(admin_client, world, await container_archive(networks=(network,)))
+    review = await admin_client.get(location)
+    text = visible_text(review)
+
+    assert "com.docker.network.bridge.name=br-shop" in text and "tier=db" in text
+    assert SUBNET in text and "internal" in text
+
+
+async def test_an_upload_being_imported_is_refused_a_second_import_and_the_first_completes(
+    admin_client: AsyncClient, world: World, import_host: ImportHost
+) -> None:
+    location, review = await opened_review(admin_client, world)
+    gate = import_host.hold("put_archive")
+    first = asyncio.ensure_future(confirm(admin_client, location, review))
+    await gate.entered.wait()
+
+    second = await confirm(admin_client, location, review)
+    gate.release.set()
+    finished_first = await first
+
+    assert second.status_code == CONFLICT and "already being imported" in visible_text(second)
+    assert finished_first.status_code == SEE_OTHER
+    assert len(import_host.volume_bodies()) == 1
+
+
+async def test_a_volume_that_exists_by_the_time_of_the_create_is_neither_written_nor_removed(
+    admin_client: AsyncClient,
+    world: World,
+    import_host: ImportHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    location, review = await opened_review(admin_client, world)
+
+    async def raced(self: ContainerImportService, client: object, name: str) -> None:
+        import_host.add_volume(name)
+
+    monkeypatch.setattr(ContainerImportService, "_require_absent", raced)
+    failed = await confirm(admin_client, location, review)
+
+    assert failed.status_code == BAD_GATEWAY and "already exists" in visible_text(failed)
+    assert VOLUME in import_host.volumes and import_host.volume_removals() == []
+    assert import_host.files_of(VOLUME) == {}
+    assert not [n for n in import_host.networks.values() if n["Name"] == NETWORK]
+
+
+async def test_a_refusal_after_the_network_was_created_reports_what_was_removed_not_a_lost_upload(
+    admin_client: AsyncClient, world: World, import_host: ImportHost
+) -> None:
+    import_host.fail("volume_create", 400)
+    location, review = await opened_review(admin_client, world)
+
+    failed = await confirm(admin_client, location, review)
+
+    text = visible_text(failed)
+    assert failed.status_code == BAD_GATEWAY and "The import failed" in text
+    assert "Every object this import created was removed" in text
+    assert "nothing was changed" not in text.lower()
+    assert not [n for n in import_host.networks.values() if n["Name"] == NETWORK]
+
+
+async def test_an_archive_with_several_volumes_is_decompressed_once(
+    admin_client: AsyncClient,
+    world: World,
+    import_host: ImportHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import stack_import_archive
+
+    archive = await container_archive(
+        form={
+            "mount-1-type": "volume",
+            "mount-1-source": "shop-logs",
+            "mount-1-target": "/logs",
+        },
+        volumes={VOLUME: {NOTE_FILE: NOTE}, "shop-logs": {"a.log": b"1\n"}},
+    )
+    location, review = await opened_review(admin_client, world, archive)
+    reads: list[object] = []
+    original = stack_import_archive._entries
+
+    def counted(*args: object) -> object:
+        reads.append(args)
+        return original(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(stack_import_archive, "_entries", counted)
+    done = await confirm(admin_client, location, review)
+
+    assert done.status_code == SEE_OTHER and len(reads) == 1
+    assert import_host.files_of("shop-logs")["a.log"].data == b"1\n"
+
+
+async def test_an_unprotected_archive_is_said_to_be_so_on_the_review(
+    admin_client: AsyncClient, world: World, import_host: ImportHost
+) -> None:
+    sealed = await admin_client.get(await reviewed(admin_client, world))
+    plain = await container_archive(passphrase=None)
+    unprotected = await admin_client.get(await reviewed(admin_client, world, plain))
+
+    assert "no integrity protection" not in visible_text(sealed)
+    assert "no integrity protection" in visible_text(unprotected)
+
+
+async def test_a_container_archive_whose_manifest_was_modified_does_not_unlock(
+    admin_client: AsyncClient, world: World, import_host: ImportHost
+) -> None:
+    tampered = with_manifest(await container_archive(), instance_version="9.9.9")
+    location = await reviewed(admin_client, world, tampered)
+
+    failed = await unlocked(admin_client, location)
+
+    assert failed.status_code == UNPROCESSABLE and "did not open" in visible_text(failed)

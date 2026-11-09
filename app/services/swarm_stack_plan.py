@@ -1242,7 +1242,7 @@ class SwarmStackPlanner:
         if volume.name != name:
             return False
         carried = volume.labels.get(SWARM_NAMESPACE_LABEL)
-        if self._imported is not None and self._imported.registered(environment_id, key):
+        if self._imported is not None and self._imported.holds(environment_id, key, volume.name):
             own = self._imported.accepts(environment_id, key, volume.name, volume.created_at)
         else:
             own = bool(carried) and canonical_stack_key(carried or "") == key

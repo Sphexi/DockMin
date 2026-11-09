@@ -33,6 +33,13 @@
   </dl>
 </section>
 
+{% if not review.integrity_protected %}
+<div class="panel panel--alert" role="note">
+  <h2>This archive has no integrity protection</h2>
+  <p>Nothing in it can be verified as unmodified: not the form's values, not the networks, not the volume data.</p>
+</div>
+{% endif %}
+
 {% if review.secrets_mode == "sealed" %}
 <section class="panel" aria-labelledby="unlock-heading">
   <h2 id="unlock-heading">Sealed values</h2>
@@ -62,7 +69,7 @@
       <div class="data-table__scroll" role="region" aria-label="Networks the container joins" tabindex="0">
         <table class="table">
           <caption class="visually-hidden">The user-defined networks the container joins and what happens to each</caption>
-          <thead><tr><th scope="col">Network</th><th scope="col">Driver</th><th scope="col">What happens</th></tr></thead>
+          <thead><tr><th scope="col">Network</th><th scope="col">Driver</th><th scope="col">What happens</th><th scope="col">The archive's settings</th></tr></thead>
           <tbody>
             {% for item in plan.networks %}
             <tr>
@@ -73,6 +80,13 @@
                 {% elif item.action == "create" %}Created from the archive's options
                 {% elif item.differences %}Exists and is used as it is. It differs from the archive in: {{ item.differences|join(", ") }}.
                 {% else %}Exists and is used as it is{% endif %}
+              </td>
+              <td>
+                {% if item.flags %}<p>{{ item.flags|join(", ") }}</p>{% endif %}
+                {% for subnet, gateway, ip_range in item.pools %}<p>Pool <span class="mono cell-wrap">{{ subnet|visible_text }}</span>{% if gateway %}, gateway <span class="mono cell-wrap">{{ gateway|visible_text }}</span>{% endif %}{% if ip_range %}, range <span class="mono cell-wrap">{{ ip_range|visible_text }}</span>{% endif %}</p>{% endfor %}
+                {% for key, value in item.options %}<p>Option <span class="mono cell-wrap">{{ key|visible_text }}={{ value|visible_text }}</span></p>{% endfor %}
+                {% for key, value in item.labels %}<p>Label <span class="mono cell-wrap">{{ key|visible_text }}={{ value|visible_text }}</span></p>{% endfor %}
+                {% if not (item.flags or item.pools or item.options or item.labels) %}—{% endif %}
               </td>
             </tr>
             {% endfor %}
@@ -129,7 +143,7 @@
       {% endif %}
       {% if plan.volumes %}
       <ul>
-        <li>Each volume is created with the local driver, without the archive's driver options or labels, and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.</li>
+        <li>Each volume is created with the local driver, without the archive's driver options or labels (it carries one label that identifies this import), and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.</li>
         <li>If anything cannot be created or written, everything this import created is removed and nothing else changes.</li>
       </ul>
       {% if plan.has_data %}

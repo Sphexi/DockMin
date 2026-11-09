@@ -1,13 +1,19 @@
 """Validation and rewriting of volume export archives."""
 
+import gzip
+import json
 import tarfile
+import tracemalloc
 from pathlib import Path
 
 import pytest
 
+from app.services.volume_export_writer import MAX_ENTRY_EXTENSIONS
 from app.services.volume_import_archive import (
+    MAX_PATH_DEPTH,
     ArchiveLimits,
     ArchiveRefusal,
+    VolumeArchive,
     VolumeArchiveRefused,
     inspect_volume_archive,
     rewrite_volume_archive,
@@ -328,3 +334,160 @@ def test_a_file_that_stops_passing_validation_after_the_review_is_refused_when_r
         list(rewrite_volume_archive(path))
 
     assert raised.value.reason == ArchiveRefusal.MEMBER_TYPE
+
+
+TAR_BLOCK = 512
+MANIFEST_NAME = "manifest.json"
+CRAFTED_MEMBERS = 30
+CRAFTED_COMPONENTS = 2040
+MEMORY_CEILING = 4 * 1024 * 1024
+EXTENSION_VALUE_BYTES = 400 * 1024
+FIRST_OVER_EXTENSIONS = MAX_ENTRY_EXTENSIONS + 1
+NAME_CHARGE = 33
+
+
+def _padded(data: bytes) -> bytes:
+    return data + bytes(-len(data) % TAR_BLOCK)
+
+
+def _header(name: str, size: int = 0, kind: bytes = tarfile.REGTYPE) -> bytes:
+    info = tarfile.TarInfo(name)
+    info.size, info.type, info.mode = size, kind, 0o644
+    return info.tobuf(tarfile.GNU_FORMAT, "utf-8", "surrogateescape")
+
+
+def raw_file(name: str, data: bytes = b"x") -> bytes:
+    return _header(name, len(data)) + _padded(data)
+
+
+def _record(key: str, value: str) -> bytes:
+    body = f" {key}={value}\n".encode()
+    length = len(body)
+    while len(str(length)) + len(body) != length:
+        length = len(str(length)) + len(body)
+    return str(length).encode() + body
+
+
+def pax(records: dict[str, str]) -> bytes:
+    data = b"".join(_record(key, value) for key, value in records.items())
+    return _header("PaxHeader", len(data), tarfile.XHDTYPE) + _padded(data)
+
+
+def crafted(directory: Path, *parts: bytes) -> Path:
+    manifest = json.dumps(manifest_document()).encode()
+    tar = raw_file(MANIFEST_NAME, manifest) + b"".join(parts) + bytes(2 * TAR_BLOCK)
+    return stored(directory, gzip.compress(tar))
+
+
+def taken_before_refusal(archive: VolumeArchive) -> tuple[int, VolumeArchiveRefused]:
+    taken = 0
+    with pytest.raises(VolumeArchiveRefused) as raised:
+        for member in archive.members():
+            taken += member.kind != "root"
+    return taken, raised.value
+
+
+def test_names_nested_past_the_depth_limit_are_refused_without_holding_them(
+    tmp_path: Path,
+) -> None:
+    deep = [
+        Entry(f"data/{index:02d}/{'/'.join(['c'] * CRAFTED_COMPONENTS)}"[:4090])
+        for index in range(CRAFTED_MEMBERS)
+    ]
+    path = stored(tmp_path, export_archive(*deep))
+
+    tracemalloc.start()
+    try:
+        error = refused(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert error.reason == ArchiveRefusal.PATH_TOO_DEEP and error.member is not None
+    assert peak < MEMORY_CEILING
+
+
+def test_a_name_at_the_depth_limit_is_accepted(tmp_path: Path) -> None:
+    path = stored(tmp_path, export_archive(file("/".join(["d"] * MAX_PATH_DEPTH))))
+
+    assert inspect_volume_archive(path).members == 1
+
+
+def test_entries_are_refused_once_their_names_take_more_than_the_budget(tmp_path: Path) -> None:
+    limits = ArchiveLimits(max_name_bytes=6 * 100 * NAME_CHARGE + NAME_CHARGE)
+    entries = [file(f"{chr(97 + index)}/{'/'.join(['n'] * 99)}") for index in range(8)]
+    archive = VolumeArchive(stored(tmp_path, export_archive(*entries)), limits)
+
+    taken, error = taken_before_refusal(archive)
+
+    assert error.reason == ArchiveRefusal.NAMES_TOO_LARGE and taken == 6
+
+
+def test_siblings_in_one_deep_directory_share_the_cost_of_its_path(tmp_path: Path) -> None:
+    limits = ArchiveLimits(max_name_bytes=100 * NAME_CHARGE + 60 * (NAME_CHARGE + 3))
+    deep = "/".join(["n"] * 99)
+    entries = [file(f"{deep}/f{index}") for index in range(60)]
+    path = stored(tmp_path, export_archive(*entries))
+
+    assert inspect_volume_archive(path, limits).files == 60
+
+
+@pytest.mark.parametrize(
+    ("headers", "limits", "reason"),
+    [
+        pytest.param(
+            [pax({f"SCHILY.xattr.user.k{n}": "v" * EXTENSION_VALUE_BYTES}) for n in range(4)],
+            None,
+            ArchiveRefusal.MALFORMED,
+            id="extension-bytes-over-the-total",
+        ),
+        pytest.param(
+            [pax({})] * FIRST_OVER_EXTENSIONS,
+            None,
+            ArchiveRefusal.MALFORMED,
+            id="too-many-for-one-entry",
+        ),
+        pytest.param(
+            [pax({})] * 6,
+            ArchiveLimits(max_members=5),
+            ArchiveRefusal.TOO_MANY_MEMBERS,
+            id="extension-headers-count-toward-the-member-limit",
+        ),
+    ],
+)
+def test_runs_of_extension_headers_are_refused_past_their_budgets(
+    tmp_path: Path, headers: list[bytes], limits: ArchiveLimits | None, reason: ArchiveRefusal
+) -> None:
+    path = crafted(tmp_path, *headers, raw_file("data/a"))
+
+    assert refused(path, limits).reason == reason
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        pytest.param(_header("data/neg", size=-1) + bytes(TAR_BLOCK), id="base-256-size"),
+        pytest.param(pax({"size": "-5"}) + raw_file("data/neg"), id="pax-size"),
+        pytest.param(pax({"uid": "-1"}) + raw_file("data/neg"), id="pax-uid"),
+        pytest.param(pax({"gid": "-1"}) + raw_file("data/neg"), id="pax-gid"),
+        pytest.param(pax({"mtime": "nan"}) + raw_file("data/neg"), id="pax-mtime-not-finite"),
+    ],
+)
+def test_negative_numbers_in_a_header_are_refused(tmp_path: Path, part: bytes) -> None:
+    assert refused(crafted(tmp_path, part)).reason == ArchiveRefusal.MALFORMED
+
+
+def test_a_negative_modification_time_is_read_as_the_epoch(tmp_path: Path) -> None:
+    path = crafted(tmp_path, pax({"mtime": "-5"}) + raw_file("data/old"))
+
+    members = read_tar(b"".join(rewrite_volume_archive(path)))
+
+    assert members["old"][0].mtime == 0
+
+
+def test_a_pax_sparse_record_is_refused_as_an_unsupported_entry(tmp_path: Path) -> None:
+    sparse = pax({"GNU.sparse.major": "1", "GNU.sparse.minor": "0", "GNU.sparse.name": "data/s"})
+
+    assert refused(crafted(tmp_path, sparse + raw_file("data/s"))).reason == (
+        ArchiveRefusal.MEMBER_TYPE
+    )

@@ -45,6 +45,7 @@
   <form class="form" method="post" action="{{ run_href }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="expected_created_at" value="{{ confirmation.created_at_text }}">
+    <input type="hidden" name="helper_image" value="{{ confirmation.helper_image or '' }}">
     <div class="form__actions">
       <button type="submit" class="btn btn--primary">Download archive</button>
       <a class="btn" href="{{ detail_href }}">Cancel</a>

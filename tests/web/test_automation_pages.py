@@ -775,6 +775,7 @@ async def test_the_chooser_offers_a_subsystem_that_takes_no_environment_to_admin
     assert forced.status_code == UNPROCESSABLE
 
 
+@pytest.mark.usefixtures("no_status_transition_events")
 async def test_an_exporter_rules_delete_page_names_how_many_events_the_deletion_releases(
     admin_client: AsyncClient, world: World
 ) -> None:

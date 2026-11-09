@@ -10,7 +10,6 @@ from app.services.stack_import_store import (
     CAPACITY,
     LIFETIME_SECONDS,
     SPOOL_DIRECTORY,
-    UNSEAL_FAILURE_LIMIT,
     StackImportStore,
 )
 from app.services.volume_import_store import SpooledUpload, spool_upload, sweep_import_leftovers
@@ -54,13 +53,14 @@ async def hold(
     user: int = USER,
     session: int = SESSION,
     environment: int = ENVIRONMENT,
+    kind: str = "compose",
 ) -> None:
     await store.hold(
         upload_id,
         user_id=user,
         session_id=session,
         environment_id=environment,
-        kind="compose",
+        kind=kind,
         upload=await make_upload(tmp_path, upload_id),
         summary=summary,
     )
@@ -134,15 +134,18 @@ async def test_a_hold_whose_import_has_begun_does_not_expire(
     await store.aclose()
 
 
-async def test_failed_attempts_to_open_sealed_values_count_per_session(
-    summary: StackArchiveSummary,
+async def test_a_container_upload_and_a_stack_upload_by_one_user_are_held_together(
+    tmp_path: Path, summary: StackArchiveSummary
 ) -> None:
     store = StackImportStore(Clock())
+    await hold(store, tmp_path, summary, "a" * 32, kind="container")
+    await hold(store, tmp_path, summary, "b" * 32, kind="compose")
+    await hold(store, tmp_path, summary, "c" * 32, kind="compose")
 
-    remaining = [store.note_failure(SESSION) for _ in range(UNSEAL_FAILURE_LIMIT)]
+    kept = [path.name for path in spooled(tmp_path)]
 
-    assert remaining == list(range(UNSEAL_FAILURE_LIMIT - 1, -1, -1))
-    assert store.failures(SESSION) == UNSEAL_FAILURE_LIMIT and store.failures(SESSION + 1) == 0
+    assert kept == [f"{'a' * 32}.tar.gz", f"{'c' * 32}.tar.gz"]
+    await store.aclose()
 
 
 async def test_the_startup_sweep_empties_the_stack_spool_only(tmp_path: Path) -> None:

@@ -12,7 +12,7 @@ from app.docker_engine.registry import EngineClientRegistry
 from app.services.volume_export import ExportSlots
 from tests.auth_support import csrf_form
 from tests.container_support import stock
-from tests.docker_engine.container_engine import VOLUME_CREATED
+from tests.docker_engine.container_engine import IMAGE_ID, VOLUME_CREATED
 from tests.environment_support import activity_rows
 from tests.object_support import add_container, hidden_values, visible_text, volume_mount
 from tests.self_support import SELF_VOLUME, home_identity
@@ -74,6 +74,7 @@ async def test_the_confirmation_states_what_is_read_and_who_can_read_it(
     assert "dockmin-read-" in text and "never started" in text and "removed" in text
     assert "No running container mounts the volume" in text
     assert hidden_values(page, "expected_created_at") == [VOLUME_CREATED]
+    assert hidden_values(page, "helper_image") == [IMAGE_ID]
     assert hidden_values(page, "csrf_token") and 'method="post"' in page.text
     assert "hx-" not in page.text.split("<main", 1)[1]
     assert not container_host.helpers() and "create" not in container_host.verbs()
@@ -119,7 +120,7 @@ async def test_the_post_downloads_the_archive_with_the_headers_of_an_attachment(
 ) -> None:
     response = await admin_client.post(
         export_path(world),
-        data=csrf_form(admin_client, expected_created_at=VOLUME_CREATED),
+        data=csrf_form(admin_client, expected_created_at=VOLUME_CREATED, helper_image=IMAGE_ID),
     )
 
     members = unpack(response.content)
@@ -140,7 +141,7 @@ async def test_a_completed_download_leaves_two_rows_and_no_helper(
 ) -> None:
     await admin_client.post(
         export_path(world),
-        data=csrf_form(admin_client, expected_created_at=VOLUME_CREATED),
+        data=csrf_form(admin_client, expected_created_at=VOLUME_CREATED, helper_image=IMAGE_ID),
     )
 
     rows = await activity_rows_of(world)
@@ -187,7 +188,7 @@ async def test_a_busy_instance_answers_429_with_a_retry_header(
 
     response = await admin_client.post(
         export_path(world),
-        data=csrf_form(admin_client, expected_created_at=VOLUME_CREATED),
+        data=csrf_form(admin_client, expected_created_at=VOLUME_CREATED, helper_image=IMAGE_ID),
     )
 
     assert response.status_code == TOO_MANY and response.headers["retry-after"]

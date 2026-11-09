@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Collection
 from datetime import datetime
 from enum import StrEnum
 from typing import Final, Literal, Self
@@ -9,7 +10,13 @@ from typing import Final, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.auth.errors import ProductError
-from app.services.export_sealing import SealedValues, is_valid_archive_id
+from app.services.export_sealing import (
+    SealedValues,
+    SealError,
+    is_valid_archive_id,
+    open_sealed,
+    verify_sealed,
+)
 from app.services.volume_manifest import FORMAT_VERSION as VOLUME_FORMAT_VERSION
 from app.services.volume_manifest import VolumeManifest
 
@@ -60,16 +67,27 @@ class ExportRefusal(StrEnum):
 
 
 class ExportFormatError(ProductError):
-    """An archive is not a readable export; `version` is set when a newer one was refused."""
+    """An archive is not a readable export; `version` is set when a newer one was refused.
 
-    def __init__(self, reason: ExportRefusal, version: int | None = None) -> None:
-        super().__init__(_message(reason, version))
+    `nested` marks a version refused in a volume's own manifest rather than the archive's.
+    """
+
+    def __init__(
+        self, reason: ExportRefusal, version: int | None = None, *, nested: bool = False
+    ) -> None:
+        super().__init__(_message(reason, version, nested))
         self.reason = reason
         self.version = version
+        self.nested = nested
 
 
-def _message(reason: ExportRefusal, version: int | None) -> str:
+def _message(reason: ExportRefusal, version: int | None, nested: bool) -> str:
     if reason is ExportRefusal.NEWER_VERSION and version is not None:
+        if nested:
+            return (
+                f"A volume's format version in the archive is {version}; "
+                f"this build reads up to {VOLUME_FORMAT_VERSION}."
+            )
         return (
             f"The archive's format version is {version}; this build reads up to {FORMAT_VERSION}."
         )
@@ -312,11 +330,17 @@ class ExportManifest(_Model):
                 consistent = (
                     bool(names)
                     and self.sealed is not None
+                    and self.sealed.mac is not None
                     and {record.name for record in self.sealed.records} == names
                 )
         if not consistent:
             raise ValueError("the secrets mode and sealed records do not match the secret entries")
         return self
+
+    @property
+    def integrity_protected(self) -> bool:
+        """Report whether the manifest carries a MAC; False means nothing in it can be verified."""
+        return self.sealed is not None and self.sealed.mac is not None
 
     def documents(self) -> dict[str, MemberRef | CompanionFile | ContextEntry]:
         """Return the non-volume members the manifest declares, by member path."""
@@ -357,6 +381,42 @@ def manifest_bytes(manifest: ExportManifest) -> bytes:
     return (json.dumps(document, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
+def authenticated_bytes(manifest: ExportManifest) -> bytes:
+    """Return the bytes the MAC covers: the whole manifest except the MAC itself."""
+    exclude = {"sealed": {"mac"}} if manifest.sealed is not None else None
+    document = manifest.model_dump(mode="json", exclude=exclude)
+    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def verify_manifest(manifest: ExportManifest, passphrase: str) -> None:
+    """Check the manifest against its MAC; SealError for a modified or unprotected manifest.
+
+    Blocking and memory-hungry: run it with `asyncio.to_thread`.
+    """
+    if manifest.sealed is None:
+        raise SealError
+    verify_sealed(manifest.sealed, passphrase, manifest.archive_id, authenticated_bytes(manifest))
+
+
+def open_manifest_secrets(
+    manifest: ExportManifest, passphrase: str, names: Collection[str] | None = None
+) -> dict[str, bytes]:
+    """Verify the manifest, then open its sealed values, with one key derivation.
+
+    Blocking and memory-hungry: run it with `asyncio.to_thread`. SealError for a wrong
+    passphrase, a modified manifest or sealed record, or a manifest with nothing sealed.
+    """
+    if manifest.sealed is None:
+        raise SealError
+    return open_sealed(
+        manifest.sealed,
+        passphrase,
+        manifest.archive_id,
+        names,
+        authenticated=authenticated_bytes(manifest),
+    )
+
+
 def parse_manifest(data: bytes) -> ExportManifest:
     """Parse a manifest, reading every version up to FORMAT_VERSION.
 
@@ -367,20 +427,21 @@ def parse_manifest(data: bytes) -> ExportManifest:
         raise ExportFormatError(ExportRefusal.TOO_LARGE)
     try:
         document = json.loads(data)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise ExportFormatError(ExportRefusal.MANIFEST_INVALID) from None
     version = document.get("format_version") if isinstance(document, dict) else None
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise ExportFormatError(ExportRefusal.MANIFEST_INVALID)
     if version > FORMAT_VERSION:
         raise ExportFormatError(ExportRefusal.NEWER_VERSION, version)
-    for section in document.get("volumes") or []:
+    volumes = document.get("volumes")
+    for section in volumes if isinstance(volumes, list) else ():
         nested = _nested_version(section)
         if nested > VOLUME_FORMAT_VERSION:
-            raise ExportFormatError(ExportRefusal.NEWER_VERSION, nested)
+            raise ExportFormatError(ExportRefusal.NEWER_VERSION, nested, nested=True)
     try:
         return ExportManifest.model_validate(document)
-    except ValidationError:
+    except (ValidationError, RecursionError):
         raise ExportFormatError(ExportRefusal.MANIFEST_INVALID) from None
 
 

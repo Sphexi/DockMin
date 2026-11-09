@@ -1,5 +1,7 @@
 """The volume import pages: upload, review, import and result."""
 
+import asyncio
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -7,11 +9,14 @@ import pytest
 from httpx import AsyncClient, Response
 
 from app.docker_engine.registry import EngineClientRegistry
+from app.services.volume_import import IMPORT_LABEL
 from app.services.volume_import_store import SPOOL_DIRECTORY
+from app.web.volume_import_routes import RUNNING
 from tests.auth_support import csrf_form, csrf_token_of
 from tests.container_support import stock
 from tests.environment_support import activity_rows
 from tests.object_support import hidden_values, visible_text
+from tests.volume_export_support import volume_tar
 from tests.volume_import_support import (
     FIXTURE,
     ImportEngine,
@@ -21,6 +26,7 @@ from tests.volume_import_support import (
     plain_tar,
 )
 from tests.web.environment_support import World
+from tests.web.flash_support import landed_texts
 
 OK, SEE_OTHER, BAD_REQUEST, FORBIDDEN = 200, 303, 400, 403
 NOT_FOUND, CONFLICT, UNPROCESSABLE = 404, 409, 422
@@ -87,12 +93,21 @@ async def reviewed(client: AsyncClient, world: World, archive: bytes | None = No
     return str(response.headers["location"])
 
 
+def confirm_values(response: Response) -> list[str]:
+    return re.findall(r'name="confirm_mount" value="([^"]*)"', response.text)
+
+
 def run_fields(client: AsyncClient, review: Response, **fields: str) -> dict[str, str]:
+    confirmed = (
+        {"confirm_mount": token} if (token := next(iter(confirm_values(review)), "")) else {}
+    )
     return csrf_form(
         client,
         expected_digest=hidden_values(review, "expected_digest")[0],
+        helper_image=hidden_values(review, "helper_image")[0],
         name=TARGET,
         driver="",
+        **confirmed,
         **fields,
     )
 
@@ -200,7 +215,8 @@ async def test_an_upload_is_reviewed_and_imported_and_the_result_names_the_volum
     assert TARGET in import_host.volumes and set(import_host.files_of(TARGET)) == {"a.txt"}
     assert f'href="{base(world)}/{TARGET}"' in result.text and TARGET in listed.text
     (body,) = import_host.volume_bodies()
-    assert body["Labels"] == {"team": "core"} and body["DriverOpts"] == {
+    assert body["Labels"] == {"team": "core", IMPORT_LABEL: body["Labels"][IMPORT_LABEL]}
+    assert body["DriverOpts"] == {
         "type": "none",
         "o": "bind",
         "device": "/srv/shop",
@@ -288,3 +304,123 @@ async def test_a_failed_write_answers_with_the_removal_of_the_volume(
     assert TARGET not in import_host.volumes and spooled(world) == []
     (row,) = await rows(world)
     assert row["result"] == "failure"
+
+
+def host_bound_archive(device: str = "/srv/shop") -> bytes:
+    return export_archive(
+        file("a.txt"),
+        manifest=manifest_document(
+            name="shop-data", options={"type": "none", "o": "bind", "device": device}
+        ),
+    )
+
+
+def host_options(device: str = "/srv/shop") -> dict[str, str]:
+    return {
+        "option-0-key": "type",
+        "option-0-value": "none",
+        "option-1-key": "o",
+        "option-1-value": "bind",
+        "option-2-key": "device",
+        "option-2-value": device,
+    }
+
+
+async def test_a_host_bound_volume_is_reviewed_with_its_path_named_and_needs_its_confirmation(
+    admin_client: AsyncClient, world: World, import_host: ImportEngine
+) -> None:
+    location = await reviewed(admin_client, world, host_bound_archive())
+    review = await admin_client.get(location)
+
+    text = visible_text(review)
+    (token,) = confirm_values(review)
+    assert "Host path or share" in text and "/srv/shop" in text
+    assert "does not remove files written to a host path or share" in text
+    assert "existing volume is never written to" not in text
+
+    unconfirmed = await admin_client.post(
+        location,
+        data=csrf_form(
+            admin_client,
+            expected_digest=hidden_values(review, "expected_digest")[0],
+            helper_image=hidden_values(review, "helper_image")[0],
+            name=TARGET,
+            driver="",
+            **host_options(),
+        ),
+    )
+    confirmed = await admin_client.post(
+        location, data=run_fields(admin_client, review, **host_options())
+    )
+
+    assert unconfirmed.status_code == BAD_REQUEST
+    assert "Confirm that the archive" in visible_text(unconfirmed)
+    box = re.search(r'<input[^>]*name="confirm_mount"[^>]*>', unconfirmed.text)
+    assert confirm_values(unconfirmed) == [token]
+    assert box is not None and " checked" not in box.group(0)
+    assert confirmed.status_code == OK and TARGET in import_host.volumes
+
+
+async def test_a_path_changed_on_the_review_is_not_covered_by_the_confirmation_of_the_old_one(
+    admin_client: AsyncClient, world: World, import_host: ImportEngine
+) -> None:
+    location = await reviewed(admin_client, world, host_bound_archive())
+    review = await admin_client.get(location)
+
+    response = await admin_client.post(
+        location, data=run_fields(admin_client, review, **host_options("/srv/other"))
+    )
+
+    assert response.status_code == BAD_REQUEST and "/srv/other" in visible_text(response)
+    assert confirm_values(response) != confirm_values(review)
+    assert import_host.calls("POST", "/volumes/create") == [] and import_host.written == {}
+
+
+async def test_a_volume_that_is_not_empty_answers_with_a_page_that_links_back_to_the_review(
+    admin_client: AsyncClient, world: World, import_host: ImportEngine
+) -> None:
+    import_host.serve_volume(TARGET, volume_tar())
+    location = await reviewed(admin_client, world)
+    review = await admin_client.get(location)
+
+    response = await admin_client.post(location, data=run_fields(admin_client, review))
+    again = await admin_client.get(location)
+
+    assert response.status_code == CONFLICT and "already holds files" in visible_text(response)
+    assert f'href="{location}"' in response.text and again.status_code == OK
+    assert import_host.written == {} and TARGET not in import_host.volumes
+
+
+async def test_the_page_of_a_failed_write_does_not_link_to_a_review_that_is_gone(
+    admin_client: AsyncClient, world: World, import_host: ImportEngine
+) -> None:
+    import_host.fail("put_archive", 500)
+    location = await reviewed(admin_client, world)
+    review = await admin_client.get(location)
+
+    response = await admin_client.post(location, data=run_fields(admin_client, review))
+    again = await admin_client.get(location)
+
+    assert response.status_code == 502 and f'href="{location}"' not in response.text
+    assert again.status_code == CONFLICT
+
+
+async def test_a_discard_while_the_upload_is_being_imported_does_not_say_it_was_discarded(
+    admin_client: AsyncClient, world: World, import_host: ImportEngine
+) -> None:
+    location = await reviewed(admin_client, world)
+    review = await admin_client.get(location)
+    gate = import_host.hold("put_archive")
+    running = asyncio.ensure_future(
+        admin_client.post(location, data=run_fields(admin_client, review))
+    )
+    await gate.entered.wait()
+
+    cancelled = await admin_client.post(f"{location}/cancel", data=csrf_form(admin_client))
+    notices = await landed_texts(admin_client, cancelled)
+    gate.release.set()
+    result = await running
+
+    assert cancelled.status_code == SEE_OTHER and str(cancelled.headers["location"]) == location
+    assert notices == [RUNNING]
+    assert result.status_code == OK and TARGET in import_host.volumes

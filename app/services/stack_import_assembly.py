@@ -7,6 +7,7 @@ from fastapi import Depends, Request
 from app.auth.dependencies import get_activity, get_runtime
 from app.auth.services import AuthRuntime
 from app.db.engine import Database
+from app.self_identity import source_of
 from app.services.activity import ActivityRecorder
 from app.services.assembly import (
     AccessServices,
@@ -49,6 +50,7 @@ async def get_stack_import_service(
         store=engine.stack_imports,
         imported=engine.imported_volumes,
         data_dir=request.app.state.settings.data_dir,
+        self_identity=source_of(request.app),
     )
 
 

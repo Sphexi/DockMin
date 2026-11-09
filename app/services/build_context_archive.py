@@ -5,7 +5,7 @@ import hashlib
 import os
 import zlib
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -80,9 +80,21 @@ class InspectedContext:
 
 
 async def run_limited[**P, T](function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    """Run a blocking archive function in a thread, two archives at a time across the process."""
+    """Run a blocking archive function in a thread, two archives at a time across the process.
+
+    The slot is held until the thread has ended, even when the caller is cancelled first.
+    """
     async with _slots:
-        return await asyncio.to_thread(function, *args, **kwargs)
+        running = asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs))
+        try:
+            return await asyncio.shield(running)
+        except asyncio.CancelledError:
+            while not running.done():
+                with suppress(asyncio.CancelledError):
+                    await asyncio.wait({running})
+            if not running.cancelled():
+                running.exception()
+            raise
 
 
 def _tar_limits() -> TarLimits:

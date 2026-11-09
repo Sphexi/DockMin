@@ -76,10 +76,6 @@ NOT_AUDITED: Mapping[str, str] = {
         "feeds a chunk of the archive into the per-part SHA-256 and MD5 digests; the hash objects' "
         "update method matches a repository method name but no database is involved"
     ),
-    "app/services/volume_import_archive.py:_Layout.accept_name": (
-        "records a name of an archive being validated in an in-memory set; the names match "
-        "repository methods but no database is involved"
-    ),
     "app/services/volume_import_store.py:VolumeImportStore.hold": (
         "holds a validated upload in memory and removes the files it replaces; the import "
         "itself is recorded by VolumeImportService.import_volume"

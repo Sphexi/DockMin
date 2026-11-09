@@ -2,6 +2,7 @@
 
 from app.services.container_import_plan import (
     ContainerImportPlan,
+    NetworkPlan,
     mount_entries,
     plan_digest,
     suggest_name,
@@ -61,3 +62,23 @@ def test_the_digest_changes_with_the_archive_and_with_what_the_plan_shows() -> N
     assert plan_digest(base, ARCHIVE) == plan_digest(plan(), ARCHIVE)
     assert plan_digest(base, ARCHIVE) != plan_digest(base, "b" * 64)
     assert plan_digest(base, ARCHIVE) != plan_digest(plan(name_taken=True), ARCHIVE)
+
+
+def net(**changes: object) -> NetworkPlan:
+    fields: dict[str, object] = {"name": "n", "driver": "bridge", "action": "create"}
+    fields.update(changes)
+    return NetworkPlan(**fields)  # type: ignore[arg-type]
+
+
+def test_the_digest_follows_each_option_label_pool_and_flag_of_a_network() -> None:
+    changes: list[dict[str, object]] = [
+        {"options": (("com.docker.network.bridge.name", "br0"),)},
+        {"labels": (("tier", "db"),)},
+        {"pools": (("172.30.0.0/24", "", ""),)},
+        {"pools": (("172.30.0.0/24", "172.30.0.1", ""),)},
+        {"flags": ("internal",)},
+    ]
+    digests = {plan_digest(plan(networks=(net(),)), ARCHIVE)}
+    digests |= {plan_digest(plan(networks=(net(**change),)), ARCHIVE) for change in changes}
+
+    assert len(digests) == len(changes) + 1

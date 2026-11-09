@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "images/_detail.html" import image_summary, image_tabs with context %}
+{% from "partials/check_status.html" import check_status %}
 {% from "partials/page_header.html" import page_header %}
 {% from "partials/back_actions.html" import back_actions %}
 {% block title %}Image {{ detail.short_id }} - dockmin{% endblock %}
@@ -11,4 +12,5 @@
 
 {{ image_summary(detail) }}
 {{ image_tabs(detail, tab, tabs, history, checkable) }}
+{{ check_status("update-results-status", "") }}
 {% endblock %}

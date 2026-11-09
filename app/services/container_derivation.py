@@ -59,6 +59,7 @@ BLOCKER_MESSAGES: Final[dict[Blocker, str]] = {
 }
 
 _IMAGE_ID: Final = re.compile(r"(?:sha256:)?[0-9a-f]{12,64}")
+_NETWORK_ID_PREFIX: Final = re.compile(r"[0-9a-f]{12,64}")
 _HEX64: Final = re.compile(r"[0-9a-f]{64}")
 _IMAGE_DEFAULT_KEYS: Final = (
     "Cmd",
@@ -265,9 +266,12 @@ def _network_name(mode: str, networks: Mapping[str, Any]) -> str:
     """Return the attached network's name when `NetworkMode` names it by id."""
     if not mode or mode in networks:
         return mode
+    abbreviated = _NETWORK_ID_PREFIX.fullmatch(mode) is not None
     for name, endpoint in networks.items():
         network_id = _mapping(endpoint).get("NetworkID")
-        if isinstance(network_id, str) and network_id and network_id.startswith(mode):
+        if not isinstance(network_id, str) or not network_id:
+            continue
+        if network_id == mode or (abbreviated and network_id.startswith(mode)):
             return str(name)
     return mode
 

@@ -37,9 +37,11 @@ from app.services.host_files import (
     HELPER_NAME_PREFIX,
     MOUNT_POINT,
     HelperImageMissing,
+    HelperImageUnusable,
     HelperMountRefused,
     HostFileReader,
     VolumeHelper,
+    check_helper_image,
     helper_image,
 )
 from app.services.host_objects import (
@@ -85,6 +87,7 @@ ARCHIVE_SUFFIX: Final = ".tar.gz"
 
 _ROOT: Final = posixpath.basename(MOUNT_POINT)
 _NAME_LIMIT: Final = 255
+_DOCKER_REFUSED_TEXT: Final = "Docker could not mount or read the volume."
 
 
 class VolumeExportBusy(ProductError):
@@ -284,6 +287,10 @@ class _Outcome:
     helper_removed: bool
 
 
+def _refused_by_docker(error: EngineError) -> bool:
+    return error.status_code is not None and not isinstance(error, EnvironmentUnreachable)
+
+
 def _reason_of(error: Exception) -> str:
     if isinstance(error, StreamMalformed):
         return "malformed_stream"
@@ -356,10 +363,17 @@ class VolumeExportService:
         )
 
     async def start(
-        self, actor: Principal, environment_id: int, name: str, *, expected_created_at: str
+        self,
+        actor: Principal,
+        environment_id: int,
+        name: str,
+        *,
+        expected_created_at: str,
+        helper_image: str | None = None,
     ) -> VolumeExportStream:
         """Check the volume, create the helper and return the archive stream.
 
+        `helper_image` is the image id the confirmation named, resolved now when omitted.
         Everything that can refuse the export has run, and the started row is written, before
         this returns; no byte has been read for the caller yet. The caller must close the stream.
         ResourceNotFound, SelfProtected, VolumeChangedSinceReview, VolumeExportRefused,
@@ -367,7 +381,9 @@ class VolumeExportService:
         """
         opened: list[VolumeExportStream] = []
         try:
-            return await self._open(actor, environment_id, name, expected_created_at, opened)
+            return await self._open(
+                actor, environment_id, name, expected_created_at, helper_image, opened
+            )
         except BaseException:
             with anyio.CancelScope(shield=True):
                 for stream in opened:
@@ -386,6 +402,7 @@ class VolumeExportService:
         environment_id: int,
         name: str,
         expected_created_at: str,
+        reviewed_image: str | None,
         opened: list[VolumeExportStream],
     ) -> VolumeExportStream:
         audit = current_audit()
@@ -409,7 +426,7 @@ class VolumeExportService:
         stack = AsyncExitStack()
         try:
             stream = await self._prepare(
-                actor, environment_id, name, expected_created_at, stack, slot
+                actor, environment_id, name, expected_created_at, reviewed_image, stack, slot
             )
         except BaseException:
             with anyio.CancelScope(shield=True):
@@ -425,6 +442,7 @@ class VolumeExportService:
         environment_id: int,
         name: str,
         expected_created_at: str,
+        reviewed_image: str | None,
         stack: AsyncExitStack,
         slot: ExportSlot,
     ) -> VolumeExportStream:
@@ -455,7 +473,7 @@ class VolumeExportService:
             audit.detail["containers"] = len(using)
             audit.detail["running_containers"] = sum(c.state in FORCEABLE_STATES for c in using)
             helper, directory, rewrite = await self._open_helper(
-                actor, environment_id, volume, client, stack
+                actor, volume, client, stack, reviewed_image
             )
         except EngineError as error:
             audit.reason = failure_reason(error)
@@ -474,24 +492,45 @@ class VolumeExportService:
             helper=helper,
         )
 
-    async def _open_helper(
-        self,
-        actor: Principal,
-        environment_id: int,
-        volume: Volume,
-        client: EngineClient,
-        stack: AsyncExitStack,
-    ) -> tuple[VolumeHelper, DirectoryStream, RewriteStream]:
+    async def _image(self, client: EngineClient, reviewed: str | None) -> str:
         audit = current_audit()
         try:
-            image = await helper_image(client)
+            if reviewed is None:
+                return await helper_image(client)
+            if not reviewed:
+                raise HelperImageMissing
+            await check_helper_image(client, reviewed)
         except HelperImageMissing:
             audit.reason = "helper_image_missing"
             raise VolumeExportRefused(
                 "helper_image_missing",
                 "The host has no image to create the helper container from. "
-                "Pull or load an image on the host, then try again.",
+                "Pull or load an image on the host, then review the export again.",
             ) from None
+        except HelperImageUnusable:
+            audit.reason = "helper_image_unusable"
+            raise VolumeExportRefused(
+                "helper_image_unusable",
+                "The image the confirmation named declares a volume where the helper mounts "
+                "the volume. Review the export again.",
+            ) from None
+        except EngineError as error:
+            if not _refused_by_docker(error):
+                raise
+            audit.reason = "helper_refused"
+            raise VolumeExportRefused("helper_refused", _DOCKER_REFUSED_TEXT) from None
+        return reviewed
+
+    async def _open_helper(
+        self,
+        actor: Principal,
+        volume: Volume,
+        client: EngineClient,
+        stack: AsyncExitStack,
+        reviewed_image: str | None,
+    ) -> tuple[VolumeHelper, DirectoryStream, RewriteStream]:
+        audit = current_audit()
+        image = await self._image(client, reviewed_image)
         try:
             helper = await stack.enter_async_context(
                 HostFileReader(client).volume_session(actor, volume.name, image=image)
@@ -501,6 +540,11 @@ class VolumeExportService:
             raise VolumeExportRefused(
                 "helper_refused", "Docker refused to create the helper container."
             ) from None
+        except EngineError as error:
+            if not _refused_by_docker(error):
+                raise
+            audit.reason = "helper_refused"
+            raise VolumeExportRefused("helper_refused", _DOCKER_REFUSED_TEXT) from None
         try:
             directory = await helper.stream()
         except ArchiveError:
@@ -508,6 +552,11 @@ class VolumeExportService:
             raise VolumeExportRefused(
                 "unreadable", "Docker could not read the volume's contents."
             ) from None
+        except EngineError as error:
+            if not _refused_by_docker(error):
+                raise
+            audit.reason = "unreadable"
+            raise VolumeExportRefused("unreadable", _DOCKER_REFUSED_TEXT) from None
         manifest = build_manifest(
             exported_at=self._clock(),
             instance_version=product_version(),

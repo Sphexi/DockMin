@@ -121,9 +121,10 @@
 {{ badge(shown[0], shown[1]) }}
 {%- endmacro %}
 
-{% macro update_results(statuses, failure=none) %}
+{# The status line is out of band, so it is emitted only where its target stands outside every swapped region. #}
+{% macro update_results(statuses, failure=none, announce=true) %}
 {% set available = statuses|selectattr("state", "equalto", "update_available")|list|length if statuses else 0 %}
-{{ check_status("update-results-status", ("Update check finished. " ~ (available if available else "No") ~ (" update available." if available == 1 else " updates available.")) if statuses and not failure else "") }}
+{% if announce %}{{ check_status("update-results-status", ("Update check finished. " ~ (available if available else "No") ~ (" update available." if available == 1 else " updates available.")) if statuses and not failure else "") }}{% endif %}
 <div id="update-results" class="update-results">
   <p class="loading" role="status">Loading&hellip;</p>
   {% if failure %}

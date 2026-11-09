@@ -1,9 +1,13 @@
 """Imports a volume export archive as a new volume on an environment; administrators only."""
 
 import asyncio
+import hashlib
 import hmac
+import posixpath
+import re
+import secrets
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import Final
@@ -42,10 +46,13 @@ from app.services.container_actions import ANONYMOUS_VOLUME_LABEL
 from app.services.guards import require_administrator
 from app.services.host_files import (
     HELPER_NAME_PREFIX,
+    MOUNT_POINT,
     HelperImageMissing,
+    HelperImageUnusable,
     HelperMountRefused,
     HostFileReader,
     VolumeHelper,
+    check_helper_image,
     helper_image,
 )
 from app.services.host_objects import (
@@ -65,6 +72,7 @@ from app.services.object_inspector import (
 )
 from app.services.object_locks import LockHolder, ObjectKey, ObjectLockRegistry
 from app.services.resource_controls import ResourceControlService
+from app.services.volume_export_writer import ChunkSource, StreamMalformed, TarReader
 from app.services.volume_import_archive import (
     ArchiveSummary,
     VolumeArchiveRefused,
@@ -72,6 +80,7 @@ from app.services.volume_import_archive import (
 )
 from app.services.volume_import_store import (
     HeldImport,
+    ImportStoreFull,
     SpoolFailure,
     VolumeImportStore,
     spool_upload,
@@ -79,7 +88,7 @@ from app.services.volume_import_store import (
 from app.services.volume_import_stream import RewrittenArchive
 from app.services.volume_manifest import filter_labels
 from app.services.volume_views import VolumeNameInUse, VolumeRefused
-from app.services.volumes import VolumeRequest, parse_volume_form
+from app.services.volumes import VolumeRequest, created_as_requested, parse_volume_form
 
 logger = get_logger(__name__)
 
@@ -87,18 +96,27 @@ __all__ = [
     "ImportChangedSinceReview",
     "ImportReview",
     "ImportUploadGone",
+    "MountConfirmation",
     "VolumeImportFailed",
     "VolumeImportRefused",
     "VolumeImportService",
     "VolumeImported",
+    "mount_confirmation",
+    "option_rows",
+    "options_of_rows",
 ]
 
 SUPPORTED_DRIVER: Final = "local"
 SETTLE_SECONDS: Final = 120.0
 REMOVE_SECONDS: Final = 60.0
 LABEL_VALUE_CHARS: Final = 256
+IMPORT_LABEL: Final = "dockmin.import"
+EMPTY_READ_BYTES: Final = 64 * 1024
 _NAME_LIMIT: Final = 255
 _ACTION: Final = "volume_imported"
+_ROOT_ENTRY: Final = posixpath.basename(MOUNT_POINT)
+_OPTION_ROW: Final = re.compile(r"option-(\d+)-(key|value)")
+_MEMORY_TYPES: Final = frozenset({"", "tmpfs"})
 
 PLUGIN_DRIVER_TEXT: Final = (
     "Only volumes of the local driver can be imported. "
@@ -108,6 +126,12 @@ _SPOOL_TEXT: Final = {
     "too_large": "The archive is larger than the upload limit.",
     "insufficient_space": "There is not enough free space on the data volume for this upload.",
 }
+STORE_FULL_TEXT: Final = (
+    "Other uploads are waiting for review. Try again when one has been imported or discarded."
+)
+MOUNT_UNCONFIRMED_TEXT: Final = (
+    "Confirm that the archive's files may be written to the host path or share named above."
+)
 
 
 class ImportUploadGone(ProductError):
@@ -136,22 +160,77 @@ class VolumeImportRefused(ProductError):
         self.reason = reason
 
 
+def _removal_text(*, volume_removed: bool, host_backed: bool) -> str:
+    if not volume_removed:
+        return (
+            "The volume this import created could not be removed; remove it from the volumes list."
+        )
+    if host_backed:
+        return (
+            "The volume this import created was removed. Files already written to its host path "
+            "or share are not removed with it."
+        )
+    return "The volume this import created was removed."
+
+
 class VolumeImportFailed(ProductError):
     """The data could not be written after the volume was created.
 
-    `volume_removed` says whether the volume this import created is gone.
+    `volume_removed` says whether the volume this import created is gone; `host_backed` that its
+    options bound a host path or share, where removing the volume does not remove written files.
     """
 
-    def __init__(self, reason: str, *, volume_removed: bool) -> None:
-        tail = (
-            "The volume this import created was removed."
-            if volume_removed
-            else "The volume this import created could not be removed; remove it from the "
-            "volumes list."
-        )
+    def __init__(self, reason: str, *, volume_removed: bool, host_backed: bool = False) -> None:
+        tail = _removal_text(volume_removed=volume_removed, host_backed=host_backed)
         super().__init__(f"The archive could not be written to the new volume. {tail}")
         self.reason = reason
         self.volume_removed = volume_removed
+        self.host_backed = host_backed
+
+
+def _not_empty_text(*, volume_removed: bool) -> str:
+    tail = _removal_text(volume_removed=volume_removed, host_backed=False)
+    return (
+        "The new volume already holds files, so nothing was written to it and the files that "
+        f"are there were not touched. {tail}"
+    )
+
+
+class VolumeNotEmpty(Exception):
+    """The new volume already holds files, or its contents could not be read as empty."""
+
+
+@dataclass(frozen=True, slots=True)
+class MountConfirmation:
+    """The host path or share the options bind; `token` is bound to the digest, type and device."""
+
+    token: str
+    device: str
+    type: str
+
+
+def mount_confirmation(digest: str, options: Mapping[str, str]) -> MountConfirmation | None:
+    """Return what needs confirming when the options bind a host path or mount a share."""
+    device = options.get("device", "").strip()
+    kind = options.get("type", "").strip()
+    if not device and kind.casefold() in _MEMORY_TYPES:
+        return None
+    token = hashlib.sha256("\0".join((digest, kind, device)).encode("utf-8")).hexdigest()
+    return MountConfirmation(token, device, kind)
+
+
+def options_of_rows(rows: Mapping[str, str]) -> dict[str, str]:
+    """Return the options the numbered form rows name; blank rows and repeated keys are skipped."""
+    found: dict[int, dict[str, str]] = {}
+    for name, value in rows.items():
+        if (row := _OPTION_ROW.fullmatch(name)) is not None:
+            found.setdefault(int(row[1]), {})[row[2]] = value
+    options: dict[str, str] = {}
+    for index in sorted(found):
+        key, value = found[index].get("key", "").strip(), found[index].get("value", "").strip()
+        if key and key not in options:
+            options[key] = value
+    return options
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +258,10 @@ class ImportReview:
         """Report whether a helper image is available on the host."""
         return self.helper_image is not None
 
+    def mount_for(self, rows: Mapping[str, str]) -> MountConfirmation | None:
+        """Return what the options in these form rows need confirmed."""
+        return mount_confirmation(self.digest, options_of_rows(rows))
+
 
 @dataclass(frozen=True, slots=True)
 class VolumeImported:
@@ -198,6 +281,8 @@ class VolumeImported:
 @dataclass(slots=True)
 class _Run:
     created: bool = False
+    keep_upload: bool = False
+    token: str = field(default_factory=lambda: secrets.token_hex(16))
 
 
 def _name_argument(arguments: Arguments) -> str:
@@ -297,6 +382,8 @@ class VolumeImportService:
         environment; ValidationFailed on the `archive` field for a refused archive.
         """
         await self._require_environment(actor, environment_id)
+        if not await self._store.has_room(actor.user_id):
+            raise ValidationFailed({"archive": STORE_FULL_TEXT})
         upload_id = self._store.new_id()
         try:
             upload = await spool_upload(
@@ -315,14 +402,21 @@ class VolumeImportService:
         except BaseException:
             await self._unlink(upload.path)
             raise
-        held = await self._store.hold(
-            upload_id,
-            user_id=actor.user_id,
-            session_id=session_id,
-            environment_id=environment_id,
-            upload=upload,
-            summary=summary,
-        )
+        try:
+            held = await self._store.hold(
+                upload_id,
+                user_id=actor.user_id,
+                session_id=session_id,
+                environment_id=environment_id,
+                upload=upload,
+                summary=summary,
+            )
+        except ImportStoreFull:
+            await self._unlink(upload.path)
+            raise ValidationFailed({"archive": STORE_FULL_TEXT}) from None
+        except BaseException:
+            await self._unlink(upload.path)
+            raise
         return held.id
 
     async def review(
@@ -365,8 +459,11 @@ class VolumeImportService:
 
     async def cancel(
         self, actor: Principal, session_id: int, environment_id: int, upload_id: str
-    ) -> None:
-        """Drop the held upload and remove its file; nothing else is changed."""
+    ) -> bool:
+        """Drop the held upload and remove its file; nothing else is changed.
+
+        False when the upload is being imported and so was not dropped.
+        """
         await self._require_environment(actor, environment_id)
         held = await self._store.get(
             upload_id,
@@ -374,8 +471,12 @@ class VolumeImportService:
             session_id=session_id,
             environment_id=environment_id,
         )
-        if held is not None and not held.importing:
-            await self._store.discard(held.id)
+        if held is None:
+            return True
+        if held.importing:
+            return False
+        await self._store.discard(held.id)
+        return True
 
     @audited(
         action=_ACTION,
@@ -393,17 +494,21 @@ class VolumeImportService:
         *,
         driver: str | None = None,
         options: Mapping[str, str] | None = None,
+        confirm_mount: str = "",
+        helper_image: str | None = None,
     ) -> VolumeImported:
         """Create a volume from the held archive and write its data; the caller owns it.
 
         `options` is the numbered `option-N-key` and `option-N-value` rows of the review, the
-        archive's own when omitted. The name must be absent on the host under the volume lock;
-        an existing volume is never adopted or written to. A volume created by this import is
-        removed if the data cannot be written. The held upload is removed once the volume has
-        been created, and kept after a refusal that created nothing. ImportUploadGone,
-        ImportChangedSinceReview, ValidationFailed, SelfProtected, VolumeNameInUse,
-        VolumeImportRefused, VolumeImportFailed, VolumeRefused, EnvironmentUnavailable,
-        ObjectBusy.
+        archive's own when omitted. Options that bind a host path or mount a share need
+        `confirm_mount`, the token of `mount_confirmation`. `helper_image` is the image id the
+        review named, resolved now when omitted. The name must be absent on the host under the
+        volume lock, the created volume must carry this import's label, and it must hold no
+        file before the data is written. A volume created by this import is removed if the data
+        cannot be written. The held upload is removed once data may have been written, and kept
+        after a refusal that wrote nothing. ImportUploadGone, ImportChangedSinceReview,
+        ValidationFailed, SelfProtected, VolumeNameInUse, VolumeImportRefused,
+        VolumeImportFailed, VolumeRefused, EnvironmentUnavailable, ObjectBusy.
         """
         audit = current_audit()
         require_administrator(actor)
@@ -418,38 +523,44 @@ class VolumeImportService:
         if not hmac.compare_digest(held.digest.encode(), expected_digest.encode("utf-8")):
             audit.reason = "changed_since_review"
             raise ImportChangedSinceReview()
-        labels, dropped = split_labels(manifest.labels)
-        form: dict[str, str] = {
-            "name": name,
-            "driver": manifest.driver if driver is None else driver,
-            **(option_rows(manifest.options) if options is None else _option_fields(options)),
-            **_label_rows(labels),
-        }
-        request = self._validated(form)
-        audit.target_id = request.name
-        audit.detail.update(
-            name=request.name,
-            driver=request.driver,
-            option_keys=",".join(request.options),
-            labels=len(request.labels),
-            labels_dropped=len(dropped),
-        )
-        self._refuse_protected(environment_id, request.options)
-        client = await audited_client(self._hosts, environment_id)
-        holder = LockHolder(UserActor.of(actor), actor.username, "import")
-        key = ObjectKey(environment_id, "volume", request.name)
-        run = _Run()
+        if held.importing:
+            audit.reason = "import_running"
+            raise VolumeImportRefused("import_running", "This upload is already being imported.")
         held.importing = True
+        run = _Run()
         try:
+            labels, dropped = split_labels(manifest.labels)
+            form: dict[str, str] = {
+                "name": name,
+                "driver": manifest.driver if driver is None else driver,
+                **(option_rows(manifest.options) if options is None else _option_fields(options)),
+                **_label_rows(labels),
+            }
+            request = self._validated(form)
+            audit.target_id = request.name
+            audit.detail.update(
+                name=request.name,
+                driver=request.driver,
+                option_keys=",".join(request.options),
+                labels=len(request.labels),
+                labels_dropped=len(dropped),
+            )
+            self._refuse_protected(environment_id, request.options)
+            host_backed = self._require_mount_confirmed(held.digest, request.options, confirm_mount)
+            client = await audited_client(self._hosts, environment_id)
+            holder = LockHolder(UserActor.of(actor), actor.username, "import")
+            key = ObjectKey(environment_id, "volume", request.name)
             async with hold_all(self._locks, [key], holder):
                 await self._require_absent(client, request.name)
-                image = await self._image(client)
+                image = await self._image(client, helper_image)
                 await self._create(actor, environment_id, client, request, run)
-                await self._write(actor, environment_id, client, request, image, held)
+                await self._write(
+                    actor, environment_id, client, request, image, held, run, host_backed
+                )
                 claimed = await self._claim(actor, environment_id, request.name)
         finally:
             held.importing = False
-            if run.created:
+            if run.created and not run.keep_upload:
                 with anyio.CancelScope(shield=True):
                     await self._store.discard(held.id)
         return VolumeImported(
@@ -512,6 +623,19 @@ class VolumeImportService:
             current_audit().reason = SELF_PROTECTED_REASON
             raise SelfProtected.import_target()
 
+    def _require_mount_confirmed(
+        self, digest: str, options: Mapping[str, str], confirm_mount: str
+    ) -> bool:
+        needed = mount_confirmation(digest, options)
+        if needed is None:
+            return False
+        audit = current_audit()
+        audit.detail["host_mount"] = True
+        if not hmac.compare_digest(needed.token.encode(), confirm_mount.encode("utf-8", "replace")):
+            audit.reason = "mount_not_confirmed"
+            raise ValidationFailed({"confirm_mount": MOUNT_UNCONFIRMED_TEXT})
+        return True
+
     async def _exists(self, client: EngineClient, name: str) -> bool:
         try:
             await client.volumes.inspect(name)
@@ -534,21 +658,33 @@ class VolumeImportService:
             audit.reason = "name_in_use"
             raise VolumeNameInUse()
 
-    async def _image(self, client: EngineClient) -> str:
+    async def _image(self, client: EngineClient, reviewed: str | None) -> str:
         audit = current_audit()
         try:
-            return await helper_image(client)
+            if reviewed is None:
+                return await helper_image(client)
+            if not reviewed:
+                raise HelperImageMissing
+            await check_helper_image(client, reviewed)
         except HelperImageMissing:
             audit.reason = "helper_image_missing"
             raise VolumeImportRefused(
                 "helper_image_missing",
                 "The host has no image to create the helper container from. "
-                "Pull or load an image on the host, then try again.",
+                "Pull or load an image on the host, then review the import again.",
+            ) from None
+        except HelperImageUnusable:
+            audit.reason = "helper_image_unusable"
+            raise VolumeImportRefused(
+                "helper_image_unusable",
+                "The image the review named declares a volume where the helper mounts the new "
+                "volume. Review the import again.",
             ) from None
         except EngineError as error:
             unavailable = unavailable_from(error)
             audit.reason = unavailable.kind
             raise unavailable from None
+        return reviewed
 
     async def _create(
         self,
@@ -563,6 +699,9 @@ class VolumeImportService:
                 partial(self._create_on_host, client, request, run),
                 partial(self._interrupted_create, actor, environment_id, client, request, run),
             )
+        except VolumeNameInUse:
+            current_audit().reason = "name_in_use"
+            raise
         except EngineError as error:
             raise create_failure(
                 error,
@@ -574,12 +713,15 @@ class VolumeImportService:
     async def _create_on_host(
         self, client: EngineClient, request: VolumeRequest, run: _Run
     ) -> Volume:
+        labelled = replace(request, labels={**request.labels, IMPORT_LABEL: run.token})
         volume = await client.volumes.create(
-            name=request.name,
-            driver=request.driver,
-            driver_opts=request.options,
-            labels=request.labels,
+            name=labelled.name,
+            driver=labelled.driver,
+            driver_opts=labelled.options,
+            labels=labelled.labels,
         )
+        if not created_as_requested(volume, labelled):
+            raise VolumeNameInUse
         run.created = True
         return volume
 
@@ -591,6 +733,8 @@ class VolumeImportService:
         request: VolumeRequest,
         image: str,
         held: HeldImport,
+        run: _Run,
+        host_backed: bool,
     ) -> None:
         audit = current_audit()
         stream = RewrittenArchive(held.path)
@@ -600,22 +744,47 @@ class VolumeImportService:
                 actor, request.name, image=image, writable=True
             ) as helper:
                 audit.detail["helper_container"] = helper.container_id
+                await self._require_empty(helper)
                 await helper.write(stream)
         except BaseException as error:
             with anyio.CancelScope(shield=True):
-                await stream.aclose()
-                removed = await self._remove_volume(client, request.name)
+                try:
+                    await stream.aclose()
+                finally:
+                    removed = await self._remove_volume(client, request.name)
             audit.detail.update(
                 volume_removed=removed, helper_removed=None if helper is None else helper.removed
             )
             if not isinstance(error, Exception):
                 await self._write_interrupted(actor, environment_id, request.name, audit.detail)
                 raise
+            if isinstance(error, VolumeNotEmpty):
+                audit.reason = "volume_not_empty"
+                run.keep_upload = True
+                raise VolumeImportRefused(
+                    "volume_not_empty", _not_empty_text(volume_removed=removed)
+                ) from None
             reason = _failure_of(error)
             audit.reason = reason
-            raise VolumeImportFailed(reason, volume_removed=removed) from None
+            raise VolumeImportFailed(
+                reason, volume_removed=removed, host_backed=host_backed
+            ) from None
         audit.detail["helper_removed"] = helper.removed
         audit.detail["bytes_written"] = stream.bytes_out
+
+    @staticmethod
+    async def _require_empty(helper: VolumeHelper) -> None:
+        stream = await helper.stream()
+        held = bytearray()
+        try:
+            async for chunk in stream:
+                held += chunk
+                if len(held) > EMPTY_READ_BYTES:
+                    raise VolumeNotEmpty
+        finally:
+            await stream.aclose()
+        if not _holds_only_the_root(bytes(held)):
+            raise VolumeNotEmpty
 
     async def _remove_volume(self, client: EngineClient, name: str) -> bool:
         try:
@@ -635,8 +804,7 @@ class VolumeImportService:
 
         def note(taken: tuple[bool, bool]) -> None:
             audit.detail["control_created"] = taken[0]
-            if taken[1]:
-                audit.detail["stale_control_replaced"] = True
+            audit.detail["stale_control_replaced"] = taken[1]
 
         try:
             created, _ = await retry_busy(
@@ -667,6 +835,7 @@ class VolumeImportService:
                 },
             )
             audit.detail["control_created"] = False
+            audit.detail.setdefault("stale_control_replaced", False)
             return False
         return created
 
@@ -690,6 +859,8 @@ class VolumeImportService:
             failure = (
                 "outcome_unknown"
                 if not finished
+                else "name_in_use"
+                if isinstance(error, VolumeNameInUse)
                 else failure_reason(error)
                 if error is not None
                 else "interrupted"
@@ -724,6 +895,21 @@ class VolumeImportService:
     @staticmethod
     async def _unlink(path: Path) -> None:
         await asyncio.to_thread(path.unlink, missing_ok=True)
+
+
+def _holds_only_the_root(archive: bytes) -> bool:
+    pieces = iter([archive])
+    reader = TarReader(ChunkSource(lambda: next(pieces, None)))
+    try:
+        root = reader.next()
+        return (
+            root is not None
+            and root.info.isdir()
+            and root.info.name == _ROOT_ENTRY
+            and reader.next() is None
+        )
+    except StreamMalformed:
+        return False
 
 
 def _failure_of(error: Exception) -> str:

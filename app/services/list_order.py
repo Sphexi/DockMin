@@ -10,9 +10,10 @@ from app.auth.errors import ValidationFailed
 from app.db.repositories.pagination import (
     CursorPosition,
     InvalidCursorError,
-    SortValue,
-    decode_cursor,
+    NamedCursorPosition,
+    decode_any_cursor,
     encode_cursor,
+    encode_named_cursor,
 )
 
 type Kind = Literal["text", "number"]
@@ -85,10 +86,11 @@ class ListOrder[T]:
 
 @dataclass(frozen=True, slots=True)
 class Position:
-    """Where a cursor points: the sort value and row id of the last row of the earlier page."""
+    """Where a cursor points: the last row of the earlier page, by sort value, row id and name."""
 
     value: str | int | None
     row_id: int
+    name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,16 +150,18 @@ class Ordering[T]:
         if cursor is None:
             return None
         try:
-            raw = decode_cursor(cursor)
+            raw = decode_any_cursor(cursor)
         except InvalidCursorError:
             raise ValidationFailed({"cursor": INVALID_CURSOR}) from None
-        return Position(self._value_of(raw.sort_value), raw.row_id)
+        name = raw.name if isinstance(raw, NamedCursorPosition) else None
+        return Position(self._value_of(raw), raw.row_id, name)
 
-    def encode(self, value: str | int | None, row_id: int) -> str:
-        """Encode a position under this ordering."""
+    def encode(self, value: str | int | None, row_id: int, name: str = "") -> str:
+        """Encode a position under this ordering; a named sort also records the folded `name`."""
+        text = "" if value is None else str(value)
         if self._tag is None:
-            return encode_cursor(CursorPosition("" if value is None else str(value), row_id))
-        return encode_cursor(CursorPosition(f"{self._tag}{'' if value is None else value}", row_id))
+            return encode_cursor(CursorPosition(text, row_id))
+        return encode_named_cursor(NamedCursorPosition(f"{self._tag}{text}", row_id, name))
 
     def ordered(self, entries: Iterable[T]) -> list[T]:
         """Return the entries in this ordering."""
@@ -171,7 +175,9 @@ class Ordering[T]:
         next_cursor = None
         if len(remaining) > size and items:
             last = items[-1]
-            next_cursor = self.encode(self._scalar(last), self._order.row_id(last))
+            next_cursor = self.encode(
+                self._scalar(last), self._order.row_id(last), self._order.name(last).casefold()
+            )
         return Window(items, len(ordered), next_cursor)
 
     def _scalar(self, entry: T) -> Scalar:
@@ -195,22 +201,27 @@ class Ordering[T]:
             if order.row_id(entry) == position.row_id and self._scalar(entry) == position.value:
                 return ordered[index + 1 :]
         kind = self._key.kind
-        target = (_rank(kind, position.value), position.row_id)
+        known_name = position.name is not None
+
+        def place(entry: T) -> tuple[tuple[int, int] | str, str, int]:
+            name = order.name(entry).casefold() if known_name else ""
+            return (_rank(kind, self._scalar(entry)), name, order.row_id(entry))
+
+        target = (_rank(kind, position.value), position.name or "", position.row_id)
         if self.descending:
-            return [e for e in ordered if (_rank(kind, self._scalar(e)), order.row_id(e)) < target]
-        return [e for e in ordered if (_rank(kind, self._scalar(e)), order.row_id(e)) > target]
+            return [e for e in ordered if place(e) < target]
+        return [e for e in ordered if place(e) > target]
 
-    def _names_a_sort(self, text: str) -> bool:
-        return any(text.startswith(f"{key}.{d}:") for key in self._order.keys for d in DIRECTIONS)
-
-    def _value_of(self, raw: SortValue) -> str | int | None:
-        if self._tag is None:
-            if not isinstance(raw, str) or self._names_a_sort(raw):
-                raise ValidationFailed({"cursor": INVALID_CURSOR})
-            return raw
-        if not isinstance(raw, str) or not raw.startswith(self._tag):
+    def _value_of(self, raw: CursorPosition | NamedCursorPosition) -> str | int | None:
+        named = isinstance(raw, NamedCursorPosition)
+        value = raw.sort_value
+        if named != (self._tag is not None) or not isinstance(value, str):
             raise ValidationFailed({"cursor": INVALID_CURSOR})
-        text = raw.removeprefix(self._tag)
+        if self._tag is None:
+            return value
+        if not value.startswith(self._tag):
+            raise ValidationFailed({"cursor": INVALID_CURSOR})
+        text = value.removeprefix(self._tag)
         if self._key.kind == "text":
             return text
         if text == "":

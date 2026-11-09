@@ -378,13 +378,14 @@
 {% endif %}
 {% endmacro %}
 
-{% macro dismissed_line(hidden, show_dismissed, list_href) %}
+{% macro dismissed_line(hidden, show_dismissed, list_href, sort=none, direction="asc") %}
+{% set sort_query = ("sort=" ~ (sort|urlencode) ~ "&dir=" ~ (direction|urlencode)) if sort else "" %}
 {% if hidden > 0 %}
 <p class="field__help" id="dismissed-line">
   {% if show_dismissed %}
-  Showing {{ hidden }} dismissed {{ "entry" if hidden == 1 else "entries" }}. <a href="{{ list_href }}">Hide dismissed</a>
+  Showing {{ hidden }} dismissed {{ "entry" if hidden == 1 else "entries" }}. <a href="{{ list_href }}{{ "?" ~ sort_query if sort_query else "" }}">Hide dismissed</a>
   {% else %}
-  {{ hidden }} dismissed {{ "entry is" if hidden == 1 else "entries are" }} hidden. <a href="{{ list_href }}?dismissed=1">Show dismissed</a>
+  {{ hidden }} dismissed {{ "entry is" if hidden == 1 else "entries are" }} hidden. <a href="{{ list_href }}?dismissed=1{{ "&" ~ sort_query if sort_query else "" }}">Show dismissed</a>
   {% endif %}
 </p>
 {% endif %}

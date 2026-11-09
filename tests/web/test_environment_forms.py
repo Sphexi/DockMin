@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
+import pytest
 from httpx import AsyncClient, Response
 
 from app.docker_engine.probe import Stage
@@ -373,7 +374,12 @@ MIN_POST_ROUTES = 16
 PREFIXES = ("/environments", "/groups", "/tags")
 FOREIGN_ORIGIN = "https://evil.example"
 # Checks its own token inside the streamed body.
-STREAMED_UPLOADS = ("/contexts/-/upload", "/volumes/-/import", "/stacks/-/import")
+STREAMED_UPLOADS = (
+    "/contexts/-/upload",
+    "/volumes/-/import",
+    "/stacks/-/import",
+    "/containers/-/import",
+)
 
 
 def post_paths(world: World) -> list[str]:
@@ -388,6 +394,7 @@ def post_paths(world: World) -> list[str]:
     ]
 
 
+@pytest.mark.usefixtures("no_status_transition_events")
 async def test_every_post_route_refuses_a_missing_token_or_foreign_origin_and_changes_nothing(
     admin_client: AsyncClient, world: World
 ) -> None:

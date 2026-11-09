@@ -2,16 +2,19 @@
 
 import base64
 import binascii
+import hmac
 import os
 import re
 import unicodedata
-from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import dataclass, field
 from typing import Final, Literal
 
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.auth.errors import ProductError, ValidationFailed
@@ -25,13 +28,17 @@ ARCHIVE_ID_BYTES: Final = 16
 SALT_BYTES: Final = 16
 NONCE_BYTES: Final = 12
 KEY_BYTES: Final = 32
+MAC_BYTES: Final = 32
 
 MIN_MEMORY_KIB: Final = 8192
-MAX_MEMORY_KIB: Final = 1_048_576
-MAX_ITERATIONS: Final = 16
+MAX_MEMORY_KIB: Final = 262_144
+MAX_ITERATIONS: Final = 8
 MAX_LANES: Final = 16
 
 _AAD_PREFIX: Final = b"dockmin/export-seal/1"
+_ENCRYPTION_INFO: Final = b"dockmin/export-seal/1 aes-256-gcm"
+_AUTHENTICATION_INFO: Final = b"dockmin/export-seal/1 hmac-sha256"
+_MAC_PREFIX: Final = b"dockmin/export-mac/1\0"
 _ARCHIVE_ID: Final = re.compile(r"[0-9a-f]{32}")
 _BASE64: Final = re.compile(r"[A-Za-z0-9+/]*={0,2}")
 _FAILURE: Final = "The sealed values could not be opened."
@@ -101,13 +108,24 @@ class SealedRecord(BaseModel):
 
 
 class SealedValues(BaseModel):
-    """Everything an archive records to open its sealed values with the passphrase."""
+    """Everything an archive records to open its sealed values with the passphrase.
+
+    `mac` is the base64 HMAC-SHA256 over the manifest that holds this section, minus `mac`.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     cipher: Literal["aes-256-gcm"]
     kdf: KdfParameters
     records: list[SealedRecord] = Field(max_length=MAX_RECORDS)
+    mac: str | None = None
+
+    @field_validator("mac")
+    @classmethod
+    def _mac_is_thirty_two_bytes(cls, value: str | None) -> str | None:
+        if value is not None and len(_decode(value)) != MAC_BYTES:
+            raise ValueError("mac must be 32 bytes")
+        return value
 
     @field_validator("records")
     @classmethod
@@ -148,11 +166,14 @@ def seal(
     archive_id: str,
     *,
     cost: SealCost = DEFAULT_COST,
+    authenticate: Callable[[SealedValues], bytes] | None = None,
 ) -> SealedValues:
     """Seal each value under a key derived from the passphrase and a fresh random salt.
 
-    Blocking and memory-hungry: run it with `asyncio.to_thread`. ValidationFailed for a
-    passphrase outside the length bounds, ValueError for a malformed archive id, name or cost.
+    With `authenticate`, the result carries a MAC over the bytes it returns for the section
+    without its MAC; those bytes must cover the whole manifest. Blocking and memory-hungry: run
+    it with `asyncio.to_thread`. ValidationFailed for a passphrase outside the length bounds,
+    ValueError for a malformed archive id, name or cost.
     """
     check_passphrase(passphrase)
     if not is_valid_archive_id(archive_id):
@@ -173,8 +194,13 @@ def seal(
         salt=base64.b64encode(salt).decode("ascii"),
     )
     records: list[SealedRecord] = []
-    if values:
-        cipher = AESGCM(_derive(unicodedata.normalize("NFKC", passphrase), parameters, salt))
+    keys = (
+        _derive(unicodedata.normalize("NFKC", passphrase), parameters, salt)
+        if values or authenticate is not None
+        else None
+    )
+    if keys is not None:
+        cipher = AESGCM(keys.encryption)
         for name in sorted(values):
             nonce = os.urandom(NONCE_BYTES)
             body = cipher.encrypt(nonce, values[name], _aad(archive_id, name))
@@ -185,7 +211,11 @@ def seal(
                     ciphertext=base64.b64encode(body).decode("ascii"),
                 )
             )
-    return SealedValues(cipher="aes-256-gcm", kdf=parameters, records=records)
+    sealed = SealedValues(cipher="aes-256-gcm", kdf=parameters, records=records)
+    if keys is None or authenticate is None:
+        return sealed
+    mac = _mac(keys.authentication, authenticate(sealed))
+    return sealed.model_copy(update={"mac": base64.b64encode(mac).decode("ascii")})
 
 
 def open_sealed(
@@ -193,12 +223,16 @@ def open_sealed(
     passphrase: str,
     archive_id: str,
     names: Collection[str] | None = None,
+    *,
+    authenticated: bytes | None = None,
 ) -> dict[str, bytes]:
     """Open every record, or only those in `names`, and return the values by name.
 
-    Blocking and memory-hungry: run it with `asyncio.to_thread`. SealError for a wrong
-    passphrase, a record that was altered, renamed or taken from another archive, or a name
-    that is not in `sealed`; the error says nothing of which.
+    With `authenticated`, the bytes the exporter authenticated (the manifest without the MAC) are
+    checked against `sealed.mac` first; without it nothing but the records is checked. Blocking
+    and memory-hungry: run it with `asyncio.to_thread`. SealError for a wrong passphrase, a
+    record that was altered, renamed or taken from another archive, a manifest that does not
+    match its MAC, or a name that is not in `sealed`; the error says nothing of which.
     """
     material = unicodedata.normalize("NFKC", passphrase)
     if len(material) > PASSPHRASE_MAX_CHARS or not is_valid_archive_id(archive_id):
@@ -207,9 +241,12 @@ def open_sealed(
     wanted = list(by_name) if names is None else list(names)
     if any(name not in by_name for name in wanted):
         raise SealError
-    if not wanted:
+    if not wanted and authenticated is None:
         return {}
-    cipher = AESGCM(_derive(material, sealed.kdf, _decode(sealed.kdf.salt)))
+    keys = _derive(material, sealed.kdf, _decode(sealed.kdf.salt))
+    if authenticated is not None:
+        _check_mac(sealed, keys, authenticated)
+    cipher = AESGCM(keys.encryption)
     opened: dict[str, bytes] = {}
     for name in wanted:
         record = by_name[name]
@@ -222,15 +259,50 @@ def open_sealed(
     return opened
 
 
-def _derive(material: str, parameters: KdfParameters, salt: bytes) -> bytes:
-    kdf = Argon2id(
+def verify_sealed(
+    sealed: SealedValues, passphrase: str, archive_id: str, authenticated: bytes
+) -> None:
+    """Check `authenticated` against the MAC with the passphrase; SealError if it does not match.
+
+    Blocking and memory-hungry: run it with `asyncio.to_thread`.
+    """
+    open_sealed(sealed, passphrase, archive_id, (), authenticated=authenticated)
+
+
+@dataclass(frozen=True, slots=True)
+class _Keys:
+    encryption: bytes = field(repr=False)
+    authentication: bytes = field(repr=False)
+
+
+def _derive(material: str, parameters: KdfParameters, salt: bytes) -> _Keys:
+    root = Argon2id(
         salt=salt,
         length=KEY_BYTES,
         iterations=parameters.iterations,
         lanes=parameters.lanes,
         memory_cost=parameters.memory_kib,
-    )
-    return kdf.derive(material.encode("utf-8"))
+    ).derive(material.encode("utf-8"))
+    return _Keys(_expand(root, _ENCRYPTION_INFO), _expand(root, _AUTHENTICATION_INFO))
+
+
+def _expand(root: bytes, info: bytes) -> bytes:
+    return HKDF(algorithm=hashes.SHA256(), length=KEY_BYTES, salt=None, info=info).derive(root)
+
+
+def _mac(key: bytes, authenticated: bytes) -> bytes:
+    return hmac.digest(key, _MAC_PREFIX + authenticated, "sha256")
+
+
+def _check_mac(sealed: SealedValues, keys: _Keys, authenticated: bytes) -> None:
+    try:
+        recorded = _decode(sealed.mac) if sealed.mac is not None else None
+    except ValueError:
+        raise SealError from None
+    if recorded is None or not hmac.compare_digest(
+        recorded, _mac(keys.authentication, authenticated)
+    ):
+        raise SealError
 
 
 def _aad(archive_id: str, name: str) -> bytes:

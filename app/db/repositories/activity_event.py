@@ -1,7 +1,6 @@
 """Repository for the activity_event table: the only insert, the reads, and the only delete."""
 
 import json
-import re
 import sqlite3
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -18,7 +17,7 @@ from app.db.repositories.pagination import (
     encode_cursor,
     validate_limit,
 )
-from app.logging import DEFAULT_SCRUBBER
+from app.logging import DEFAULT_SCRUBBER, REQUEST_ID_PATTERN, REQUEST_ID_RULE
 
 Category = Literal["authentication", "user_action", "automation"]
 ActorType = Literal["user", "subsystem", "anonymous"]
@@ -31,7 +30,6 @@ MAX_DETAIL_SCRUB_INPUT = 4096
 MAX_EXPORT_COUNT: Final = 100_000
 MAX_SEQUENTIAL_READ: Final = 2_000
 MAX_BY_IDS: Final = 100
-REQUEST_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 _SELECT = (
     "SELECT id, category, actor_type, actor_user_id, actor_subsystem, rule_id, job_run_id, "
@@ -87,7 +85,7 @@ class ActivityFilter:
 
     def __post_init__(self) -> None:
         if self.request_id is not None and REQUEST_ID_PATTERN.fullmatch(self.request_id) is None:
-            raise ValueError("request_id is 1 to 64 letters, digits, dots, hyphens or underscores")
+            raise ValueError(f"request_id is {REQUEST_ID_RULE}")
         if self.target_id is not None and self.target_type is None:
             raise ValueError("target_type and target_id are set together")
         if self.target_type is not None and self.target_id is None and self.environment_id is None:

@@ -35,6 +35,7 @@ from app.services.stack_import import (
 from app.services.stack_import_assembly import StackImports
 from app.services.stack_import_plan import ImportChoices
 from app.services.stack_jobs import TooManyStackJobs
+from app.services.volume_views import VolumeNameInUse
 from app.web.flash import Flash
 from app.web.identifiers import PathId
 from app.web.image_helpers import credential_choice_of
@@ -55,12 +56,13 @@ from app.web.swarm_routes import swarm_router
 
 UPLOAD_ID_PATTERN: Final = re.compile(r"[0-9a-f]{32}")
 FIELD: Final = re.compile(
-    r"(?P<group>path|credential|secret)-(?P<index>[0-9]{1,3})-(?P<part>source|choice|reference|name|value)"
+    r"(?P<group>path|credential|secret|mount)-(?P<index>[0-9]{1,3})-(?P<part>source|choice|reference|name|value|confirm)"
 )
 SCALARS: Final = frozenset({"name", "action", "expected_plan"})
 MAX_FIELDS: Final = 400
 MAX_NAME_FIELD: Final = 512
 MAX_VALUE_FIELD: Final = 70_000
+MAX_TOKEN_FIELD: Final = 128
 HEADING: Final = "Import stack"
 CANCELLED: Final = "The upload was discarded. Nothing was changed."
 OPENED: Final = "The sealed values were opened."
@@ -154,6 +156,7 @@ async def _read_form(request: Request, fallback: str) -> _Posted:
     paths: dict[int, dict[str, str]] = {}
     credentials: dict[int, dict[str, str]] = {}
     secrets: dict[int, dict[str, str]] = {}
+    mounts: dict[int, dict[str, str]] = {}
     for count, (key, value) in enumerate(posted.multi_items()):
         if count >= MAX_FIELDS:
             break
@@ -162,7 +165,12 @@ async def _read_form(request: Request, fallback: str) -> _Posted:
         if key in SCALARS:
             scalars[key] = value
         elif (found := FIELD.fullmatch(key)) is not None:
-            group = {"path": paths, "credential": credentials, "secret": secrets}[found["group"]]
+            group = {
+                "path": paths,
+                "credential": credentials,
+                "secret": secrets,
+                "mount": mounts,
+            }[found["group"]]
             group.setdefault(int(found["index"]), {})[found["part"]] = value
     errors: dict[str, str] = {}
     host_paths = {
@@ -191,7 +199,15 @@ async def _read_form(request: Request, fallback: str) -> _Posted:
     }
     name = scalars.get("name", fallback)[:MAX_NAME_FIELD]
     return _Posted(
-        ImportChoices(name=name, host_paths=host_paths, credentials=made, entered=entered),
+        ImportChoices(
+            name=name,
+            host_paths=host_paths,
+            credentials=made,
+            entered=entered,
+            confirmed_mounts=frozenset(
+                row["confirm"][:MAX_TOKEN_FIELD] for row in mounts.values() if row.get("confirm")
+            ),
+        ),
         scalars.get("action", ""),
         scalars.get("expected_plan", "")[:128],
         chosen,
@@ -228,6 +244,10 @@ def _failure_of(error: Exception, stacks: StackServices, actor: Principal) -> Fa
         return problem_of(error, stacks, actor).failure or Failure(
             400, "Check the request", str(error)
         )
+    if isinstance(error, VolumeNameInUse):
+        return Failure(409, "A volume name is in use", "; ".join(error.fields.values()))
+    if isinstance(error, ValidationFailed):
+        return Failure(400, "Check the request", "; ".join(error.fields.values()))
     return Failure(503, *unreachable_copy(error))
 
 
@@ -353,6 +373,7 @@ def _register(target: APIRouter, names: _Names, base: str) -> None:
             StackUploadGone,
             EnvironmentUnavailable,
             ObjectBusy,
+            ValidationFailed,
         ) as error:
             return problem(request, stacks, error, actor, environment_id)
         merged = {**(errors or {}), **(posted.errors if posted is not None else {})}

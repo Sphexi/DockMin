@@ -812,7 +812,7 @@ Target type `volume`, the volume's name as the target id (cut to 255 characters)
 
 - On a failed `volume_export_started`, the keys that were known when the export was refused are present: `driver` and `format_version` after the volume was read, `containers` and `running_containers` after the host's containers were listed.
 - `volume_exported` is written for every export that wrote `volume_export_started` with success. It is a failure, with `completed` `false`, when the archive was not fully produced.
-- `volume_export_started` reasons: `self_protected`, `export_busy`, `object_busy`, `changed_since_review`, `plugin_driver`, `helper_image_missing`, `helper_refused`, `unreadable`, `volume_gone`, `too_large` and the host failure reasons ([Volumes](Usage-Volumes#recorded-actions)).
+- `volume_export_started` reasons: `self_protected`, `export_busy`, `object_busy`, `changed_since_review`, `plugin_driver`, `helper_image_missing`, `helper_image_unusable`, `helper_refused`, `unreadable`, `volume_gone`, `too_large` and the host failure reasons ([Volumes](Usage-Volumes#recorded-actions)).
 - `volume_exported` reasons: `interrupted` (the client left or the request was cancelled), `malformed_stream`, `unreadable`, `unreachable`, `outcome_unknown`, `engine_error`.
 - A request from a user who is not an administrator, for a name that is not a volume name, or for a volume that does not exist or is not visible, writes no row.
 - A row holds no option value, no label value, no path and no file content.
@@ -824,7 +824,7 @@ Target type `volume`, the volume's name as the target id (cut to 255 characters)
 
 | Action | Written | Detail keys |
 |---|---|---|
-| `volume_imported` | Once for each import request that reached the import, when it ends: success, or failure | `name`, `driver`, `format_version`, `members`, `bytes`, `option_keys`, `labels`, `labels_dropped`, `helper_container`, `helper_removed`, `bytes_written`, `control_created`, `stale_control_replaced` |
+| `volume_imported` | Once for each import request that reached the import, when it ends: success, or failure | `name`, `driver`, `format_version`, `members`, `bytes`, `option_keys`, `labels`, `labels_dropped`, `helper_container`, `helper_removed`, `bytes_written`, `control_created`, `stale_control_replaced`, `host_mount` |
 
 | Detail key | Value |
 |---|---|
@@ -840,16 +840,17 @@ Target type `volume`, the volume's name as the target id (cut to 255 characters)
 | `helper_removed` | Whether the helper container was removed. `null` on a failure when no helper was created |
 | `bytes_written` | Bytes of tar sent to the Engine, after a successful write |
 | `control_created` | Whether the access control was saved |
-| `stale_control_replaced` | `true` when a control left on the name was replaced. Absent otherwise |
+| `stale_control_replaced` | Whether a control left on the name was replaced. Present once the owner step has run, `false` when it failed or replaced nothing |
+| `host_mount` | `true` when the options bind a host path or share, so the confirmation was required. Absent otherwise |
 | `volume_removed` | Failure after the volume was created: whether the volume this import created was removed |
 | `fields` | Reason `invalid`: the names of the refused fields, comma-separated |
 | `holder_action` | Reason `object_busy`: the action that holds the volume |
 | `interrupted` | `true` when the request ended before the import finished |
 | `reason`, `message` | Failure rows |
 
-- A key is present once its value is known. A failure row holds the keys known when the import stopped: `format_version`, `members` and `bytes` after the held archive was found, `name` to `labels_dropped` after the fields were validated, `helper_container` after the helper was created.
+- A key is present once its value is known. A failure row holds the keys known when the import stopped: `format_version`, `members` and `bytes` after the held archive was found, `name` to `labels_dropped` after the fields were validated, `host_mount` once the options were found to bind a host path or share, `helper_container` after the helper was created.
 - The target id is the name from the form until the fields are validated, then the validated name.
-- Failure reasons: `upload_gone`, `invalid`, `changed_since_review`, `self_protected`, `name_in_use`, `object_busy`, `helper_image_missing`, `too_large`, `engine_rejected`, `helper_refused`, `archive_invalid`, `archive_rejected`, `unreachable`, `outcome_unknown`, `conflict`, `not_found`, `engine_error`, `interrupted`. An unexpected error during the write records the name of its class ([Volumes](Usage-Volumes#recorded-actions)).
+- Failure reasons: `upload_gone`, `invalid`, `changed_since_review`, `import_running`, `self_protected`, `mount_not_confirmed`, `name_in_use`, `object_busy`, `helper_image_missing`, `helper_image_unusable`, `volume_not_empty`, `too_large`, `engine_rejected`, `helper_refused`, `archive_invalid`, `archive_rejected`, `unreachable`, `outcome_unknown`, `conflict`, `not_found`, `engine_error`, `interrupted`. An unexpected error during the write records the name of its class ([Volumes](Usage-Volumes#recorded-actions)).
 - A request cancelled during the create or the write removes the helper and then the volume, and writes a failure row with `interrupted` `true` and reason `interrupted`, on a session of its own. A request cancelled while the owner is saved writes a success row with `interrupted` `true` and `control_created` `false`.
 - A request from a user who is not an administrator, or with an environment or upload identifier of the wrong form, writes no row. The upload, the review and the discard write no row.
 - A row holds no option value, no label key or value, no path and no file content.
@@ -922,18 +923,19 @@ Target type `stack`, the stack's name from the form (trimmed, cut to 255 charact
 
 - A key is present once its value is known. A failure row holds the keys known when the import stopped: `stack_kind`, `format_version` and `volumes_archived` once the held archive was found; `renamed` to `secrets` once the plan was made; `volumes_created`, `bytes_written` and `helpers_created` once the checks have passed.
 - The target id is the name as typed, and is empty when none was typed, until the name is validated.
-- Failure reasons: `upload_gone`, `changed_since_review`, `collision`, `secrets_needed`, `paths_undecided`, `credential_choice_required`, `helper_image_missing`, `archive_invalid`, `name_in_use`, `engine_error`, `helper_refused`, `archive_rejected`, `interrupted`, and the reasons of the create: `invalid`, `invalid_compose`, `refused_construct`, `restricted`, `preexisting_objects`, `object_busy`, `compose_unavailable` and the host failure reasons ([Stacks](Usage-Stacks#errors), [Host failures](Usage-Containers#host-failures)). An unexpected error records the name of its class.
+- Failure reasons: `upload_gone`, `import_running`, `changed_since_review`, `collision`, `secrets_needed`, `paths_undecided`, `self_protected`, `mounts_unconfirmed`, `credential_choice_required`, `helper_image_missing`, `archive_invalid`, `name_in_use`, `mount_not_empty`, `engine_error`, `helper_refused`, `archive_rejected`, `interrupted`, and the reasons of the create: `invalid`, `invalid_compose`, `refused_construct`, `restricted`, `preexisting_objects`, `object_busy`, `compose_unavailable` and the host failure reasons ([Stacks](Usage-Stacks#errors), [Host failures](Usage-Containers#host-failures)). An unexpected error records the name of its class.
 - A request cancelled during the create of a volume or the write removes the volumes this import created, and writes a failure row with `interrupted` `true` and reason `interrupted`, on a session of its own.
 - A request from a user who is not an administrator, or with an environment or upload identifier of the wrong form, writes no row. The upload, the review, the passphrase and the discard write no row.
 - A row holds no passphrase, no secret value, no variable or file name, no label and no path. It names the volumes it removed or could not remove.
 
 ## Container export rows
 
-Target type `container`, the full container id as the target id, in the container's environment. Actor: a user, always an administrator. Category `user_action`. An export writes one row ([Containers](Usage-Containers#export)).
+Target type `container`, the full container id as the target id, in the container's environment. Actor: a user, always an administrator. Category `user_action`. An export writes two rows ([Containers](Usage-Containers#export)).
 
 | Action | Written | Detail keys |
 |---|---|---|
-| `container_exported` | When the download ends, by completion, failure or client disconnect. Also as a failure when the export is refused after the request reached the service. No row is written when the export starts | `format_version`, `environment`, `secret_values`, `secrets`, `networks`, `bind_mounts`, `volumes`, `not_exported_groups`, `running`, and when the download ended `bytes`, `skipped`, `volumes_copied`, `completed` |
+| `container_export_started` | After every check that can refuse the export has passed and the archive's manifest is sealed, before any volume is read. Also as a failure when the export is refused after the request reached the service | `format_version`, `environment`, `secret_values`, `secrets`, `networks`, `bind_mounts`, `volumes`, `not_exported_groups`, `running` |
+| `container_exported` | When the download ends, by completion, failure or client disconnect | The keys above, and `bytes`, `skipped`, `volumes_copied`, `completed` |
 
 | Detail key | Value |
 |---|---|
@@ -953,10 +955,10 @@ Target type `container`, the full container id as the target id, in the containe
 | `holder_action` | Failure row for a busy volume |
 | `reason`, `message` | Failure rows |
 
-- The counts are present once the container, its networks and its volumes were checked. A failure row before that holds `format_version`.
-- The row is a failure, with `completed` `false`, when the archive was not fully produced.
-- Failure reasons before the download: `self_protected`, `export_busy`, `object_busy`, `changed_since_review`, `plugin_driver`, `volume_gone`, `helper_image_missing`, `network_unreadable`, `not_representable`, `too_large` and the host failure reasons ([Host failures](Usage-Containers#host-failures)). A refused passphrase, a marked name that is not a variable and a chosen volume that is not mounted record `ValidationFailed`.
-- Failure reasons of a download that ended early: `interrupted` (the client left or the request was cancelled), `malformed_stream`, `unreadable`, `helper_refused`, `helper_image_missing`, `unreachable`, `not_found`, `conflict`, `outcome_unknown`, `engine_error`. An unexpected error records the name of its class.
+- On a failed `container_export_started`, the counts are present once the container, its networks and its volumes were checked. A failure row before that holds `format_version`.
+- `container_exported` is written for every export that wrote `container_export_started` with success. It is a failure, with `completed` `false`, when the archive was not fully produced.
+- `container_export_started` reasons: `self_protected`, `export_busy`, `object_busy`, `changed_since_review`, `plugin_driver`, `volume_gone`, `container_gone`, `helper_image_missing`, `network_unreadable`, `not_representable`, `too_large` and the host failure reasons ([Host failures](Usage-Containers#host-failures)). A refused passphrase, a marked name that is not a variable and a chosen volume that is not mounted record `ValidationFailed`.
+- `container_exported` reasons: `interrupted` (the client left or the request was cancelled), `malformed_stream`, `unreadable`, `helper_refused`, `helper_image_missing`, `unreachable`, `not_found`, `conflict`, `outcome_unknown`, `engine_error`. An unexpected error records the name of its class.
 - A request from a user who is not an administrator, for a container that does not exist or is not visible, or with an id that is not a full container id, writes no row. A host failure met on the first read of the container writes no row. A request refused by the page's own checks (the secret choice, the two passphrases) writes no row.
 - A row holds no container name, no variable name or value, no volume name, no path and no passphrase.
 - A `container_exported` row that cannot be written logs `activity_event_write_failed` with `action` `container_exported`.
@@ -1049,7 +1051,7 @@ Rows for `template_catalogue_created`, `template_catalogue_updated`, `template_c
 
 ## Self-protection refusals
 
-An action refused because it would stop the container dockmin runs in, or take away what it runs on, records a failure with the reason `self_protected` and the usual `message`. The product-written message names the object. The rows are those of the refused action: `container_stopped`, `container_restarted`, `container_killed`, `container_paused`, `container_removed`, `container_recreated`, `container_created`, `container_exec_started`, `container_attach_started`, `network_disconnected`, `volume_removed`, `volume_export_started`, `volume_imported`, `stack_export_started`, `container_exported`, `stack_deployed`, `stack_redeployed`, `stack_stopped`, `stack_restarted`, `stack_removed`, `service_updated`, `service_scaled`, `service_force_updated`, `service_rolled_back`, `service_removed`, `node_availability_changed` ([Containers](Usage-Containers#dockmins-own-container), [Volumes](Usage-Volumes#dockmins-volumes), [Stacks](Usage-Stacks#dockmins-own-stack), [Swarm](Usage-Swarm#dockmins-own-service)). A subsystem skips such a target before acting; the run counts the skip ([Automation](Operations-Automation#self-protection)).
+An action refused because it would stop the container dockmin runs in, or take away what it runs on, records a failure with the reason `self_protected` and the usual `message`. The product-written message names the object. The rows are those of the refused action: `container_stopped`, `container_restarted`, `container_killed`, `container_paused`, `container_removed`, `container_recreated`, `container_created`, `container_exec_started`, `container_attach_started`, `network_disconnected`, `volume_removed`, `volume_export_started`, `volume_imported`, `stack_export_started`, `container_export_started`, `stack_deployed`, `stack_redeployed`, `stack_stopped`, `stack_restarted`, `stack_removed`, `service_updated`, `service_scaled`, `service_force_updated`, `service_rolled_back`, `service_removed`, `node_availability_changed` ([Containers](Usage-Containers#dockmins-own-container), [Volumes](Usage-Volumes#dockmins-volumes), [Stacks](Usage-Stacks#dockmins-own-stack), [Swarm](Usage-Swarm#dockmins-own-service)). A subsystem skips such a target before acting; the run counts the skip ([Automation](Operations-Automation#self-protection)).
 
 ## Limits
 

@@ -54,9 +54,9 @@ def export_path(world: World, container: str = SOURCE) -> str:
     return f"{detail_path(world, container)}/export"
 
 
-async def export_rows(world: World) -> list[dict[str, object]]:
+async def export_rows(world: World, action: str = "container_exported") -> list[dict[str, object]]:
     async with world.app.state.database.session() as db:
-        return [r for r in await activity_rows(db) if str(r["action"]) == "container_exported"]
+        return [r for r in await activity_rows(db) if str(r["action"]) == action]
 
 
 async def digest_of(client: AsyncClient, world: World) -> str:
@@ -116,6 +116,7 @@ async def test_a_standard_user_gets_a_not_found_page_and_nothing_is_recorded(
 
     assert response.status_code == NOT_FOUND
     assert await export_rows(world) == [] and "create" not in container_host.verbs()
+    assert await export_rows(world, "container_export_started") == []
 
 
 async def test_the_post_downloads_an_archive_that_matches_the_confirmation(
@@ -149,9 +150,11 @@ async def test_the_post_downloads_an_archive_that_matches_the_confirmation(
     assert [v.manifest.name for v in manifest.volumes] == [VOLUME]
     assert members[f"{manifest.volumes[0].prefix}/data/{NOTE_FILE}"][1] == NOTE
     assert SECRET_VALUE not in archive_text(members) and PLAIN_VALUE in archive_text(members)
-    assert [(r["result"], r["detail"]["secrets"]) for r in await export_rows(world)] == [  # type: ignore[index]
-        ("success", "sealed")
-    ]
+    for action in ("container_export_started", "container_exported"):
+        rows = await export_rows(world, action)
+        assert [(r["result"], r["detail"]["secrets"]) for r in rows] == [  # type: ignore[index]
+            ("success", "sealed")
+        ]
     assert container_host.helpers() == []
 
 

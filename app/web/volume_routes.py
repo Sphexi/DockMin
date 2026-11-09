@@ -362,6 +362,7 @@ async def list_volumes(
             "kind_options": KIND_FILTERS,
             "can_create": can_create,
             "can_prune": can_prune,
+            "can_import": actor.is_administrator,
             "can_backfill": can_backfill,
         },
         status_code,

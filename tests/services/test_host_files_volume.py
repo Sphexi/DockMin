@@ -16,8 +16,10 @@ from app.services.host_files import (
     LEFTOVER_AGE_SECONDS,
     MAX_IMAGE_INSPECTS,
     HelperImageMissing,
+    HelperImageUnusable,
     HelperMountRefused,
     HostFileReader,
+    check_helper_image,
     helper_image,
     volume_helper_body,
 )
@@ -263,3 +265,47 @@ async def test_only_a_bounded_number_of_images_is_inspected(
         c for c in daemon.calls("GET") if c.path.startswith("/images/") and c.path != "/images/json"
     ]
     assert len(inspected) == MAX_IMAGE_INSPECTS
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        pytest.param(MOUNT_POINT, id="the-mount-point"),
+        pytest.param(f"{MOUNT_POINT}/sub", id="below-it"),
+        pytest.param(f"/{MOUNT_POINT.lstrip('/')}//sub/./deeper", id="unclean-spelling"),
+        pytest.param("/declared/../dockmin-read", id="parent-component"),
+    ],
+)
+async def test_an_image_declaring_a_volume_at_or_below_the_mount_point_is_never_the_helper_image(
+    daemon: VolumeEngine, client: EngineClient, declared: str
+) -> None:
+    daemon.add_image(VOLUME_IMAGE, VOLUME_IMAGE_ID, {"Volumes": {declared: {}}}, size=1)
+
+    assert await helper_image(client) == PLAIN_IMAGE_ID
+    with pytest.raises(HelperImageUnusable):
+        await check_helper_image(client, VOLUME_IMAGE_ID)
+
+
+async def test_a_volume_beside_the_mount_point_does_not_disqualify_an_image(
+    daemon: VolumeEngine, client: EngineClient
+) -> None:
+    sibling: dict[str, Any] = {"Volumes": {f"{MOUNT_POINT}-other": {}}}
+    daemon.add_image(VOLUME_IMAGE, VOLUME_IMAGE_ID, sibling, size=1)
+
+    await check_helper_image(client, VOLUME_IMAGE_ID)
+    assert await helper_image(client) == PLAIN_IMAGE_ID
+
+
+async def test_with_only_unusable_images_on_the_host_there_is_no_helper_image() -> None:
+    engine = VolumeEngine()
+    engine.add_image(VOLUME_IMAGE, VOLUME_IMAGE_ID, {"Volumes": {MOUNT_POINT: {}}})
+    async with EngineClient(ENV_ID, engine.bundle()) as only:
+        with pytest.raises(HelperImageMissing):
+            await helper_image(only)
+
+
+async def test_checking_an_image_the_host_no_longer_holds_is_helper_image_missing(
+    client: EngineClient,
+) -> None:
+    with pytest.raises(HelperImageMissing):
+        await check_helper_image(client, VOLUME_IMAGE_ID)

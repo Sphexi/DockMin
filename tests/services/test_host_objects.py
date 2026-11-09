@@ -23,7 +23,6 @@ from app.services.host_objects import (
     MAX_USERS_SHOWN,
     check_limit,
     create_failure,
-    decode_position,
     describe_users,
     failure_reason,
     hold_all,
@@ -193,18 +192,6 @@ def test_a_page_size_outside_the_bounds_is_refused_on_the_limit_field(limit: int
         check_limit(limit)
 
     assert "limit" in refused.value.fields
-
-
-def test_no_cursor_decodes_to_no_position() -> None:
-    assert decode_position(None) is None
-
-
-@pytest.mark.parametrize("cursor", ["garbage", "!!!", ""])
-def test_a_cursor_that_does_not_decode_is_refused_on_the_cursor_field(cursor: str) -> None:
-    with pytest.raises(ValidationFailed) as refused:
-        decode_position(cursor)
-
-    assert "cursor" in refused.value.fields
 
 
 def test_row_ids_are_stable_and_differ_between_swarm_and_hex_ids() -> None:
