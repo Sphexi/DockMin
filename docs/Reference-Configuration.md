@@ -122,12 +122,12 @@ Sign-in from a trusted access platform's token. Off while `DOCKMIN_JWT_HEADER` i
 | Variable | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `DOCKMIN_LOG_LEVEL` | one of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | `INFO` | — | Log level of dockmin and uvicorn. Case is ignored |
-| `DOCKMIN_ACCESS_LOG` | boolean | `false` | — | When `true`, one `http_request` line is logged per HTTP request, except `/api/health` and `/api/ready`. Fields: `method`, `path` (no query string, cut at 1,024 characters), `status`, `duration_ms`, `address`, `user_id` ([Logging events](Reference-Deployment#logging-events)) |
+| `DOCKMIN_ACCESS_LOG` | boolean | `false` | — | When `true`, one `http_request` line is logged per HTTP request and one `websocket_connection` line per WebSocket connection, except `/api/health` and `/api/ready`. The redirect listener logs refused requests and refused WebSocket handshakes only. Fields: `method`, `path` (no query string, cut at 1,024 characters), `status`, `duration_ms`, `address`, `user_id`; `websocket_connection` has `close_code` and no `method` ([Access log](Reference-Deployment#access-log)) |
 | `DOCKMIN_DEVELOPMENT_CHECKS` | boolean | `false` | — | When `true`, a failed job run logs its traceback, `development_checks_enabled` is logged at every start, and `/ui-kit` is served. Leave unset in production ([Development checks](Reference-Deployment#development-checks)) |
 
 - `DOCKMIN_ACCESS_LOG` writes at `INFO`, so `DOCKMIN_LOG_LEVEL` must be `INFO` or lower for the lines to appear.
-- The line is written for HTTP requests only: not for WebSocket connections, and not for the plain listener when `DOCKMIN_HTTP_MODE` is `redirect`.
-- Each line carries the request's `request_id`. The query string is never logged.
+- With `DOCKMIN_HTTP_MODE` set to `redirect`, the plain listener writes a line for a response of 400 or above and for a refused WebSocket handshake, with `listener` set to `redirect`. A `308` writes none.
+- Each line carries the `request_id` of the request or connection, `null` on the redirect listener. The query string is never logged.
 - With the setting on, stdout volume rises with the request rate. The setting is read at start.
 - Field definitions: [Access log](Reference-Deployment#access-log).
 

@@ -188,7 +188,7 @@ Success: the browser saves `dockmin-backup-<UTC YYYYMMDDTHHMMSSZ>.tar.gz`, and a
 
 ### Download activity
 
-Action `backup_downloaded`, category `user_action`, target type `backup`, no target id, no environment.
+Action `backup_downloaded`, category `user_action`, target type `backup`, target id the id of the backup record, no environment. A failure row has a target id only when its failed record was written. Rows written by earlier versions have no target id ([Deleted targets](Administration-Activity#deleted-targets)).
 
 | Result | Written | Detail |
 |---|---|---|

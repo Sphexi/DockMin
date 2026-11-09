@@ -468,12 +468,6 @@ async def test_the_access_log_records_500_and_lets_the_exception_through_when_th
     assert (record["status"], record["user_id"]) == (500, None)
 
 
-async def test_the_access_log_ignores_scopes_that_are_not_http(logged: Logged) -> None:
-    await _drive(_respond_204, _scope("/ws", kind="websocket"))
-
-    assert logged("http_request") == []
-
-
 async def test_requests_are_not_logged_when_the_access_log_is_off(
     client: AsyncClient, logged: Logged
 ) -> None:

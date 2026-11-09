@@ -37,6 +37,13 @@ ACCESS_LOGGER = "dockmin.access"
 ACCESS_PATH_LIMIT = 1024
 ACCESS_SKIPPED_PATHS = frozenset({HEALTH_PATH, READY_PATH})
 RESTORE_PROGRESS_PREFIX = "/restore/progress/"
+HTTP_REFUSAL_FLOOR = 400
+WEBSOCKET_ACCEPTED_STATUS = 101
+WEBSOCKET_REFUSED_STATUS = 403
+WEBSOCKET_NORMAL_CLOSE = 1000
+WEBSOCKET_NO_STATUS_CODE = 1005
+WEBSOCKET_INTERNAL_ERROR = 1011
+_CONNECTION_SCOPES = frozenset({"http", "websocket"})
 _UNLOGGED_EXTRAS = frozenset({"color_message"})
 
 SENSITIVE_SUFFIXES = (
@@ -329,14 +336,15 @@ def bound_request_id(request_id: str) -> Iterator[None]:
 
 
 class RequestIdMiddleware:
-    """Bind a request id for the duration of each HTTP request and echo it in the response."""
+    """Bind a request id for each HTTP request and WebSocket connection; HTTP responses echo it."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Bind the id, then delegate to the wrapped application."""
-        if scope["type"] != "http":
+        kind = scope["type"]
+        if kind not in _CONNECTION_SCOPES:
             await self.app(scope, receive, send)
             return
 
@@ -352,22 +360,35 @@ class RequestIdMiddleware:
             await send(message)
 
         with bound_request_id(request_id):
-            await self.app(scope, receive, send_with_id)
+            await self.app(scope, receive, send_with_id if kind == "http" else send)
 
 
 class AccessLogMiddleware:
-    """Write one line per HTTP request once its response has been sent or the application raised."""
+    """Write one line per HTTP request and per WebSocket connection, once it has ended.
 
-    def __init__(self, app: ASGIApp) -> None:
+    A `listener` name is added to every line. With `refusals_only`, requests answered below 400
+    and accepted connections write nothing.
+    """
+
+    def __init__(
+        self, app: ASGIApp, *, listener: str | None = None, refusals_only: bool = False
+    ) -> None:
         self.app = app
+        self._listener = listener
+        self._refusals_only = refusals_only
         self._logger = get_logger(ACCESS_LOGGER)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Delegate to the wrapped application, then log the request."""
-        if scope["type"] != "http" or scope["path"] in ACCESS_SKIPPED_PATHS:
+        """Delegate to the wrapped application, then log the request or connection."""
+        kind = scope["type"]
+        if kind not in _CONNECTION_SCOPES or scope["path"] in ACCESS_SKIPPED_PATHS:
             await self.app(scope, receive, send)
-            return
+        elif kind == "http":
+            await self._serve_http(scope, receive, send)
+        else:
+            await self._serve_websocket(scope, receive, send)
 
+    async def _serve_http(self, scope: Scope, receive: Receive, send: Send) -> None:
         started = time.perf_counter()
         status = 500
 
@@ -380,20 +401,86 @@ class AccessLogMiddleware:
         try:
             await self.app(scope, receive, send_recording)
         finally:
-            path: str = scope["path"]
-            if len(path) > ACCESS_PATH_LIMIT:
-                path = f"{path[:ACCESS_PATH_LIMIT]}\u2026"
-            if path.startswith(RESTORE_PROGRESS_PREFIX):
-                path = f"{RESTORE_PROGRESS_PREFIX}{REDACTED}"
-            client = scope.get("client")
-            self._logger.info(
-                "http_request",
-                extra={
-                    "method": scope["method"],
-                    "path": path,
-                    "status": status,
-                    "duration_ms": int((time.perf_counter() - started) * 1000),
-                    "address": client[0] if client else "unknown",
-                    "user_id": scope.get("state", {}).get("authenticated_user_id"),
-                },
-            )
+            if not self._refusals_only or status >= HTTP_REFUSAL_FLOOR:
+                self._write(
+                    "http_request",
+                    {
+                        "method": scope["method"],
+                        "path": _logged_path(scope["path"]),
+                        "status": status,
+                        "duration_ms": _elapsed_ms(started),
+                        **_caller(scope),
+                    },
+                )
+
+    async def _serve_websocket(self, scope: Scope, receive: Receive, send: Send) -> None:
+        started = time.perf_counter()
+        accepted = False
+        refusal_status: int | None = None
+        close_code: int | None = None
+        completed = False
+
+        async def receive_recording() -> Message:
+            nonlocal close_code
+            message = await receive()
+            if message["type"] == "websocket.disconnect" and close_code is None:
+                close_code = message.get("code", WEBSOCKET_NO_STATUS_CODE)
+            return message
+
+        async def send_recording(message: Message) -> None:
+            nonlocal accepted, refusal_status, close_code
+            match message["type"]:
+                case "websocket.accept":
+                    accepted = True
+                case "websocket.close":
+                    if close_code is None:
+                        close_code = message.get("code", WEBSOCKET_NORMAL_CLOSE)
+                    if not accepted and refusal_status is None:
+                        refusal_status = WEBSOCKET_REFUSED_STATUS
+                case "websocket.http.response.start":
+                    refusal_status = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive_recording, send_recording)
+            completed = True
+        finally:
+            if accepted and close_code is None:
+                close_code = WEBSOCKET_NORMAL_CLOSE if completed else WEBSOCKET_INTERNAL_ERROR
+            if not (self._refusals_only and accepted):
+                status = WEBSOCKET_ACCEPTED_STATUS if accepted else refusal_status
+                self._write(
+                    "websocket_connection",
+                    {
+                        "path": _logged_path(scope["path"]),
+                        "status": 500 if status is None else status,
+                        "close_code": close_code,
+                        "duration_ms": _elapsed_ms(started),
+                        **_caller(scope),
+                    },
+                )
+
+    def _write(self, event: str, fields: dict[str, Any]) -> None:
+        if self._listener is not None:
+            fields["listener"] = self._listener
+        self._logger.info(event, extra=fields)
+
+
+def _logged_path(path: str) -> str:
+    if len(path) > ACCESS_PATH_LIMIT:
+        path = f"{path[:ACCESS_PATH_LIMIT]}\u2026"
+    if path.startswith(RESTORE_PROGRESS_PREFIX):
+        return f"{RESTORE_PROGRESS_PREFIX}{REDACTED}"
+    return path
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def _caller(scope: Scope) -> dict[str, Any]:
+    client = scope.get("client")
+    return {
+        "address": client[0] if client else "unknown",
+        "user_id": scope.get("state", {}).get("authenticated_user_id"),
+    }

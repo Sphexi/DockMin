@@ -16,6 +16,7 @@ MAX_PORT_SUFFIX: Final = 6
 MAX_PORT: Final = 65535
 DEFAULT_HTTPS_PORT: Final = 443
 WEBSOCKET_POLICY_VIOLATION: Final = 1008
+REDIRECT_LISTENER: Final = "redirect"
 
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 _DNS_HOST = re.compile(rf"(?:{_LABEL}\.)*{_LABEL}\.?")

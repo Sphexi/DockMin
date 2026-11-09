@@ -28,6 +28,10 @@ BURST_SIZE = 30
 BURST_PAGE = 7
 BURST_STAMP = "2030-01-01T11:00:00Z"
 RECREATED = "container_recreated"
+REQUEST_A = "req-a"
+REQUEST_B = "req-b"
+REQUEST_A_EVENTS = (1, 3, 4, 7)
+UNUSED_REQUEST = "req-unused"
 
 USER, AUTOMATION = "user_action", "automation"
 
@@ -112,6 +116,39 @@ def seeded_rows() -> list[tuple[object, ...]]:
 
 
 FILTER_CASES = [
+    pytest.param(ActivityFilter(request_id=REQUEST_A), {1, 3, 4, 7}, id="request"),
+    pytest.param(ActivityFilter(request_id=REQUEST_B), {2}, id="other-request"),
+    pytest.param(ActivityFilter(request_id=UNUSED_REQUEST), set(), id="unused-request"),
+    pytest.param(
+        ActivityFilter(request_id=REQUEST_A, actor_user_id=ADMIN_USER), {1, 3, 4}, id="request-user"
+    ),
+    pytest.param(
+        ActivityFilter(request_id=REQUEST_A, category="automation"), {7}, id="request-category"
+    ),
+    pytest.param(
+        ActivityFilter(request_id=REQUEST_A, occurred_from=moment(3), occurred_to=moment(7)),
+        {3, 4},
+        id="request-time",
+    ),
+    pytest.param(
+        ActivityFilter(request_id=REQUEST_A, environment_id=ENV_A), {1, 4, 7}, id="request-env"
+    ),
+    pytest.param(
+        ActivityFilter(request_id=REQUEST_A, environment_id=ENV_B), {3}, id="request-other-env"
+    ),
+    pytest.param(
+        ActivityFilter(request_id=REQUEST_B, environment_id=ENV_A, target_type="container"),
+        {2},
+        id="request-env-target-type",
+    ),
+    pytest.param(ActivityFilter(request_id=REQUEST_A, job_run_id=FIRST_RUN), {7}, id="request-run"),
+    pytest.param(
+        ActivityFilter(
+            request_id=REQUEST_A, environment_id=ENV_A, target_type="container", target_id="c1"
+        ),
+        {1, 7},
+        id="request-object",
+    ),
     pytest.param(ActivityFilter(action=RECREATED), {7, 8, 9}, id="action"),
     pytest.param(
         ActivityFilter(action=RECREATED, occurred_from=moment(8)), {8, 9}, id="action-time"
@@ -191,6 +228,10 @@ def seeded(migrated_template: Path, tmp_path_factory: pytest.TempPathFactory) ->
             [(FIRST_RUN, stamp(0)), (SECOND_RUN, stamp(0))],
         )
         connection.executemany(INSERT_EVENT, seeded_rows())
+        connection.executemany(
+            "UPDATE activity_event SET request_id = ? WHERE id = ?",
+            [(REQUEST_A, number) for number in REQUEST_A_EVENTS] + [(REQUEST_B, 2)],
+        )
     finally:
         connection.close()
     return path
@@ -262,3 +303,27 @@ async def test_an_environment_page_outside_the_page_size_range_is_refused(
         await ActivityEventRepository(seeded_db).page(
             ActivityFilter(environment_id=ENV_A), limit=limit
         )
+
+
+@pytest.mark.parametrize("environment_id", [None, ENV_A])
+async def test_a_request_id_filter_lists_its_events_newest_first(
+    seeded_db: Session, environment_id: int | None
+) -> None:
+    page = await ActivityEventRepository(seeded_db).page(
+        ActivityFilter(request_id=REQUEST_A, environment_id=environment_id), limit=500
+    )
+
+    stamps = [event.occurred_at for event in page.items]
+    assert stamps == sorted(stamps, reverse=True)
+    assert {event.request_id for event in page.items if event.id != 4} == {REQUEST_A}
+
+
+@pytest.mark.parametrize("request_id", ["", "has space", "a/b", "é", "x" * 65, "line\nbreak"])
+def test_a_request_id_outside_the_stored_grammar_is_refused(request_id: str) -> None:
+    with pytest.raises(ValueError, match="request_id"):
+        ActivityFilter(request_id=request_id)
+
+
+@pytest.mark.parametrize("request_id", ["a", "A.b_c-9", "x" * 64])
+def test_a_request_id_inside_the_stored_grammar_is_accepted(request_id: str) -> None:
+    assert ActivityFilter(request_id=request_id).request_id == request_id

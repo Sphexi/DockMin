@@ -27,11 +27,15 @@
 {{ filter_form(filters, true) }}
 {% endmacro %}
 
-{% macro activity_results(rows, columns, pager, export_href, errors, target_hrefs=none) %}
+{% macro activity_results(rows, columns, pager, export_href, errors, target_hrefs=none, request_id="") %}
 <div id="activity-results">
   {% if errors %}
   {{ error_summary(errors) }}
   {% else %}
+  {% if request_id %}
+  <h2 id="request-heading">Events recorded with request id <span class="mono">{{ request_id|visible_text }}</span></h2>
+  <p class="field__help">A client can supply the request id, so events listed here are correlated by that id and are not proven to come from one request.</p>
+  {% endif %}
   <p class="toolbar">
     <a class="btn" href="{{ export_href }}{{ '&' if '?' in export_href else '?' }}format=csv">Download CSV</a>
     <a class="btn" href="{{ export_href }}{{ '&' if '?' in export_href else '?' }}format=ndjson">Download NDJSON</a>

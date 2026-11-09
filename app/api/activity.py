@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.auth.dependencies import require_token_user
 from app.auth.errors import ValidationFailed
 from app.auth.principal import Principal
-from app.db.repositories.activity_event import ActivityFilter
+from app.db.repositories.activity_event import REQUEST_ID_PATTERN, ActivityFilter
 from app.db.repositories.pagination import MAX_PAGE_SIZE, MAX_ROW_ID, InvalidCursorError
 from app.services.activity_log import ActivityEventView
 from app.services.assembly import ActivityLog
@@ -23,6 +23,8 @@ MAX_CURSOR: Final = 512
 MAX_SUBSYSTEM: Final = 64
 MAX_TARGET_ID: Final = 256
 NAME_PATTERN: Final = r"^[a-z_]{1,64}$"
+MAX_REQUEST_ID: Final = 256
+REQUEST_ID_MESSAGE: Final = "Use 1 to 64 letters, digits, dots, hyphens or underscores."
 EARLIEST_TIME: Final = datetime(1970, 1, 1, tzinfo=UTC)
 LATEST_TIME: Final = datetime(9999, 1, 1, tzinfo=UTC)
 
@@ -127,8 +129,11 @@ def _criteria(
     result: Literal["success", "failure"] | None,
     occurred_from: datetime | None,
     occurred_to: datetime | None,
+    request_id: str | None,
 ) -> ActivityFilter:
     problems: dict[str, str] = {}
+    if request_id is not None and REQUEST_ID_PATTERN.fullmatch(request_id) is None:
+        problems["request_id"] = REQUEST_ID_MESSAGE
     for name, moment in (("from", occurred_from), ("to", occurred_to)):
         if moment is None:
             continue
@@ -156,6 +161,7 @@ def _criteria(
         occurred_to=occurred_to,
         action=action,
         job_run_id=job_run_id,
+        request_id=request_id,
     )
 
 
@@ -169,6 +175,7 @@ async def list_activity(
     subsystem: Annotated[str | None, Query(max_length=MAX_SUBSYSTEM)] = None,
     rule_id: OptionalRowId = None,
     job_run_id: OptionalRowId = None,
+    request_id: Annotated[str | None, Query(max_length=MAX_REQUEST_ID)] = None,
     environment_id: OptionalRowId = None,
     target_type: Annotated[str | None, Query(pattern=NAME_PATTERN)] = None,
     target_id: Annotated[str | None, Query(min_length=1, max_length=MAX_TARGET_ID)] = None,
@@ -194,6 +201,7 @@ async def list_activity(
         result=result,
         occurred_from=occurred_from,
         occurred_to=occurred_to,
+        request_id=request_id,
     )
     try:
         page = await log.page(principal, criteria, limit=limit, cursor=cursor)

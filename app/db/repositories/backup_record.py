@@ -113,6 +113,10 @@ class BackupRecordRepository(ClockedRepository[BackupRecord]):
             _SELECT, limit=limit, cursor=cursor, sort_column="created_at", descending=True
         )
 
+    async def get(self, record_id: int) -> BackupRecord | None:
+        """Fetch a record by id; None once it has left the kept set."""
+        return await self._one(f"{_SELECT} WHERE id = ?", (record_id,))
+
     async def by_destinations(self, target_id: int, keys: Sequence[str]) -> dict[str, BackupRecord]:
         """Return the newest successful record of each key stored on the target, by key."""
         found: dict[str, BackupRecord] = {}

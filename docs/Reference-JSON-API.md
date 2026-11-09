@@ -76,6 +76,7 @@ The address and port are those the deployment publishes ([Deployment](Reference-
 | Response header | `X-Request-Id` on every HTTP response |
 | Request header | An `X-Request-Id` of 1 to 64 letters, digits, `.`, `_` or `-` is reused. Any other value is replaced by a generated 32-digit hexadecimal id |
 | Where it appears | The `request_id` of log lines and activity events of the request ([Activity](Administration-Activity#request-id)) |
+| Filter | `GET /api/v1/activity?request_id=<id>` returns the events recorded with that id, by exact match. An id outside the grammar above answers `422` with a field error ([Activity](Administration-Activity#request-id-filter)) |
 
 ## Pagination
 

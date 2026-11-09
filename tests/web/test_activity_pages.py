@@ -26,7 +26,7 @@ from app.db.repositories.job_run import JobRunRepository
 from app.db.repositories.scheduled_job import ScheduledJobRepository
 from app.services.assembly import app_activity_log_service
 from app.web.activity_routes import _ExportResponse
-from tests.auth_support import ADMIN_ID
+from tests.auth_support import ADMIN_ID, csrf_form
 from tests.container_support import STACK_LABEL, SWARM_LABEL, WEB
 from tests.docker_engine.container_engine import ContainerEngine
 from tests.docker_engine.swarm_engine import WORKER, SwarmEngine
@@ -86,6 +86,15 @@ INSERT_USER = (
     "VALUES (?, 'x', 'standard', 1, ?)"
 )
 INSERT_TEAM = "INSERT INTO team (name, created_at) VALUES (?, ?)"
+INSERT_CHANNEL = (
+    "INSERT INTO notification_channel (name, kind, settings, created_at, updated_at) "
+    "VALUES (?, 'ntfy', '{}', ?, ?)"
+)
+PLANTED_ID = "chosen-by-the-client"
+SHARED_REQUEST = "shared-request-1"
+REQUEST_HEADING = "Events recorded with request id"
+REQUEST_NOTE = "A client can supply the request id"
+REQUEST_MESSAGE = "Request id: use 1 to 64 letters, digits, dots, hyphens or underscores."
 INSERT_REGISTRY = (
     "INSERT INTO registry_credential (name, provider, url, authentication_enabled, username, "
     "secret_kind, secret_ciphertext, provider_extras, created_at, updated_at) "
@@ -493,8 +502,97 @@ async def test_the_event_page_shows_the_request_id_in_monospace_and_a_dash_when_
     shown = await admin_client.get(f"/activity/{with_id}")
     absent = await admin_client.get(f"/activity/{without_id}")
 
-    assert f'<dt>Request</dt>\n    <dd class="mono">{REQUEST_ID}</dd>' in shown.text
+    assert (
+        f'<dt>Request</dt>\n    <dd class="mono"><a href="/activity?request_id={REQUEST_ID}">'
+        f"{REQUEST_ID}</a></dd>"
+    ) in shown.text
     assert '<dt>Request</dt>\n    <dd class="mono">&mdash;</dd>' in absent.text
+
+
+async def tag_events(app: FastAPI, request_id: str, *where: str) -> None:
+    """Stamp the request id on the events whose action is one of those named."""
+    connection = app.state.database.connect()
+    try:
+        connection.execute("BEGIN")
+        connection.execute(
+            "UPDATE activity_event SET request_id = ? "
+            f"WHERE action IN ({', '.join('?' * len(where))})",
+            (request_id, *where),
+        )
+        connection.execute("COMMIT")
+    finally:
+        connection.close()
+
+
+async def test_the_log_filtered_by_a_request_id_lists_exactly_its_events_under_a_heading_and_note(
+    admin_client: AsyncClient, world: World, app: FastAPI
+) -> None:
+    await seed(app, world)
+    await tag_events(app, SHARED_REQUEST, "login_failed", "container_stopped")
+    query = f"request_id={SHARED_REQUEST}"
+
+    shown = await admin_client.get(f"/activity?{query}")
+    fragment = await admin_client.get(f"/activity?{query}", headers=HTMX)
+    plain = await admin_client.get("/activity")
+    exported = await admin_client.get(f"/activity/-/export?{query}&format=ndjson")
+
+    listed = await ids_for(admin_client, query)
+    records = [json.loads(line) for line in exported.text.split("\n")[:-1]]
+    text = flat(shown.text)
+    assert len(listed) == len(records) == CONTAINER_EVENTS // 3 + 1
+    assert {record["request_id"] for record in records} == {SHARED_REQUEST}
+    assert f"{REQUEST_HEADING} {SHARED_REQUEST}" in text and REQUEST_NOTE in text
+    assert f'<input type="hidden" name="request_id" value="{SHARED_REQUEST}">' in shown.text
+    assert f"{REQUEST_HEADING} {SHARED_REQUEST}" in flat(fragment.text)
+    assert "<body" not in fragment.text
+    assert REQUEST_HEADING not in plain.text and 'name="request_id"' not in plain.text
+    assert f"request_id={SHARED_REQUEST}&amp;format=csv" in shown.text
+
+
+async def test_an_id_outside_the_grammar_is_refused_with_a_field_message_on_page_and_download(
+    admin_client: AsyncClient,
+) -> None:
+    ids = {"has a space": "a%20b", "too long": "x" * 65, "slash": "a%2Fb"}
+
+    pages = {
+        name: await admin_client.get(f"/activity?request_id={value}") for name, value in ids.items()
+    }
+    downloads = {
+        name: await admin_client.get(f"/activity/-/export?request_id={value}")
+        for name, value in ids.items()
+    }
+
+    assert {name: r.status_code for name, r in pages.items()} == dict.fromkeys(ids, UNPROCESSABLE)
+    assert {name: r.status_code for name, r in downloads.items()} == dict.fromkeys(
+        ids, UNPROCESSABLE
+    )
+    assert all(REQUEST_MESSAGE in r.text for r in [*pages.values(), *downloads.values()])
+    assert all("<table" not in r.text and REQUEST_HEADING not in r.text for r in pages.values())
+    assert all(
+        "attachment" not in r.headers.get("content-disposition", "") for r in downloads.values()
+    )
+
+
+async def test_a_client_chosen_request_id_lists_its_events_and_never_claims_one_request(
+    anonymous_client: AsyncClient, admin_client: AsyncClient
+) -> None:
+    await anonymous_client.get("/login")
+    for _attempt in range(2):
+        await anonymous_client.post(
+            "/login",
+            data=csrf_form(anonymous_client, username="nobody-here", password="not-the-password"),
+            headers={"X-Request-Id": PLANTED_ID},
+        )
+
+    listed = await ids_for(admin_client, f"request_id={PLANTED_ID}")
+    shown = await admin_client.get(f"/activity?request_id={PLANTED_ID}")
+    event = await admin_client.get(f"/activity/{listed[0]}")
+
+    assert len(listed) == 2
+    assert "same request" not in flat(shown.text).lower()
+    assert "same request" not in flat(event.text).lower()
+    assert f"{REQUEST_HEADING} {PLANTED_ID}" in flat(shown.text)
+    assert f'href="/activity?request_id={PLANTED_ID}"' in event.text
 
 
 async def test_a_subsystem_events_detail_links_its_rule_and_run_until_the_rule_is_deleted(
@@ -693,6 +791,9 @@ async def test_the_log_links_targets_with_the_log_as_origin_and_a_stack_only_onc
             "container": ("container", HEX_ONE, e),
             "compose stack": ("stack", COMPOSE_NAME, e),
             "unmanaged stack": ("stack", UNMANAGED_NAME, e),
+            "config": ("config", SWARM_ID_ONE, e),
+            "secret": ("secret", "r" * 25, e),
+            "channel": ("notification_channel", "7", None),
         },
     )
 
@@ -703,6 +804,9 @@ async def test_the_log_links_targets_with_the_log_as_origin_and_a_stack_only_onc
     assert linked[HEX_ONE] == f"/environments/{e}/containers/{HEX_ONE}?{origin}"
     assert linked[COMPOSE_NAME] == f"/environments/{e}/stacks/{COMPOSE_NAME}?{origin}"
     assert UNMANAGED_NAME not in linked
+    assert linked[SWARM_ID_ONE] == f"/environments/{e}/swarm/configs/{SWARM_ID_ONE}?{origin}"
+    assert linked["r" * 25] == f"/environments/{e}/swarm/secrets/{'r' * 25}?{origin}"
+    assert linked["7"] == f"/notifications/7?{origin}"
 
 
 async def test_a_reused_row_id_created_after_the_event_shows_deleted(
@@ -784,6 +888,99 @@ async def test_a_host_read_past_the_budget_leaves_the_link_unmarked_and_reads_no
         path for path in container_host.paths() if "/_ping" not in path and "/version" not in path
     ]
     assert reads == [f"GET /containers/{HEX_ONE}/json"]
+
+
+INSERT_BACKUP_RECORD = (
+    "INSERT INTO backup_record (origin, created_at, key_version, key_fingerprint, outcome) "
+    "VALUES ('download', ?, 1, 'fingerprint', 'success')"
+)
+
+
+async def test_config_secret_and_channel_targets_link_while_present_and_show_deleted_once_removed(
+    admin_client: AsyncClient, world: World, app: FastAPI, swarm_host: SwarmEngine
+) -> None:
+    e = world.remote_id
+    config_id = swarm_host.add_config("app-config")
+    secret_id = swarm_host.add_secret("db-password")
+    channel_id = await insert_row(app, INSERT_CHANNEL, "alerts", BEFORE_EVENTS, BEFORE_EVENTS)
+    events: Events = {
+        "config": ("config", config_id, e),
+        "secret": ("secret", secret_id, e),
+        "notification_channel": ("notification_channel", str(channel_id), None),
+    }
+    ids = await record_events(app, events)
+
+    existing = await target_cells(admin_client, ids)
+    swarm_host.configs.clear()
+    swarm_host.secrets.clear()
+    async with app.state.database.session() as db:
+        await db.execute("DELETE FROM notification_channel WHERE id = ?", (channel_id,))
+    removed = await target_cells(admin_client, ids)
+
+    base = f"/environments/{e}/swarm"
+    assert existing == {
+        "config": (f"{base}/configs/{config_id}?from=activity%3A-%3A{ids['config']}", False),
+        "secret": (f"{base}/secrets/{secret_id}?from=activity%3A-%3A{ids['secret']}", False),
+        "notification_channel": (f"/notifications/{channel_id}", False),
+    }
+    assert removed == dict.fromkeys(events, (None, True))
+
+
+async def test_a_config_or_secret_on_an_unreachable_or_standalone_environment_is_linked_unmarked(
+    admin_client: AsyncClient, world: World, app: FastAPI
+) -> None:
+    events: Events = {
+        "config on an unreachable host": ("config", SWARM_ID_ONE, world.down_id),
+        "secret on an unreachable host": ("secret", SWARM_ID_ONE, world.down_id),
+        "config on a standalone host": ("config", SWARM_ID_ONE, world.local_id),
+        "secret on a standalone host": ("secret", SWARM_ID_ONE, world.local_id),
+    }
+
+    cells = await target_cells(admin_client, await record_events(app, events))
+
+    assert all(href is not None and not marked for href, marked in cells.values())
+    assert world.engine_clients == []
+
+
+async def test_a_config_id_its_page_cannot_take_is_plain_text_and_unmarked(
+    admin_client: AsyncClient, world: World, app: FastAPI, swarm_host: SwarmEngine
+) -> None:
+    e = world.remote_id
+    events: Events = {
+        "config id too short": ("config", "q" * 24, e),
+        "secret id with capitals": ("secret", "Q" * 25, e),
+        "channel id not a number": ("notification_channel", "abc", None),
+    }
+
+    cells = await target_cells(admin_client, await record_events(app, events))
+
+    assert cells == dict.fromkeys(events, (None, False))
+
+
+async def test_a_backup_target_is_marked_deleted_once_its_record_has_left_the_backups_list(
+    admin_client: AsyncClient, world: World, app: FastAPI
+) -> None:
+    kept = await insert_row(app, INSERT_BACKUP_RECORD, BEFORE_EVENTS)
+    gone = await insert_row(app, INSERT_BACKUP_RECORD, BEFORE_EVENTS)
+    reused = await insert_row(app, INSERT_BACKUP_RECORD, AFTER_EVENTS)
+    events: Events = {
+        "present": ("backup", str(kept), None),
+        "removed": ("backup", str(gone), None),
+        "created after the event": ("backup", str(reused), None),
+        "row from before ids were recorded": ("backup", None, None),
+    }
+    ids = await record_events(app, events)
+    async with app.state.database.session() as db:
+        await db.execute("DELETE FROM backup_record WHERE id = ?", (gone,))
+
+    cells = await target_cells(admin_client, ids)
+
+    assert cells == {
+        "present": (None, False),
+        "removed": (None, True),
+        "created after the event": (None, True),
+        "row from before ids were recorded": (None, False),
+    }
 
 
 async def test_a_target_with_no_page_or_an_id_its_page_cannot_take_is_plain_text(

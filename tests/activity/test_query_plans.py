@@ -31,6 +31,7 @@ USER = "idx_activity_event_actor_user_id"
 SUBSYSTEM = "idx_activity_event_actor_subsystem"
 ACTION = "idx_activity_event_action"
 JOB_RUN = "idx_activity_event_job_run_id"
+REQUEST = "idx_activity_event_request_id"
 
 READ_PLANS = [
     pytest.param(ActivityFilter(), OCCURRED_AT, id="no-filter"),
@@ -103,6 +104,17 @@ JOB_RUN_PLANS = [
     pytest.param(
         ActivityFilter(environment_id=1, target_type="container", job_run_id=1),
         id="job-run-environment-target-type",
+    ),
+]
+REQUEST_ID_PLANS = [
+    pytest.param(ActivityFilter(request_id="r"), id="request"),
+    pytest.param(ActivityFilter(request_id="r", category="automation"), id="request-category"),
+    pytest.param(ActivityFilter(request_id="r", actor_user_id=1), id="request-user"),
+    pytest.param(ActivityFilter(request_id="r", occurred_from=FROM), id="request-time"),
+    pytest.param(ActivityFilter(request_id="r", environment_id=1), id="request-environment"),
+    pytest.param(
+        ActivityFilter(request_id="r", environment_id=1, target_type="container"),
+        id="request-environment-target-type",
     ),
 ]
 CUTOFF = "2030-01-01T00:00:00Z"
@@ -180,6 +192,24 @@ async def test_a_filter_naming_a_job_run_starts_from_the_run_index(
 
     assert BARE_SCAN.search(plan) is None
     assert f"USING INDEX {JOB_RUN} (job_run_id=?)" in plan
+
+
+@pytest.mark.parametrize("cursor", CURSORS)
+@pytest.mark.parametrize("criteria", REQUEST_ID_PLANS)
+async def test_a_filter_naming_a_request_id_starts_from_the_request_index(
+    plans: sqlite3.Connection,
+    recording: RecordingSession,
+    criteria: ActivityFilter,
+    cursor: str,
+) -> None:
+    await ActivityEventRepository(recording).page(criteria, limit=PAGE, cursor=cursor)  # type: ignore[arg-type]
+    [(sql, params)] = recording.queries
+
+    plan = explain(plans, sql, params)
+
+    assert BARE_SCAN.search(plan) is None
+    assert f"USING INDEX {REQUEST} (request_id=?" in plan
+    assert criteria.environment_id is not None or "USE TEMP B-TREE" not in plan
 
 
 @pytest.mark.parametrize("resume", RETENTION_RESUMES)

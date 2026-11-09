@@ -70,6 +70,13 @@ class NotificationChannelRepository(ClockedRepository[NotificationChannel]):
         """Fetch a channel by id."""
         return await self._one(f"{_SELECT} WHERE id = ?", (channel_id,))
 
+    async def exists(self, channel_id: int) -> bool:
+        """Report whether a channel with this id is stored."""
+        row = await self._session.fetch_one(
+            "SELECT 1 AS found FROM notification_channel WHERE id = ?", (channel_id,)
+        )
+        return row is not None
+
     async def list_channels(self, *, limit: int = MAX_CHANNELS) -> list[NotificationChannel]:
         """List up to limit channels, by name."""
         rows = await self._session.fetch_limited(

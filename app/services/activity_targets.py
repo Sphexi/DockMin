@@ -9,7 +9,9 @@ from app.auth.principal import Principal
 from app.db.engine import Session
 from app.db.repositories.activity_event import ActivityEvent
 from app.db.repositories.automation_rule import AutomationRuleRepository
+from app.db.repositories.backup_record import BackupRecordRepository
 from app.db.repositories.environment import Environment
+from app.db.repositories.notification_channel import NotificationChannelRepository
 from app.db.repositories.object_storage_target import ObjectStorageTargetRepository
 from app.db.repositories.pagination import MAX_ROW_ID
 from app.db.repositories.registry_credential import RegistryListRepository
@@ -32,8 +34,10 @@ IMAGE_ID: Final = re.compile(r"(?:sha256:)?([0-9a-f]{64})")
 SWARM_ID: Final = re.compile(r"[0-9a-z]{25}")
 VOLUME_NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}")
 STACK_NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
-REUSED_ID_TARGETS: Final = frozenset({"automation_rule", "user", "team", "object_storage_target"})
-INTEGER_ID_TARGETS: Final = REUSED_ID_TARGETS | {"registry_credential"}
+REUSED_ID_TARGETS: Final = frozenset(
+    {"automation_rule", "user", "team", "object_storage_target", "backup"}
+)
+INTEGER_ID_TARGETS: Final = REUSED_ID_TARGETS | {"registry_credential", "notification_channel"}
 
 
 def integer_id(text: str) -> int | None:
@@ -52,6 +56,8 @@ class ActivityTargets:
         self._teams = TeamRepository(db)
         self._storage = ObjectStorageTargetRepository(db)
         self._registries = RegistryListRepository(db)
+        self._channels = NotificationChannelRepository(db)
+        self._backups = BackupRecordRepository(db)
         self._stacks = StackListRepository(db)
         self._inspector = inspector
 
@@ -90,6 +96,11 @@ class ActivityTargets:
             case "object_storage_target":
                 stored = await self._storage.get(row_id)
                 created_at = None if stored is None else stored.created_at
+            case "backup":
+                record = await self._backups.get(row_id)
+                created_at = None if record is None else record.created_at
+            case "notification_channel":
+                return "present" if await self._channels.exists(row_id) else "deleted"
             case _:
                 return "present" if await self._registries.exists(row_id) else "deleted"
         if created_at is None or created_at > event.occurred_at:
@@ -130,12 +141,16 @@ class ActivityTargets:
                     await inspector.volume(env, target)
                 case "image":
                     await self._image(inspector, env, target)
-                case "service" | "node" if environment.type != "swarm":
+                case "service" | "node" | "config" | "secret" if environment.type != "swarm":
                     return "unknown"
                 case "service":
                     await inspector.service(env, target)
                 case "node":
                     await inspector.node(env, target)
+                case "config":
+                    await inspector.config(env, target)
+                case "secret":
+                    await inspector.secret(env, target)
                 case "stack":
                     return await self._stack(inspector, environment, target)
                 case _:
@@ -172,7 +187,7 @@ def _well_formed(kind: str, target: str) -> bool:
     match kind:
         case "container" | "network":
             return HEX_ID.fullmatch(target) is not None
-        case "service" | "node":
+        case "service" | "node" | "config" | "secret":
             return SWARM_ID.fullmatch(target) is not None
         case "image":
             return IMAGE_ID.fullmatch(target) is not None

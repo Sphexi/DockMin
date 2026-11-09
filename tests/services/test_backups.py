@@ -86,15 +86,19 @@ async def test_a_download_writes_one_record_and_one_audited_row_with_the_facts(r
     await read_all(stream)
 
     record = rig.rows(
-        "SELECT origin, object_storage_target_id, size_bytes, archive_sha256, outcome "
+        "SELECT id, origin, object_storage_target_id, size_bytes, archive_sha256, outcome "
         "FROM backup_record"
     )
     [row] = rig.rows(
-        "SELECT result, actor_type, actor_user_id, detail FROM activity_event "
-        "WHERE action = 'backup_downloaded'"
+        "SELECT result, actor_type, actor_user_id, target_type, target_id, detail "
+        "FROM activity_event WHERE action = 'backup_downloaded'"
     )
     detail = json.loads(row["detail"])
-    assert [tuple(r) for r in record] == [("download", None, stream.size, stream.sha256, "success")]
+    assert [tuple(r)[1:] for r in record] == [
+        ("download", None, stream.size, stream.sha256, "success")
+    ]
+    assert (row["target_type"], row["target_id"]) == ("backup", str(record[0]["id"]))
+    assert detail["backup_record_id"] == record[0]["id"]
     assert (row["result"], row["actor_type"], row["actor_user_id"]) == ("success", "user", 1)
     assert {
         "archive_sha256",
@@ -136,10 +140,11 @@ async def test_a_failed_production_raises_with_its_reason_and_records_the_failur
         await rig.download()
 
     [event] = rig.rows(
-        "SELECT result, detail FROM activity_event WHERE action = 'backup_downloaded'"
+        "SELECT result, target_id, detail FROM activity_event WHERE action = 'backup_downloaded'"
     )
-    [record] = rig.rows("SELECT origin, outcome, error, size_bytes FROM backup_record")
+    [record] = rig.rows("SELECT id, origin, outcome, error, size_bytes FROM backup_record")
     detail = json.loads(event["detail"])
+    assert event["target_id"] == str(record["id"])
     assert raised.value.reason == "insufficient_space"
     assert (event["result"], detail["reason"]) == ("failure", "insufficient_space")
     assert "free space" in detail["message"]

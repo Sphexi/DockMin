@@ -15,7 +15,7 @@ import uvicorn
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import TLS_SELF_SIGNED_VAR, ConfigError, Settings, load_settings
-from app.logging import configure_logging, get_logger
+from app.logging import AccessLogMiddleware, configure_logging, get_logger
 from app.main import create_app
 from app.selfcheck import (
     TLS_REMEDY,
@@ -24,7 +24,7 @@ from app.selfcheck import (
     from_config_error,
     log_check_failure,
 )
-from app.serving.redirect import HttpsRedirectApp
+from app.serving.redirect import REDIRECT_LISTENER, HttpsRedirectApp
 from app.tls import (
     TLS_LISTENER_SCOPE_KEY,
     TLS_SELF_SIGNED_SCOPE_KEY,
@@ -100,9 +100,13 @@ def server_configs(
         case "serve":
             configs.append(_config(settings, app, port=settings.port, lifespan="off"))
         case "redirect":
-            redirect = HttpsRedirectApp(
+            redirect: ASGIApp = HttpsRedirectApp(
                 public_port=settings.redirect_port, trusted_origins=settings.trusted_origins
             )
+            if settings.access_log:
+                redirect = AccessLogMiddleware(
+                    redirect, listener=REDIRECT_LISTENER, refusals_only=True
+                )
             configs.append(
                 _config(settings, redirect, port=settings.port, lifespan="off", proxy_headers=False)
             )

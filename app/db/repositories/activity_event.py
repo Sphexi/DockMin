@@ -1,6 +1,7 @@
 """Repository for the activity_event table: the only insert, the reads, and the only delete."""
 
 import json
+import re
 import sqlite3
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ MAX_DETAIL_SCRUB_INPUT = 4096
 MAX_EXPORT_COUNT: Final = 100_000
 MAX_SEQUENTIAL_READ: Final = 2_000
 MAX_BY_IDS: Final = 100
+REQUEST_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 _SELECT = (
     "SELECT id, category, actor_type, actor_user_id, actor_subsystem, rule_id, job_run_id, "
@@ -81,8 +83,11 @@ class ActivityFilter:
     occurred_to: datetime | None = None
     action: str | None = None
     job_run_id: int | None = None
+    request_id: str | None = None
 
     def __post_init__(self) -> None:
+        if self.request_id is not None and REQUEST_ID_PATTERN.fullmatch(self.request_id) is None:
+            raise ValueError("request_id is 1 to 64 letters, digits, dots, hyphens or underscores")
         if self.target_id is not None and self.target_type is None:
             raise ValueError("target_type and target_id are set together")
         if self.target_type is not None and self.target_id is None and self.environment_id is None:
@@ -216,7 +221,7 @@ class ActivityEventRepository(ClockedRepository[ActivityEvent]):
             position = decode_cursor(cursor)
             keyset = " AND (occurred_at, id) < (?, ?)"
             keyset_params = [position.sort_value, position.row_id]
-        run = "" if criteria.job_run_id is None else "+"
+        run = "" if _driver(criteria) is None else "+"
         residual, residual_params = _residuals(criteria, hinted=False)
         clauses = [f"{run}environment_id = ?", *residual]
         params: list[Any] = [criteria.environment_id, *residual_params]
@@ -670,13 +675,20 @@ def _truncate(values: Mapping[str, DetailValue], limit: int) -> dict[str, Detail
     return {k: v[:limit] if isinstance(v, str) else v for k, v in values.items()}
 
 
+def _driver(criteria: ActivityFilter) -> str | None:
+    """Return the column whose own index should drive the read, when a filter names one."""
+    if criteria.job_run_id is not None:
+        return "job_run_id"
+    return "request_id" if criteria.request_id is not None else None
+
+
 def _residuals(criteria: ActivityFilter, *, hinted: bool) -> tuple[list[str], list[Any]]:
     """Return the conditions of every filter but environment and target.
 
     Each takes a unary plus so it cannot choose the index: every equality when hinted, all but
-    the run when a job run is named.
+    the driver (a named job run or request id) when there is one.
     """
-    by_run = criteria.job_run_id is not None
+    driver = _driver(criteria)
     clauses: list[str] = []
     params: list[Any] = []
     for column, value in (
@@ -686,14 +698,15 @@ def _residuals(criteria: ActivityFilter, *, hinted: bool) -> tuple[list[str], li
         ("actor_subsystem", criteria.actor_subsystem),
         ("rule_id", criteria.rule_id),
         ("job_run_id", criteria.job_run_id),
+        ("request_id", criteria.request_id),
         ("action", criteria.action),
         ("result", criteria.result),
     ):
         if value is not None:
-            prefix = "+" if (hinted or by_run) and column != "job_run_id" else ""
+            prefix = "+" if (hinted or driver is not None) and column != driver else ""
             clauses.append(f"{prefix}{column} = ?")
             params.append(value)
-    prefix = "+" if by_run else ""
+    prefix = "+" if driver is not None else ""
     if criteria.occurred_from is not None:
         clauses.append(f"{prefix}occurred_at >= ?")
         params.append(format_timestamp(criteria.occurred_from))

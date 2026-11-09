@@ -559,3 +559,18 @@ async def test_a_handshake_made_before_setup_is_complete_is_refused(fresh_app: F
         status = await refused_status(served, socket_path(1), served.headers(token=None))
 
     assert status == REFUSED
+
+
+async def test_with_the_access_log_off_no_connection_line_is_written_accepted_or_refused(
+    live: Live, world: World, terminal_daemon: TerminalEngine, logged: Callable[[str], list[Any]]
+) -> None:
+    ticket = await issue(live, world.local_id)
+    async with connect(live, ticket.websocket_path) as socket:
+        await redeem(socket, ticket)
+        await socket.send(f"exit {EXIT_CODE}\r".encode())
+        await drain(socket)
+    refused = await refused_status(live, ticket.websocket_path, live.headers(token=None))
+
+    await ended_rows(live.app)
+    assert refused == REFUSED
+    assert logged("websocket_connection") == []

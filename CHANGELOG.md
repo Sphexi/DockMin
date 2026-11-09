@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 - Sortable column headers on the container, image, volume, network, Compose stack, Swarm service, config, secret and Swarm stack lists, with the `sort` and `dir` query parameters: [Sorting](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#sorting).
 - The total size of every image on the host above the image list, read from the Engine's disk usage with each shared layer counted once: [Total size](https://github.com/Sphexi/DockMin/wiki/Usage-Images#total-size).
 - Shift-click range selection on the batch checkboxes of the container, image and volume lists, the environment list and the onboarding review: [Range selection](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#range-selection).
+- The `request_id` filter on the activity log, its downloads and `GET /api/v1/activity`, an exact match backed by a new index: [Request id filter](https://github.com/Sphexi/DockMin/wiki/Administration-Activity#request-id-filter).
+- A `websocket_connection` access line for each WebSocket connection, written with `DOCKMIN_ACCESS_LOG` on: [Access log](https://github.com/Sphexi/DockMin/wiki/Reference-Deployment#access-log).
+- Access lines for refused requests and refused WebSocket handshakes of the redirect listener, with a `listener` field: [Redirect listener](https://github.com/Sphexi/DockMin/wiki/Reference-Deployment#redirect-listener).
+- Links to the Swarm config, Swarm secret and notification channel pages from activity targets, and `Deleted` marks on the event page for those targets and for backups: [Deleted targets](https://github.com/Sphexi/DockMin/wiki/Administration-Activity#deleted-targets).
+
+### Changed
+
+- The Request value on the activity event page links to the log filtered by that id.
+- A WebSocket connection is given a request id, so the activity rows and log lines written during a terminal session carry one.
+- `backup_downloaded` activity rows record the id of the backup record as the target id.
 
 ## 0.2.2 - 2026-11-08
 

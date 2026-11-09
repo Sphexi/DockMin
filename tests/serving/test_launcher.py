@@ -16,6 +16,7 @@ from starlette.responses import PlainTextResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from app.config import TLS_SELF_SIGNED_VAR, Settings, load_settings
+from app.logging import AccessLogMiddleware
 from app.main import create_app
 from app.selfcheck import StartupCheckFailed
 from app.serving import launcher
@@ -28,6 +29,7 @@ from app.tls import (
 )
 from app.tls_self_signed import ensure_self_signed
 from app.web.security_headers import HSTS_VALUE, SecurityHeadersMiddleware
+from tests.serving.asgi import call, http_scope
 from tests.tls_support import write_server_files
 
 WS_FRAME_LIMIT = 65_536
@@ -464,6 +466,77 @@ async def test_both_listeners_serve_one_application_with_headers_and_a_redirect(
     assert redirected.status_code == 308
     assert redirected.headers["location"] == f"https://{LOOPBACK}:{https_port}/containers?x=1"
     assert "strict-transport-security" not in redirected.headers
+
+
+def redirect_listener(env: dict[str, str], tmp_path: Path, access_log: str) -> Any:
+    settings = settings_with(env, tmp_path, DOCKMIN_ACCESS_LOG=access_log)
+    _, plain = launcher.server_configs(settings, recording_app, context_for(settings))
+    return plain.app
+
+
+def test_the_redirect_listener_is_wrapped_in_the_access_log_alone_when_the_access_log_is_on(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    listener = redirect_listener(env, tmp_path, "true")
+
+    assert isinstance(listener, AccessLogMiddleware)
+    assert isinstance(listener.app, HttpsRedirectApp)
+
+
+def test_the_redirect_listener_is_not_wrapped_when_the_access_log_is_off(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    assert isinstance(redirect_listener(env, tmp_path, "false"), HttpsRedirectApp)
+
+
+async def test_the_redirect_listener_logs_refused_requests_only_with_its_listener_name(
+    env: dict[str, str], tmp_path: Path, logged: Any
+) -> None:
+    listener = redirect_listener(env, tmp_path, "true")
+
+    await call(listener, http_scope(path="/containers", query=b"q=secret"))
+    await call(listener, http_scope(method="POST", path="/login"))
+    await call(listener, http_scope(host="bad host", path="/probe"))
+
+    refused_post, bad_host = logged("http_request")
+    assert (refused_post["method"], refused_post["path"], refused_post["status"]) == (
+        "POST",
+        "/login",
+        400,
+    )
+    assert bad_host["path"] == "/probe"
+    assert {refused_post["listener"], bad_host["listener"]} == {"redirect"}
+    assert (refused_post["user_id"], refused_post["address"]) == (None, "203.0.113.9")
+
+
+async def test_the_redirect_listener_logs_a_refused_websocket_with_its_close_code(
+    env: dict[str, str], tmp_path: Path, logged: Any, log_stream: Any
+) -> None:
+    listener = redirect_listener(env, tmp_path, "true")
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "websocket.connect"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope = http_scope(path="/ws", query=b"ticket=sentinel-5e1f") | {"type": "websocket"}
+    await listener(scope, receive, send)
+
+    [record] = logged("websocket_connection")
+    assert (record["status"], record["close_code"], record["listener"]) == (403, 1008, "redirect")
+    assert "sentinel-5e1f" not in log_stream.getvalue()
+
+
+async def test_the_redirect_listener_writes_no_line_when_the_access_log_is_off(
+    env: dict[str, str], tmp_path: Path, logged: Any
+) -> None:
+    listener = redirect_listener(env, tmp_path, "false")
+
+    await call(listener, http_scope(method="POST", path="/login"))
+
+    assert logged("http_request") == []
 
 
 CRASH = "listener crashed"

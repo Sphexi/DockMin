@@ -16,7 +16,13 @@ from starlette.types import Receive, Scope, Send
 from app.auth.dependencies import CurrentAdministrator, require_administrator
 from app.auth.errors import ResourceNotFound, ValidationFailed
 from app.auth.principal import Principal
-from app.db.repositories.activity_event import ActivityFilter, ActorType, Category, Outcome
+from app.db.repositories.activity_event import (
+    REQUEST_ID_PATTERN,
+    ActivityFilter,
+    ActorType,
+    Category,
+    Outcome,
+)
 from app.db.repositories.pagination import MAX_PAGE_SIZE, MAX_ROW_ID, InvalidCursorError
 from app.db.repositories.resource_control import canonical_stack_key
 from app.db.repositories.stack import StackKind
@@ -102,6 +108,7 @@ FIELDS: Final = (
     "target_id",
     "rule_id",
     "job_run_id",
+    "request_id",
 )
 MORE_FIELDS: Final = ("environment_id", "target_type", "target_id", "rule_id", "job_run_id")
 NAME_PATTERN: Final = re.compile(r"[a-z_]{1,64}")
@@ -234,6 +241,11 @@ async def read_query(
             f"{label}: enter a whole number from 1 to {MAX_ROW_ID}.",
             _identifier(values[name]) is not None,
         )
+    check(
+        "request_id",
+        "Request id: use 1 to 64 letters, digits, dots, hyphens or underscores.",
+        REQUEST_ID_PATTERN.fullmatch(values["request_id"]) is not None,
+    )
     for name, label in (("from", "From"), ("to", "To")):
         moment = _moment(values[name])
         check(name, f"{label}: enter a UTC time such as 2026-01-31T09:00.", moment is not None)
@@ -276,6 +288,7 @@ def _criteria(reading: Reading, user_id: int | None) -> ActivityFilter | None:
             occurred_to=moment("to"),
             action=values["action"] or None,
             job_run_id=number("job_run_id"),
+            request_id=values["request_id"] or None,
         )
     except ValueError:
         if values["target_id"] and not values["target_type"]:
@@ -490,6 +503,7 @@ async def _page_context(
         "export_href": _href(request, "activity_export", reading.params),
         "retention": retention,
         "target_hrefs": {},
+        "request_id": reading.values["request_id"],
     }
 
 
@@ -565,6 +579,7 @@ async def activity_log(
             export_href=_href(request, "activity_export", reading.params),
             errors=reading.errors,
             target_hrefs=target_hrefs,
+            request_id=reading.values["request_id"],
         )
     context = await _page_context(
         request,
@@ -715,6 +730,7 @@ INTEGER_TARGETS: Final = {
     "team": ("team_detail", "team_id"),
     "registry_credential": ("registry_detail", "credential_id"),
     "object_storage_target": ("object_storage_target_detail", "target_id"),
+    "notification_channel": ("notification_channel_detail", "channel_id"),
 }
 HEX_TARGETS: Final = {
     "container": ("environment_container_detail", "container_id"),
@@ -723,6 +739,8 @@ HEX_TARGETS: Final = {
 SWARM_TARGETS: Final = {
     "service": ("environment_swarm_service_detail", "service_id"),
     "node": ("environment_swarm_node_detail", "node_id"),
+    "config": ("environment_swarm_config_detail", "object_id"),
+    "secret": ("environment_swarm_secret_detail", "object_id"),
 }
 
 
@@ -837,5 +855,8 @@ async def event_detail(
             "list_href": route(request, "activity"),
             "target_deleted": target_deleted,
             "target_href": None if target_deleted else await _target_link(request, actor, view),
+            "request_href": None
+            if view.event.request_id is None
+            else _href(request, "activity", [("request_id", view.event.request_id)]),
         },
     )

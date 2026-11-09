@@ -6,7 +6,7 @@
 {% set crumb_object = "Event " ~ view.event.id %}
 {% block content %}
 {% set event = view.event %}
-{% set origin_targets = ["container", "network", "service", "node", "automation_rule", "image", "volume", "stack", "user", "team", "object_storage_target"] %}
+{% set origin_targets = ["container", "network", "service", "node", "automation_rule", "image", "volume", "stack", "user", "team", "object_storage_target", "config", "secret"] %}
 {% set recorded = event.detail or {} %}
 {% set recorded_at %}Recorded <time datetime="{{ event.occurred_at|timestamp_iso }}">{{ event.occurred_at|timestamp(seconds=True) }}</time>{% endset %}
 {% call page_header("Event " ~ event.id, recorded_at) %}
@@ -19,7 +19,7 @@
     <dt>Time</dt>
     <dd>{{ when(event) }}</dd>
     <dt>Request</dt>
-    <dd class="mono">{% if event.request_id is none %}&mdash;{% else %}{{ event.request_id|visible_text }}{% endif %}</dd>
+    <dd class="mono">{% if event.request_id is none %}&mdash;{% else %}<a href="{{ request_href }}">{{ event.request_id|visible_text }}</a>{% endif %}</dd>
     <dt>Action</dt>
     <dd class="mono">{{ event.action|visible_text }}</dd>
     <dt>Result</dt>

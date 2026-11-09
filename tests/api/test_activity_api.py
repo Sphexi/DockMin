@@ -18,6 +18,8 @@ EVENTS = 40
 PAGE = 7
 SMALL_PAGE = 5
 NOTE_INDEX = 5
+REQUEST_EVERY = 5
+SHARED_REQUEST = "req-shared"
 NOTE = '=x,"y"\nz'
 START = datetime(2026, 2, 1, 12, 0, 0, tzinfo=UTC)
 ITEM_KEYS = {
@@ -41,8 +43,8 @@ ITEM_KEYS = {
 }
 INSERT_EVENT = (
     "INSERT INTO activity_event (category, actor_type, actor_user_id, environment_id, "
-    "target_type, target_id, action, result, detail, occurred_at) "
-    "VALUES ('user_action', 'user', ?, ?, ?, ?, ?, ?, ?, ?)"
+    "target_type, target_id, action, result, detail, occurred_at, request_id) "
+    "VALUES ('user_action', 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 ENVIRONMENT_ID = 1
 ENVIRONMENT_NAME = "local"
@@ -69,6 +71,7 @@ def event_row(index: int) -> tuple[Any, ...]:
         "success" if index % 4 else "failure",
         json.dumps(detail),
         stamp(index),
+        SHARED_REQUEST if index % REQUEST_EVERY == 0 else None,
     )
 
 
@@ -97,6 +100,14 @@ FILTERS: dict[str, tuple[dict[str, Any], Callable[[dict[str, Any]], bool]]] = {
         {"environment_id": ENVIRONMENT_ID, "target_type": "container", "target_id": "t1"},
         lambda item: item["target_id"] == "t1",
     ),
+    "request": (
+        {"request_id": SHARED_REQUEST},
+        lambda item: item["request_id"] == SHARED_REQUEST,
+    ),
+    "request-in-environment": (
+        {"request_id": SHARED_REQUEST, "environment_id": ENVIRONMENT_ID},
+        lambda item: item["request_id"] == SHARED_REQUEST and item["environment_id"] is not None,
+    ),
 }
 BAD_PARAMETERS: dict[str, dict[str, Any]] = {
     "category": {"category": "zzz"},
@@ -110,6 +121,10 @@ BAD_PARAMETERS: dict[str, dict[str, Any]] = {
     "action-too-long": {"action": "x" * 65},
     "empty-target-id": {"target_id": ""},
     "unknown-subsystem": {"subsystem": "no-such-subsystem"},
+    "request-id-with-a-space": {"request_id": "a b"},
+    "request-id-too-long": {"request_id": "x" * 65},
+    "request-id-beyond-the-query-bound": {"request_id": "x" * 257},
+    "empty-request-id": {"request_id": ""},
     "target-id-without-type": {"target_id": "t1"},
     "target-type-without-id-or-environment": {"target_type": "container"},
     "naive-from": {"from": "2026-01-01T00:00:00"},
@@ -124,6 +139,8 @@ ACCEPTED_PARAMETERS: dict[str, dict[str, Any]] = {
     "to-9998": {"to": "9998-12-31T23:59:59Z"},
     "both": {"from": "1970-01-01T00:00:00Z", "to": "9998-12-31T23:59:59+00:00"},
     "registered-subsystem": {"subsystem": "stack-restarter"},
+    "longest-request-id": {"request_id": "x" * 64},
+    "request-id-characters": {"request_id": "A.b_c-9"},
 }
 CURSORS = {
     "not-base64": ("!!!", BAD_REQUEST),
@@ -284,3 +301,14 @@ async def test_a_time_between_1970_and_9998_and_a_registered_subsystem_are_accep
     answers = await statuses(api, admin_headers, ACCEPTED_PARAMETERS)
 
     assert answers == dict.fromkeys(ACCEPTED_PARAMETERS, OK)
+
+
+async def test_a_request_id_outside_the_grammar_names_the_field_and_never_echoes_the_value(
+    api: AsyncClient, admin_headers: dict[str, str], seeded: FastAPI
+) -> None:
+    response = await api.get(BASE, params={"request_id": "bad id!"}, headers=admin_headers)
+
+    [problem] = response.json()["error"]["fields"]
+    assert response.status_code == UNPROCESSABLE
+    assert problem["loc"] == ["query", "request_id"]
+    assert "bad id" not in response.text

@@ -200,7 +200,9 @@ class BackupService:
                 )
             except ProductionFailed as failure:
                 audit.reason = failure.reason
-                await self._note_failure(failure)
+                failed_id = await self._note_failure(failure)
+                if failed_id is not None:
+                    audit.target_id = str(failed_id)
                 raise BackupFailed(failure.reason, failure.message) from None
             manifest = produced.manifest
             async with self._db.transaction():
@@ -216,6 +218,7 @@ class BackupService:
                     outcome="success",
                     error=None,
                 )
+                audit.target_id = str(record_id)
                 audit.detail.update(
                     archive_sha256=produced.sha256,
                     size_bytes=produced.size,
@@ -231,11 +234,11 @@ class BackupService:
             if workdir is not None and not delivered:
                 await completed(asyncio.to_thread(_discard, workdir))
 
-    async def _note_failure(self, failure: ProductionFailed) -> None:
-        """Record the failed attempt on a session of its own, apart from the audit scope's."""
+    async def _note_failure(self, failure: ProductionFailed) -> int | None:
+        """Record the failed attempt on a session of its own; return its id, None if unwritten."""
         try:
             async with self._database.session() as db:
-                await BackupRecordRepository(db, self._clock).add_backup_record(
+                return await BackupRecordRepository(db, self._clock).add_backup_record(
                     origin="download",
                     target_id=None,
                     size_bytes=None,
@@ -249,3 +252,4 @@ class BackupService:
                 )
         except Exception as error:
             logger.error("backup_record_write_failed", extra={"error": type(error).__name__})
+            return None
