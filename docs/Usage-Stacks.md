@@ -1730,6 +1730,7 @@ A file written from the inspect data of the project's running containers.
 | `ports`, `expose` | Published ports and exposed ports not set by the image |
 | `volumes`, `tmpfs` | Named volumes, bind mounts, tmpfs mounts and anonymous volumes the image does not declare |
 | `networks` | Each network with its aliases |
+| `network_mode` | `host`, `none`, `bridge`. A container on another container's network: `service:{key}` when that container belongs to the project (matched by id, short id or name), `container:{name}` when it is named outside the project. `hostname`, `ports`, `expose` and `networks` are not written for it |
 | `labels` | The container's labels minus `com.docker.compose.*` and the image's |
 | `restart` | `always`, `unless-stopped`, `on-failure` and `on-failure:{N}` |
 | `healthcheck` | Where it differs from the image's |
@@ -1755,7 +1756,7 @@ Losses listed on the result page:
 | Secret screening applies to environment values only: a secret in a command or a label is written as found |
 | Network drivers, options and address pools; project networks are declared with defaults |
 | A mount that is not a volume, bind or tmpfs, and a tmpfs option other than `size` and `mode` |
-| `network_mode` |
+| A `network_mode` naming an outside container by id only |
 
 ### The helper container
 

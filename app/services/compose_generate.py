@@ -41,6 +41,8 @@ KNOWN_LOSSES: Final = (
 _KEY: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _ENV_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 _ANONYMOUS: Final = re.compile(r"[0-9a-f]{64}")
+_HEX_ID: Final = re.compile(r"[0-9a-fA-F]{12,64}")
+_SHORT_ID: Final = 12
 _LOCAL_BRIDGES: Final = frozenset({"host", "none", "bridge", "default"})
 _UNSPECIFIED: Final = frozenset({"", "0.0.0.0", "::"})
 _PLAIN_PROPAGATION: Final = frozenset({"", "rprivate"})
@@ -210,14 +212,19 @@ class _Generator:
         ):
             if value and value != inherited:
                 service[field] = value
+        shared = self._shared_network(key, host)
         hostname = config.get("Hostname")
-        if hostname and hostname != str(container.get("Id", ""))[:12]:
+        if shared is None and hostname and hostname != str(container.get("Id", ""))[:12]:
             service["hostname"] = hostname
         self._environment(service, key, config, defaults)
         self._labels(service, config, defaults)
-        self._ports(service, config, host, defaults)
+        if shared is None:
+            self._ports(service, config, host, defaults)
         self._storage(service, key, container, host, defaults)
-        self._attachments(service, key, container, host)
+        if shared is None:
+            self._attachments(service, key, container, host)
+        elif shared:
+            service["network_mode"] = shared
         self._depends(service, config)
         self._policies(service, config, host, defaults)
         if len(members) != 1:
@@ -416,6 +423,34 @@ class _Generator:
                 self.losses.append(f"services.{key}: the tmpfs option {name} was left out.")
         return parsed
 
+    def _shared_network(self, key: str, host: Mapping[str, Any]) -> str | None:
+        """Return the network_mode of a container joined to another's network, "" if unwritable.
+
+        None means the container has a network of its own.
+        """
+        mode = str(host.get("NetworkMode") or "")
+        if not mode.startswith("container:"):
+            return None
+        target = mode.partition(":")[2]
+        owner = self._container_service(target)
+        if owner is not None and owner != key:
+            return f"service:{owner}"
+        if owner is None and target and _HEX_ID.fullmatch(target) is None:
+            return mode
+        self.losses.append(f"services.{key}: network_mode {mode} was left out.")
+        return ""
+
+    def _container_service(self, target: str) -> str | None:
+        for key, members in self.services.items():
+            for member in members:
+                ident = str(member.get("Id", ""))
+                name = str(member.get("Name", "")).lstrip("/")
+                if target == name or (
+                    len(target) >= _SHORT_ID and ident.startswith(target.casefold())
+                ):
+                    return key
+        return None
+
     def _attachments(
         self,
         service: dict[str, Any],
@@ -426,9 +461,6 @@ class _Generator:
         mode = str(host.get("NetworkMode") or "")
         if mode in _LOCAL_BRIDGES:
             service["network_mode"] = "bridge" if mode == "default" else mode
-            return
-        if mode.startswith("container:"):
-            self.losses.append(f"services.{key}: network_mode {mode} was left out.")
             return
         attached = _mapping(_mapping(container.get("NetworkSettings")).get("Networks"))
         ignored = {

@@ -18,6 +18,8 @@ IMAGE_ID = "sha256:" + "a1" * 32
 IMAGE_REFERENCE = "nginx:1.27"
 CONTAINER_ID = "0123456789ab" + "0" * 52
 PATH_ENTRY = "PATH=/usr/bin"
+JOINED_ID = "fedcba987654" + "0" * 52
+OUTSIDE_ID = "abcdef012345" + "0" * 52
 
 
 def recorded(name: str) -> dict[str, Any]:
@@ -193,6 +195,51 @@ def test_plain_dependencies_are_written_as_a_list() -> None:
         "cache",
         "db",
     ]
+
+
+def joined(network_mode: str) -> dict[str, Any]:
+    """A container on another container's network, carrying what Docker reports for one."""
+    client = container("client")
+    client["Id"] = JOINED_ID
+    client["Config"]["Hostname"] = CONTAINER_ID[:12]
+    client["Config"]["ExposedPorts"] = {"6881/tcp": {}}
+    client["HostConfig"]["NetworkMode"] = network_mode
+    client["NetworkSettings"]["Networks"] = {f"{PROJECT}_default": {"Aliases": ["client"]}}
+    return client
+
+
+@pytest.mark.parametrize(
+    "network_mode",
+    [f"container:{CONTAINER_ID}", f"container:{CONTAINER_ID[:12]}", f"container:{PROJECT}-vpn-1"],
+)
+def test_a_container_on_a_project_service_network_is_written_with_that_service(
+    network_mode: str,
+) -> None:
+    outcome = generated([container("vpn"), joined(network_mode)])
+
+    service = yaml.safe_load(outcome.compose_text)["services"]["client"]
+    assert service["network_mode"] == "service:vpn"
+    assert service.keys().isdisjoint({"hostname", "ports", "expose", "networks"})
+    assert not any("network_mode" in loss for loss in outcome.losses)
+    precheck(outcome.compose_text, kind="compose")
+
+
+def test_a_container_on_a_named_outside_container_network_keeps_the_name() -> None:
+    outcome = generated([joined("container:gateway")])
+
+    service = yaml.safe_load(outcome.compose_text)["services"]["client"]
+    assert service["network_mode"] == "container:gateway"
+    assert "hostname" not in service
+
+
+def test_a_container_on_an_outside_container_known_only_by_id_is_left_out_and_listed() -> None:
+    network_mode = f"container:{OUTSIDE_ID}"
+
+    outcome = generated([joined(network_mode)])
+
+    service = yaml.safe_load(outcome.compose_text)["services"]["client"]
+    assert service.keys().isdisjoint({"network_mode", "hostname", "networks"})
+    assert f"services.client: network_mode {network_mode} was left out." in outcome.losses
 
 
 def test_an_image_missing_from_the_host_writes_its_defaults_and_says_so() -> None:
