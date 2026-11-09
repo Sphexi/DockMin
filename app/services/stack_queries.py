@@ -36,6 +36,7 @@ from app.db.repositories.stack import (
     StoredStack,
     VariableWrite,
 )
+from app.db.repositories.stack_build_context import ContextWrite
 from app.db.repositories.stack_dismissal import StackDismissalRepository, StoredDismissal
 from app.db.repositories.team import TeamRepository
 from app.db.repositories.user import UserRepository
@@ -88,6 +89,7 @@ from app.services.stack_common import (
     read_labelled_volumes,
     swarm_namespaces_apply,
 )
+from app.services.stack_context_source import HeldContexts
 from app.services.stack_context_views import context_views
 from app.services.stack_deploy import (
     BUILD_ADMINISTRATOR_ONLY,
@@ -1067,6 +1069,7 @@ class StackQueryService:
         check_collisions: bool = False,
         files: Sequence[CompanionFile] | None = None,
         rebuild: bool = False,
+        contexts: Mapping[str, ContextWrite] | None = None,
     ) -> ValidationReport:
         """Check a candidate file and variables without storing or running anything.
 
@@ -1079,6 +1082,47 @@ class StackQueryService:
         on the report. `files` is the candidate companion file set; without it a stack's stored
         files are used and a new stack has none. StackRejected carries the fields, findings and
         Compose's scrubbed stderr.
+        """
+        checked, validated = await self.resolve_candidate(
+            actor,
+            environment_id,
+            name=name,
+            compose_text=compose_text,
+            variables=variables,
+            existing=existing,
+            adopt=adopt,
+            deploy=deploy,
+            pull=pull,
+            choices=choices,
+            check_collisions=check_collisions,
+            files=files,
+            rebuild=rebuild,
+            contexts=contexts,
+        )
+        return _report_of(checked, validated)
+
+    async def resolve_candidate(
+        self,
+        actor: Principal,
+        environment_id: int,
+        *,
+        name: str,
+        compose_text: str,
+        variables: Sequence[VariableInput] | None,
+        existing: bool = False,
+        adopt: bool = False,
+        deploy: bool = False,
+        pull: bool = False,
+        choices: Mapping[str, CredentialChoice] | None = None,
+        check_collisions: bool = False,
+        files: Sequence[CompanionFile] | None = None,
+        rebuild: bool = False,
+        contexts: Mapping[str, ContextWrite] | None = None,
+    ) -> tuple[str, Validated]:
+        """Run `validate` and return the checked name with everything the validation resolved.
+
+        `contexts` are build contexts a new stack is about to be stored with; they admit and
+        plan the file's builds as stored ones would.
         """
         stack: StoredStack | None = None
         if existing and adopt:
@@ -1109,7 +1153,7 @@ class StackQueryService:
             compose_text,
             kind="compose" if stack is None else stack.kind,
             files=companions,
-            builds=None if stack is None else await self.build_check(stack, actor),
+            builds=await self._builds_for(stack, actor, contexts),
         ) as project:
             validated = await self._validator.validate(
                 actor,
@@ -1126,12 +1170,31 @@ class StackQueryService:
                     choices=choices,
                     collisions=check_collisions,
                     files=companions,
-                    builds=None
-                    if stack is None
-                    else await self.build_inputs(stack, rebuild=rebuild),
+                    builds=await self._inputs_for(stack, contexts, rebuild),
                 ),
             )
-        return _report_of(name, validated)
+        return name, validated
+
+    async def _builds_for(
+        self,
+        stack: StoredStack | None,
+        actor: Principal,
+        contexts: Mapping[str, ContextWrite] | None,
+    ) -> ServiceBuildCheck | None:
+        if stack is not None:
+            return await self.build_check(stack, actor)
+        return BuildAdmission(frozenset(contexts)).check if contexts else None
+
+    async def _inputs_for(
+        self, stack: StoredStack | None, contexts: Mapping[str, ContextWrite] | None, rebuild: bool
+    ) -> BuildInputs | None:
+        if stack is not None:
+            return await self.build_inputs(stack, rebuild=rebuild)
+        if not contexts:
+            return None
+        return BuildInputs(
+            HeldContexts(contexts), buildx_available=self._runtime.buildx.available, rebuild=rebuild
+        )
 
     async def redeploy_confirmation(
         self,

@@ -64,7 +64,7 @@ All paths are under `/environments/{id}/swarm`. The sidebar's `Swarm` section li
 | Stack access control | `/stacks/{namespace}/access`, `/stacks/{namespace}/access/delete` | `POST` |
 | Stack export confirmation | `/stacks/{namespace}/export` | `GET` |
 | Stack export download | `/stacks/{namespace}/export` | `POST` |
-| Stack create, check, edit, files, redeploy, remove, forget, adopt, progress, dismiss and restore, and reveal of a secret variable | `/stacks/-/…` and `/stacks/{namespace}/…` | [Swarm stack pages and routes](Usage-Stacks#swarm-stack-pages-and-routes) |
+| Stack create, check, edit, files, redeploy, remove, forget, adopt, import, progress, dismiss and restore, and reveal of a secret variable | `/stacks/-/…` and `/stacks/{namespace}/…` | [Swarm stack pages and routes](Usage-Stacks#swarm-stack-pages-and-routes) |
 
 - `{service_id}`, `{task_id}`, `{node_id}` and `{object_id}` are 25 lower-case letters and digits. Any other form of at most 128 characters, including a name, answers `404` for every role, before any call to the host. A longer segment answers `422`.
 - `{namespace}` is `[A-Za-z0-9][A-Za-z0-9_.-]{0,62}`. Any other form answers `404`.
@@ -844,7 +844,7 @@ Export downloads a managed Swarm stack as one gzip archive of its file, variable
 | Output | `application/gzip`, `Content-Disposition: attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` |
 | Lock | The stack by its folded name and each chosen volume, from the confirmed download until it ends ([Locks and busy](#locks-and-busy)) |
 | Concurrency | One export at a time on an environment, two in all, shared with volume, Compose stack and container exports ([Export limits](Usage-Stacks#export-limits)) |
-| Import | Not available |
+| Import | [Import (Swarm stacks)](#import-swarm-stacks) |
 | Recorded | `stack_export_started` and `stack_exported`, with `stack_kind` `swarm` ([Activity](Administration-Activity#stack-export-rows)) |
 
 ### Export confirmation (Swarm stacks)
@@ -878,6 +878,81 @@ The refusals, statuses, titles and messages are those of [Export refusals](Usage
 | A service of the namespace is the one that runs the container dockmin runs in | 409, page `Protected` | `The stack {name} contains the container dockmin runs in. It cannot be exported from dockmin.` | `self_protected` |
 | Another action holds the stack, by its folded name, or a chosen volume | 409, page `This stack is busy` | `{Who} started a {action} on it {N} seconds ago and it has not finished. Wait for it to complete, then try again.` The action is `export` | `object_busy` |
 | The manager is no longer an active Swarm manager, or its swarm is locked | 503 | `This environment is not an active Swarm manager, or its swarm is locked.` | The host failure reason |
+
+## Import (Swarm stacks)
+
+Import creates one managed Swarm stack from a stack export archive, creates and fills its volumes on the manager, and starts its first deployment. Administrators only. The pages, checks, review, passphrase, host paths, credential choices, confirmation, failure behaviour and limits are those of [Import (Compose)](Usage-Stacks#import-compose), with the differences below.
+
+1. Open `Import stack` on the Swarm stack list.
+2. Choose the archive and `Upload and check`. Nothing is created.
+3. Open the sealed values with the passphrase, or enter each secret value, when the archive holds secrets.
+4. Read the review. Change the name if a name is in use, decide each host path, and choose a credential set for each image, then choose `Check the choices`.
+5. Choose `Import stack`. The stack, its volumes and their data are created, and the progress page of the first deployment opens.
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on every import route, before a request body is read, and nothing is recorded |
+| Environment | A Swarm manager ([Environments](#environments)). Any other environment answers `404` |
+| Accepts | An archive whose manifest `kind` is `swarm_stack`. A Compose stack archive is refused at upload: `The archive holds a Compose stack. Import it from the Compose stacks list.` A container archive is refused: `The archive holds a container, not a stack.` A Swarm stack imports only into a Swarm environment |
+| Pages | [Import pages (Swarm stacks)](#import-pages-swarm-stacks) |
+| Objects | Services, networks, configs and secrets of the stack, and its volumes ([Import review (Swarm stacks)](#import-review-swarm-stacks)) |
+| Secret values | The secret variables and secret companion files that were exported. Swarm secrets that existed only in the cluster are not in the archive |
+| Volumes | Created and filled on the manager the environment connects to ([Import volumes (Swarm stacks)](#import-volumes-swarm-stacks)) |
+| Deploy | Starts as a stack job on the Swarm routes, through the Engine ([Swarm stack deployment](Usage-Stacks#deploy-and-redeploy-a-swarm-stack)) |
+| Owner | The importing administrator. No team or other grant is carried |
+| Upload, validation, hold, limits | As [Import (Compose)](Usage-Stacks#import-compose): 7 GiB as uploaded, 3,600 seconds, held 30 minutes |
+| Recorded | `stack_imported` with `stack_kind` `swarm`, then `stack_deployed` ([Activity](Administration-Activity#stack-import-rows)) |
+
+### Import pages (Swarm stacks)
+
+All paths are under `/environments/{id}/swarm/stacks`.
+
+| Page | Path | Method |
+|---|---|---|
+| Upload form | `/-/import` | `GET` |
+| Upload | `/-/import` | `POST` |
+| Review | `/-/import/{upload_id}` | `GET` |
+| Check the choices, import | `/-/import/{upload_id}` | `POST` |
+| Open the sealed values | `/-/import/{upload_id}/unlock` | `POST` |
+| Discard the upload | `/-/import/{upload_id}/cancel` | `POST` |
+
+- `{upload_id}` is 32 lowercase hexadecimal characters. Any other form of at most 64 characters answers `404`; a longer one answers `422`.
+- `Import stack` sits beside `Create stack` on the Swarm stack list, for administrators.
+- The texts of [Import (Compose)](Usage-Stacks#import-pages) apply, with `Swarm stack` for `Compose stack`. The upload page reads `The archive must hold a Swarm stack written by a stack export.`
+- The upload route's body cap and deadline are those of the Compose route ([Import limits](Usage-Stacks#import-limits)).
+- The progress page after an import is `/environments/{id}/swarm/stacks/-/jobs/{job_id}`.
+
+### Import review (Swarm stacks)
+
+| Section | Difference |
+|---|---|
+| `The archive` | Kind `Swarm stack` |
+| `Objects it creates` | `service`, `network`, `config`, `secret`. A config or secret reads `named when it is deployed` in `Note`. A network that is `external` is not listed |
+| `Name` | Checked against the [Compose stack name](Usage-Stacks#stack-names) grammar, lower case only. A name that breaks it, including an archived name with upper case letters, is shown with the message beside `Name`, and `Import stack` is refused until the name follows it |
+| Collisions | `stack`, `volume`, `network`, `service`, `config`, `secret`. Texts: `A service with this name already exists and does not belong to this stack.` and the same for `config` and `secret`. A Swarm namespace, a Compose project and a stack of either kind with the name in any case is a `stack` collision. |
+| Images | One picker for each image the file names ([Swarm images and credentials](Usage-Stacks#swarm-images-and-credentials)) |
+| Host paths | The same choices, with the text of the Compose review. The import creates no directory |
+| Digest | `On this host` reports the digest the manager holds for the reference |
+
+### Import volumes (Swarm stacks)
+
+| Item | Value |
+|---|---|
+| Where | On the manager the environment connects to. A Swarm service whose task runs on another node does not see the volume |
+| Created with | Driver `local` and the label `com.docker.stack.namespace` set to the stack name. Archived labels and driver options are not applied |
+| Written | Before the stack record is stored, through a helper container on the manager ([Import volumes](Usage-Stacks#import-volumes)) |
+| Matching, data rules, helper | As [Import volumes](Usage-Stacks#import-volumes) |
+| First deployment | The [existing-object check of a Swarm stack](Usage-Stacks#swarm-objects-that-already-exist) accepts a volume that exists only when it is one this import created, with the creation time the manager reported then. The binding ends when the first deployment succeeds, when the stack is removed or forgotten, and when the import fails |
+| After a restart before the first deployment | The binding is gone. A volume is accepted when its `com.docker.stack.namespace` label equals the stack name in any case and it has no access control of its own |
+
+### Import refusals (Swarm stacks)
+
+The refusals, statuses, pages, messages and reasons are those of [Import refusals](Usage-Stacks#import-refusals), with these differences:
+
+| Condition | Status | Message |
+|---|---|---|
+| The environment is not a Swarm manager the user can see | 404 | Not found. No row |
+| The manager is no longer an active Swarm manager, or its swarm is locked | 503 | `This environment is not an active Swarm manager, or its swarm is locked.` |
 
 ## Locks and busy
 

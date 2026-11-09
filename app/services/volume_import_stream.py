@@ -13,8 +13,20 @@ class RewrittenArchive:
     A refusal of the file is raised from `__anext__` as VolumeArchiveRefused.
     """
 
-    def __init__(self, path: Path, limits: ArchiveLimits | None = None) -> None:
-        self._chunks: Generator[bytes, None, None] = rewrite_volume_archive(path, limits)
+    def __init__(
+        self,
+        path: Path | None = None,
+        limits: ArchiveLimits | None = None,
+        *,
+        chunks: Generator[bytes, None, None] | None = None,
+    ) -> None:
+        if (path is None) == (chunks is None):
+            raise ValueError("give the archive's path or the chunks of its rewritten tar")
+        if chunks is None and path is not None:
+            chunks = rewrite_volume_archive(path, limits)
+        if chunks is None:
+            raise ValueError("no archive")
+        self._chunks: Generator[bytes, None, None] = chunks
         self._pending: asyncio.Future[bytes | None] | None = None
         self._done = False
         self.bytes_out = 0

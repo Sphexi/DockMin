@@ -26,6 +26,7 @@ __all__ = [
     "VolumeImportStore",
     "spool_upload",
     "sweep_import_leftovers",
+    "unlink_quietly",
 ]
 
 SPOOL_DIRECTORY: Final = "volume-import"
@@ -72,9 +73,9 @@ class HeldImport:
     importing: bool = False
 
 
-def sweep_import_leftovers(data_dir: Path) -> None:
-    """Remove every spooled upload; blocking, for startup, when no hold can name them."""
-    directory = data_dir / SPOOL_DIRECTORY
+def sweep_import_leftovers(data_dir: Path, name: str = SPOOL_DIRECTORY) -> None:
+    """Remove every spooled upload in the named spool directory; blocking, for startup."""
+    directory = data_dir / name
     if directory.is_symlink():
         directory.unlink()
     elif directory.exists():
@@ -111,8 +112,8 @@ def _abandon(spool: _Spool | None, partial: Path) -> None:
         partial.unlink(missing_ok=True)
 
 
-def _ensure_directory(data_dir: Path, declared: int | None) -> Path:
-    directory = paths.ensure_private_directory(data_dir / SPOOL_DIRECTORY)
+def _ensure_directory(data_dir: Path, declared: int | None, name: str) -> Path:
+    directory = paths.ensure_private_directory(data_dir / name)
     if _free_bytes(directory) < FREE_FLOOR_BYTES + (declared or 0):
         raise SpoolFailure("insufficient_space")
     return directory
@@ -132,6 +133,7 @@ async def spool_upload(
     *,
     declared_size: int | None = None,
     limit: int = MAX_UPLOAD_BYTES,
+    directory_name: str = SPOOL_DIRECTORY,
 ) -> SpooledUpload:
     """Write the upload to a private file in the spool directory and return its digest.
 
@@ -139,7 +141,7 @@ async def spool_upload(
     one, and again with every write. The file is removed on every way out but success; the
     final name exists only for a complete upload. SpoolFailure, OSError.
     """
-    directory = await asyncio.to_thread(_ensure_directory, data_dir, declared_size)
+    directory = await asyncio.to_thread(_ensure_directory, data_dir, declared_size, directory_name)
     final = directory / f"{upload_id}{SUFFIX}"
     partial = directory / f"{upload_id}{PARTIAL_SUFFIX}"
     spool: _Spool | None = None
@@ -160,7 +162,8 @@ async def spool_upload(
     return SpooledUpload(final, spool.digest.hexdigest(), spool.size)
 
 
-def _unlink(path: Path) -> None:
+def unlink_quietly(path: Path) -> None:
+    """Remove a spooled file; a file already gone is not an error."""
     with suppress(OSError):
         path.unlink(missing_ok=True)
 
@@ -259,7 +262,7 @@ class VolumeImportStore:
 
     async def _remove(self, held: list[HeldImport]) -> None:
         for item in held:
-            await completed(asyncio.to_thread(_unlink, item.path))
+            await completed(asyncio.to_thread(unlink_quietly, item.path))
 
     def _arm(self) -> None:
         loop = asyncio.get_running_loop()

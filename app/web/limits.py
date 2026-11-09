@@ -14,8 +14,14 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.db.repositories.stack_build_context import MAX_CONTEXT_UPLOAD_BYTES
 from app.logging import LOG_INTERVAL_SECONDS, get_logger
 from app.paths import HEALTH_PATH
+from app.services.stack_import_archive import MAX_UPLOAD_BYTES as MAX_STACK_UPLOAD_BYTES
 from app.services.volume_import_archive import MAX_UPLOAD_BYTES as MAX_VOLUME_UPLOAD_BYTES
-from app.web.csrf import STREAMED_UPLOAD_ROUTES, is_context_upload, is_volume_import_upload
+from app.web.csrf import (
+    STREAMED_UPLOAD_ROUTES,
+    is_context_upload,
+    is_stack_import_upload,
+    is_volume_import_upload,
+)
 
 MAX_BODY_BYTES: Final = 256 * 1024
 CONTEXT_UPLOAD_BODY_BYTES: Final = MAX_CONTEXT_UPLOAD_BYTES + 64 * 1024
@@ -24,6 +30,8 @@ BODY_TOTAL_SECONDS: Final = 30.0
 CONTEXT_UPLOAD_TOTAL_SECONDS: Final = 300.0
 VOLUME_IMPORT_BODY_BYTES: Final = MAX_VOLUME_UPLOAD_BYTES + 64 * 1024
 VOLUME_IMPORT_TOTAL_SECONDS: Final = 3600.0
+STACK_IMPORT_BODY_BYTES: Final = MAX_STACK_UPLOAD_BYTES + 64 * 1024
+STACK_IMPORT_TOTAL_SECONDS: Final = 3600.0
 SEND_IDLE_SECONDS: Final = 60.0
 CLOSE_TRY_AGAIN_LATER: Final = 1013
 CLOSE_CONNECTION: Final = {"Connection": "close"}
@@ -85,6 +93,8 @@ class BodySizeLimitMiddleware:
         upload_total_seconds: float = CONTEXT_UPLOAD_TOTAL_SECONDS,
         volume_import_max_bytes: int = VOLUME_IMPORT_BODY_BYTES,
         volume_import_total_seconds: float = VOLUME_IMPORT_TOTAL_SECONDS,
+        stack_import_max_bytes: int = STACK_IMPORT_BODY_BYTES,
+        stack_import_total_seconds: float = STACK_IMPORT_TOTAL_SECONDS,
     ) -> None:
         self.app = app
         self._max_bytes = max_bytes
@@ -95,6 +105,8 @@ class BodySizeLimitMiddleware:
         self._upload_total_seconds = upload_total_seconds
         self._volume_import_max_bytes = volume_import_max_bytes
         self._volume_import_total_seconds = volume_import_total_seconds
+        self._stack_import_max_bytes = stack_import_max_bytes
+        self._stack_import_total_seconds = stack_import_total_seconds
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Pass the request on with a bounded receive channel, or refuse it."""
@@ -107,6 +119,9 @@ class BodySizeLimitMiddleware:
         elif is_volume_import_upload(scope["method"], scope["path"]):
             max_bytes = self._volume_import_max_bytes
             total_seconds = self._volume_import_total_seconds
+        elif is_stack_import_upload(scope["method"], scope["path"]):
+            max_bytes = self._stack_import_max_bytes
+            total_seconds = self._stack_import_total_seconds
         declared = Headers(scope=scope).get("content-length", "")
         if declared.isdigit() and int(declared) > max_bytes:
             await _refuse(self._respond, scope, receive, send, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)

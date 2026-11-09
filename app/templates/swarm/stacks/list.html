@@ -34,6 +34,9 @@
 {% if can_create %}
 <a class="btn btn--primary" href="{{ route_path('environment_swarm_stack_new', environment_id=environment.id) }}">Create stack</a>
 {% endif %}
+{% if principal.is_administrator %}
+<a class="btn" href="{{ route_path('environment_swarm_stack_import_form', environment_id=environment.id) }}">Import stack</a>
+{% endif %}
 {% endcall %}
 
 <div id="stacks-results">

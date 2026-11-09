@@ -18,8 +18,10 @@ from app.services.environment_snapshots import (
 )
 from app.services.host_read_stash import HostReadStash
 from app.services.image_jobs import ImageJobRegistry
+from app.services.imported_volumes import ImportedVolumes
 from app.services.object_locks import ObjectLockRegistry, StreamSlots
 from app.services.onboarding_store import OnboardingReviewStore
+from app.services.stack_import_store import StackImportStore
 from app.services.stack_jobs import StackJobRegistry
 from app.services.terminals import RestrictedCache, TerminalTickets
 from app.services.volume_import_store import VolumeImportStore
@@ -53,6 +55,8 @@ class EngineRuntime:
     host_reads: HostReadStash = field(default_factory=HostReadStash)
     onboarding_reviews: OnboardingReviewStore = field(default_factory=OnboardingReviewStore)
     volume_imports: VolumeImportStore = field(default_factory=VolumeImportStore)
+    stack_imports: StackImportStore = field(default_factory=StackImportStore)
+    imported_volumes: ImportedVolumes = field(default_factory=ImportedVolumes)
     instance_name: str = DEFAULT_INSTANCE_NAME
 
     @property
@@ -70,6 +74,7 @@ class EngineRuntime:
         await self.stack_jobs.aclose()
         await self.refresher.aclose()
         await self.volume_imports.aclose()
+        await self.stack_imports.aclose()
         await self.probes.aclose()
         await self.registry.aclose()
 

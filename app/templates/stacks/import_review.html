@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/form_field.html" import form_field %}
+{% from "partials/page_header.html" import page_header %}
+{% from "stacks/_parts.html" import credential_choices with context %}
+{% block title %}Review import on {{ review.environment_name }} - dockmin{% endblock %}
+{% set crumb_page = "Import stack" %}
+{% block content %}
+{% call page_header("Review the import", "Nothing has been created yet. Check everything the archive will create, then confirm.") %}
+<a class="btn" href="{{ list_href }}">Back to stacks</a>
+{% endcall %}
+
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+
+<section class="panel" aria-labelledby="archive-heading">
+  <h2 id="archive-heading">The archive</h2>
+  <dl class="facts">
+    <dt>Environment</dt>
+    <dd>{{ review.environment_name }}</dd>
+    <dt>Kind</dt>
+    <dd>{{ kind_label }}</dd>
+    <dt>Format version</dt>
+    <dd>{{ review.format_version }}, written by dockmin <span class="mono">{{ review.instance_version|visible_text }}</span></dd>
+    <dt>Exported</dt>
+    <dd><time datetime="{{ review.exported_at|timestamp_iso }}">{{ review.exported_at|timestamp }}</time></dd>
+    <dt>Source stack</dt>
+    <dd class="mono cell-wrap">{{ plan.source_name|visible_text }}</dd>
+    <dt>Size as uploaded</dt>
+    <dd>{{ review.archive_size|filesize }}</dd>
+    <dt>Volume data</dt>
+    <dd>{{ plan.data_bytes|filesize }} in {{ plan.volumes|selectattr("filled")|list|length }} {{ "volume" if plan.volumes|selectattr("filled")|list|length == 1 else "volumes" }}</dd>
+    <dt>SHA-256</dt>
+    <dd class="mono cell-wrap">{{ review.archive_digest }}</dd>
+  </dl>
+</section>
+
+{% if review.secrets_mode == "sealed" %}
+<section class="panel" aria-labelledby="unlock-heading">
+  <h2 id="unlock-heading">Sealed values</h2>
+  {% if review.opened %}
+  <p>The sealed values were opened with the passphrase. They are held until you confirm, discard the upload or it expires, and are never shown.</p>
+  {% else %}
+  <p>The archive's secret values are sealed under a passphrase. Enter it to open them, or enter each value by hand in the form below. The passphrase is used once and is not stored or shown again. {{ review.unlock_remaining }} {{ "attempt" if review.unlock_remaining == 1 else "attempts" }} left in this session.</p>
+  <form class="form" method="post" action="{{ unlock_href }}" data-submit-once aria-labelledby="unlock-heading">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ form_field("passphrase", "Passphrase", type="password", autocomplete="off", error=errors.get("passphrase")) }}
+    <div class="form__actions">
+      <button type="submit" class="btn">Open the sealed values</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+<form class="form create-form" method="post" action="{{ post_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_plan" value="{{ plan.digest }}">
+
+  <section class="panel create-section" aria-labelledby="name-title">
+    <h2 class="create-section__title" id="name-title">The stack this creates</h2>
+    <div class="create-section__body">
+      {{ form_field("name", "Name", value=review.typed_name or plan.name, required=true, error=review.name_error or errors.get("name"), help="Every project-derived name is built from this one: its containers, networks and volumes. Change it and choose Check to see the names it gives. The stack is created under this name only.") }}
+      {% if plan.collisions %}
+      <div class="panel panel--alert" role="note">
+        <h3>Names already in use</h3>
+        <p>Nothing existing is overwritten. Change the name above and choose Check, or discard the upload.</p>
+        <table class="table">
+          <caption class="visually-hidden">Names the import would create that are already in use</caption>
+          <thead><tr><th scope="col">Kind</th><th scope="col">Name</th><th scope="col">Why it cannot be used</th></tr></thead>
+          <tbody>
+            {% for item in plan.collisions %}
+            <tr><td>{{ item.kind }}</td><th scope="row"><span class="mono cell-wrap">{{ item.name|visible_text }}</span></th><td>{{ item.text }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if not plan.checked %}
+        <p class="field__help">Further collisions are checked once the stack name is free.</p>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% for warning in plan.warnings %}
+      <div class="panel panel--notice" role="note"><p>{{ warning }}</p></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="objects-title">
+    <h2 class="create-section__title" id="objects-title">Objects it creates</h2>
+    <div class="create-section__body">
+      {% if plan.objects %}
+      <div class="data-table__scroll" role="region" aria-label="Objects the import creates" tabindex="0">
+        <table class="table">
+          <caption class="visually-hidden">The objects the stack creates when it is deployed</caption>
+          <thead><tr><th scope="col">Kind</th><th scope="col">Name</th><th scope="col">Note</th></tr></thead>
+          <tbody>
+            {% for item in plan.objects %}
+            <tr><td>{{ item.kind }}</td><th scope="row"><span class="mono cell-wrap">{{ item.name|visible_text }}</span></th><td>{{ item.note }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% elif plan.checked %}
+      <p>The stack file declares no object that is created on the host.</p>
+      {% else %}
+      <p>The objects are listed once the names above are free.</p>
+      {% endif %}
+      <p class="field__help">The stack record, with its stored file, variables, companion files and build contexts, is created first. Containers and networks are created when the stack is deployed, which starts as soon as the import completes.</p>
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="volumes-title">
+    <h2 class="create-section__title" id="volumes-title">Volumes and their data</h2>
+    <div class="create-section__body">
+      {% if plan.volumes %}
+      <div class="data-table__scroll" role="region" aria-label="Volumes of the stack" tabindex="0">
+        <table class="table">
+          <caption class="visually-hidden">The volumes of the stack and what is written into each</caption>
+          <thead><tr><th scope="col">Volume</th><th scope="col">Filled from</th><th scope="col">Entries</th><th scope="col">Size</th></tr></thead>
+          <tbody>
+            {% for item in plan.volumes %}
+            <tr>
+              <th scope="row"><span class="mono cell-wrap">{{ item.name|visible_text }}</span></th>
+              <td>{% if item.filled %}<span class="mono cell-wrap">{{ item.source|visible_text }}</span>{% elif item.origin == "host_path" %}A new empty volume replacing a host path{% else %}Created empty when the stack is deployed{% endif %}</td>
+              <td>{{ item.entries if item.filled else "—" }}</td>
+              <td>{{ item.size|filesize if item.filled else "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p>The stack declares no volume.</p>
+      {% endif %}
+      {% if plan.skipped_volumes %}
+      <p>Archived volumes that are not written:</p>
+      <ul>
+        {% for item in plan.skipped_volumes %}
+        <li><span class="mono cell-wrap">{{ item.name|visible_text }}</span>. {{ item.reason }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if plan.has_data %}
+      <ul>
+        <li>Each volume with data is created before the stack is deployed, labelled as the stack's own, and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.</li>
+        <li>The volume's own root owner and mode are not applied, and extended attributes other than <span class="mono">user.</span> ones are not written.</li>
+        <li>If a volume cannot be written, every volume this import created is removed and nothing else changes.</li>
+      </ul>
+      {% if review.helper_image %}
+      <p>dockmin creates a helper container from the image <span class="mono">{{ review.helper_image|replace("sha256:", "")|truncate(12, true, "") }}</span>, which is already on the host, once for each volume. It is never started, has no network and no capabilities, and is removed when its volume has been written.</p>
+      {% else %}
+      <div class="panel panel--alert" role="note">
+        <h3>The host has no image to use</h3>
+        <p>The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then check the import again.</p>
+      </div>
+      {% endif %}
+      {% endif %}
+    </div>
+  </section>
+
+  {% if plan.host_paths %}
+  <section class="panel create-section" aria-labelledby="paths-title">
+    <h2 class="create-section__title" id="paths-title">Host paths</h2>
+    <div class="create-section__body">
+      <p>The stack file binds these paths on the host. Choose what happens to each. Keeping a path leaves the file as it is, and the deployment can create the directory on the host if it is missing. Replacing it rewrites the file to use a new, empty named volume, and no directory is created.</p>
+      {% for item in plan.host_paths %}
+      {% set number = loop.index0 %}
+      <fieldset class="choice-group">
+        <legend>Host path <span class="mono cell-wrap">{{ item.source|visible_text }}</span></legend>
+        <p class="field__help">Used by {{ item.uses|join(", ") }}.</p>
+        <input type="hidden" name="path-{{ number }}-source" value="{{ item.source }}">
+        <div class="choice">
+          <input class="choice__input" type="radio" id="path-{{ number }}-keep" name="path-{{ number }}-choice" value="keep"{% if item.choice == "keep" %} checked{% endif %} required>
+          <label class="choice__label" for="path-{{ number }}-keep">Keep the path</label>
+        </div>
+        <div class="choice">
+          <input class="choice__input" type="radio" id="path-{{ number }}-volume" name="path-{{ number }}-choice" value="volume"{% if item.choice == "volume" %} checked{% endif %} required>
+          <label class="choice__label" for="path-{{ number }}-volume">Replace it with a new named volume{% if item.volume %} (<span class="mono">{{ plan.name }}_{{ item.volume }}</span>){% endif %}</label>
+        </div>
+      </fieldset>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if plan.secrets %}
+  <section class="panel create-section" aria-labelledby="secrets-title">
+    <h2 class="create-section__title" id="secrets-title">Secret values</h2>
+    <div class="create-section__body">
+      <table class="table">
+        <caption class="visually-hidden">The secret variables and files of the stack and where each value comes from</caption>
+        <thead><tr><th scope="col">Secret</th><th scope="col">Value</th></tr></thead>
+        <tbody>
+          {% for item in plan.secrets %}
+          <tr>
+            <th scope="row"><span class="mono cell-wrap">{{ item.name|visible_text }}</span> <span class="field__help">{{ item.kind }}</span></th>
+            <td>
+              {% if item.state == "opened" %}
+              Opened from the archive
+              {% else %}
+              <label class="visually-hidden" for="secret-{{ loop.index0 }}-value">Value of {{ item.kind }} {{ item.name }}</label>
+              <input type="hidden" name="secret-{{ loop.index0 }}-name" value="{{ item.sealed_name }}">
+              <input class="field__input" type="password" id="secret-{{ loop.index0 }}-value" name="secret-{{ loop.index0 }}-value" autocomplete="off" required>
+              <p class="field__help">{% if item.archive_sealed %}Not opened. Open the archive above, or enter the value.{% else %}The archive carries only the name. Enter the value.{% endif %}</p>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="field__help">Values are stored encrypted and are never shown again on this page.</p>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel create-section" aria-labelledby="inputs-title">
+    <h2 class="create-section__title" id="inputs-title">Variables, files and build contexts</h2>
+    <div class="create-section__body">
+      <p>{{ plan.variables|length }} {{ "variable" if plan.variables|length == 1 else "variables" }}{% if plan.variables %}: {% for name, secret in plan.variables %}<span class="mono cell-wrap">{{ name }}</span>{% if secret %} (secret){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>
+      <p>{{ plan.files|length }} companion {{ "file" if plan.files|length == 1 else "files" }}{% if plan.files %}: {% for name, size, secret in plan.files %}<span class="mono cell-wrap">{{ name }}</span> ({{ size }} {{ "byte" if size == 1 else "bytes" }}{% if secret %}, secret{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>
+      <p>{{ plan.contexts|length }} build {{ "context" if plan.contexts|length == 1 else "contexts" }}{% if plan.contexts %}: {% for name, size in plan.contexts %}<span class="mono cell-wrap">{{ name }}</span> ({{ size|filesize }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>
+      <p class="field__help">The stored stack file is the archive's own{% if plan.host_paths|selectattr("volume")|list %}, with the host paths you replace rewritten to named volumes{% endif %}.</p>
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="images-title">
+    <h2 class="create-section__title" id="images-title">Images</h2>
+    <div class="create-section__body">
+      {% if plan.images %}
+      <div class="data-table__scroll" role="region" aria-label="Images the stack names" tabindex="0">
+        <table class="table">
+          <caption class="visually-hidden">The images the stack names, with the digest recorded in the archive and what this host holds</caption>
+          <thead><tr><th scope="col">Reference</th><th scope="col">Used by</th><th scope="col">Archive digest</th><th scope="col">On this host</th></tr></thead>
+          <tbody>
+            {% for item in plan.images %}
+            <tr>
+              <th scope="row"><span class="mono cell-wrap">{{ item.reference|visible_text }}</span></th>
+              <td class="mono cell-wrap">{{ item.used_by|join(", ") }}</td>
+              <td class="mono cell-wrap">{{ item.archive_digest or "not recorded" }}</td>
+              <td>
+                {% if item.status == "same" %}The same digest
+                {% elif item.status == "differs" %}<strong>A different digest:</strong> <span class="mono cell-wrap">{{ item.local_digest }}</span>. The stored file keeps the tag, so a pull resolves whatever the tag names.
+                {% elif item.status == "not_present" %}Not on this host. A pull resolves the tag when it runs, and can return a different digest.
+                {% else %}The archive recorded no digest.{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="field__help">Images are not in the archive. The stored file keeps each tag as exported; nothing is pinned by digest.</p>
+      {% else %}
+      <p>The stack file names no image outright.</p>
+      {% endif %}
+      {% if offers %}
+      {{ credential_choices(offers, catalogue) }}
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel create-section" aria-labelledby="effects-title">
+    <h2 class="create-section__title" id="effects-title">What happens</h2>
+    <div class="create-section__body">
+      <ul>
+        <li>The stack and the volumes it creates become yours; no team or other access is carried from the archive.</li>
+        <li>Resource controls, automation rules, webhooks and image bindings are not in the archive. Each image is bound to the credential set you choose when it is pulled.</li>
+        <li>The stack is deployed as soon as the import completes. If it is refused or fails, the stack stays and can be deployed from its page.</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="form__actions">
+    {% if review.can_import %}
+    <button type="submit" class="btn btn--primary" name="action" value="import">Import stack</button>
+    {% endif %}
+    <button type="submit" class="btn" name="action" value="check" formnovalidate>Check the choices</button>
+    <a class="btn" href="{{ list_href }}">Back to stacks</a>
+  </div>
+</form>
+
+<form class="form" method="post" action="{{ cancel_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="form__actions">
+    <button type="submit" class="btn">Discard the upload</button>
+  </div>
+</form>
+{% endblock %}

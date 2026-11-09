@@ -45,6 +45,7 @@ from app.services.compose_setup import ComposeStatus, build_target
 from app.services.container_restrictions import Finding
 from app.services.guards import require_administrator
 from app.services.image_bindings import CredentialOffer, RebindRefused, parse_pull_reference
+from app.services.imported_volumes import ImportedVolumes
 from app.services.object_inspector import (
     EngineObjectInspector,
     HostClients,
@@ -498,7 +499,9 @@ class SwarmStackPlanner:
         tls: EnvironmentTlsRepository,
         locks: ObjectLockRegistry,
         poke: Callable[[int], None] | None = None,
+        imported: ImportedVolumes | None = None,
     ) -> None:
+        self._imported = imported
         self._authoriser = authoriser
         self._inspector = inspector
         self._hosts = hosts
@@ -571,6 +574,41 @@ class SwarmStackPlanner:
     ) -> ValidationReport:
         """Check a candidate file and variables against the host; nothing is stored or created.
 
+        See `candidate`.
+        """
+        return _report_of(
+            await self.candidate(
+                actor,
+                environment_id,
+                name=name,
+                compose_text=compose_text,
+                variables=variables,
+                existing=existing,
+                adopt=adopt,
+                choices=choices,
+                resolve_images=resolve_images,
+                check_collisions=check_collisions,
+                files=files,
+            )
+        )
+
+    async def candidate(
+        self,
+        actor: Principal,
+        environment_id: int,
+        *,
+        name: str,
+        compose_text: str,
+        variables: Sequence[VariableInput] | None,
+        existing: bool = False,
+        adopt: bool = False,
+        choices: Mapping[str, CredentialChoice] | None = None,
+        resolve_images: bool = False,
+        check_collisions: bool = False,
+        files: Sequence[CompanionFile] | None = None,
+    ) -> SwarmDeployPlan:
+        """Plan a candidate file and variables against the host; nothing is stored or created.
+
         `existing` validates a change to the stack called `name`, which needs write and every
         member writable. `adopt` validates a file for the namespace called `name`, which only an
         administrator may do and which must exist. Otherwise the caller needs create and the name
@@ -610,7 +648,7 @@ class SwarmStackPlanner:
             submitted=variables is not None,
             candidate=files,
         )
-        plan = await self._plan(
+        return await self._plan(
             actor,
             loaded,
             remove_orphans=False,
@@ -619,7 +657,6 @@ class SwarmStackPlanner:
             documents=False,
             check_collisions=check_collisions,
         )
-        return _report_of(plan)
 
     async def deploy_plan(
         self,
@@ -1205,7 +1242,11 @@ class SwarmStackPlanner:
         if volume.name != name:
             return False
         carried = volume.labels.get(SWARM_NAMESPACE_LABEL)
-        if not carried or canonical_stack_key(carried) != key:
+        if self._imported is not None and self._imported.registered(environment_id, key):
+            own = self._imported.accepts(environment_id, key, volume.name, volume.created_at)
+        else:
+            own = bool(carried) and canonical_stack_key(carried or "") == key
+        if not own:
             return True
         return await self._control_repo.get_for(environment_id, "volume", volume.name) is not None
 

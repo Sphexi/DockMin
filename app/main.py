@@ -100,6 +100,7 @@ from app.services.restore import (
 from app.services.restore_gate import RestoreGate, RestoreGateMiddleware
 from app.services.self_identity_probe import EngineSelfProbe
 from app.services.self_update import finish_updates
+from app.services.stack_import_store import SPOOL_DIRECTORY as STACK_SPOOL_DIRECTORY
 from app.services.stacks import sweep_orphan_directories
 from app.services.volume_import_store import sweep_import_leftovers
 from app.services.webhooks import WebhookCallLimiter
@@ -145,6 +146,7 @@ from app.web import (
     stack_dismissal_routes,
     stack_export_routes,
     stack_file_routes,
+    stack_import_routes,
     stack_log_routes,
     stack_read_routes,
     stack_routes,
@@ -259,6 +261,12 @@ async def _sweep_leftovers(app: FastAPI) -> None:
         await asyncio.to_thread(sweep_import_leftovers, app.state.settings.data_dir)
     except OSError as error:
         logger.error("volume_import_sweep_failed", extra={"error": type(error).__name__})
+    try:
+        await asyncio.to_thread(
+            sweep_import_leftovers, app.state.settings.data_dir, STACK_SPOOL_DIRECTORY
+        )
+    except OSError as error:
+        logger.error("stack_import_sweep_failed", extra={"error": type(error).__name__})
 
 
 async def start_runtime(app: FastAPI, *, during: StartPhase = "startup") -> None:
@@ -861,6 +869,8 @@ def build_app(options: AppOptions) -> FastAPI:
     app.include_router(stack_dismissal_routes.swarm)
     app.include_router(stack_export_routes.router)
     app.include_router(stack_export_routes.swarm)
+    app.include_router(stack_import_routes.router)
+    app.include_router(stack_import_routes.swarm)
     app.include_router(stack_routes.router)
     app.include_router(stack_file_routes.router)
     app.include_router(swarm_stream_routes.router)

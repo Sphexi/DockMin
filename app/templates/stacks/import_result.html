@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Imported stack {{ result.name }} - dockmin{% endblock %}
+{% set crumb_page = "Import result" %}
+{% block content %}
+{% call page_header("Stack imported", result.name) %}
+<a class="btn btn--primary" href="{{ detail_href }}">Open the stack</a>
+<a class="btn" href="{{ list_href }}">Back to stacks</a>
+{% endcall %}
+
+<div class="panel panel--alert" role="alert">
+  <h2>The stack was not deployed</h2>
+  <p>{{ reason }} The {{ kind_label|lower }} <span class="mono cell-wrap">{{ result.name }}</span> exists with its files, variables and volume data. Deploy it from its page.</p>
+</div>
+<section class="panel" aria-labelledby="result-heading">
+  <h2 id="result-heading">What was created</h2>
+  <dl class="facts">
+    <dt>Stack</dt>
+    <dd class="mono cell-wrap">{{ result.name }}</dd>
+    <dt>Variables</dt>
+    <dd>{{ result.variables }}</dd>
+    <dt>Files</dt>
+    <dd>{{ result.files }}</dd>
+    <dt>Build contexts</dt>
+    <dd>{{ result.contexts }}</dd>
+    <dt>Volumes written</dt>
+    <dd>{% if result.volumes %}<span class="mono cell-wrap">{{ result.volumes|join(", ") }}</span>{% else %}None{% endif %}</dd>
+    <dt>Volume data</dt>
+    <dd>{{ result.bytes_written|filesize }}</dd>
+    <dt>Owner</dt>
+    <dd>{% if result.control_created %}You{% else %}Not recorded. An administrator can assign access to the stack.{% endif %}</dd>
+  </dl>
+</section>
+{% endblock %}

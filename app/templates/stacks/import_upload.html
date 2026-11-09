@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "environments/_parts.html" import environment_badge with context %}
+{% from "partials/error_summary.html" import error_summary %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Import stack on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Import stack" %}
+{% block content %}
+{% call page_header("Import stack", environment.name) %}
+{{ environment_badge(environment) }}
+<a class="btn" href="{{ list_href }}">Cancel</a>
+{% endcall %}
+
+{% if errors %}
+{{ error_summary(errors) }}
+{% endif %}
+
+<section class="panel" aria-labelledby="import-upload-heading">
+  <h2 id="import-upload-heading">Upload an archive</h2>
+  <p>The archive must hold a {{ kind_label }} written by a stack export. It is checked in full before anything is created, and you review every object it will create, choose the credentials for each image and decide what happens to host paths before the stack is created.</p>
+  <form class="form" method="post" action="{{ post_href }}" enctype="multipart/form-data" data-submit-once aria-labelledby="import-upload-heading">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field"{% if errors.get("archive") %} data-invalid{% endif %}>
+      <div class="field__head">
+        <label class="field__label" for="field-archive">Archive <span class="field__required" aria-hidden="true">*</span></label>
+        <p class="field__help" id="field-archive-help">A .tar.gz file written by a stack export, up to 7 GiB as uploaded. Every member passes the same rules as a volume import: devices, FIFOs, sockets, absolute names, names containing .. and entries below a symbolic link are refused.</p>
+      </div>
+      <input class="field__input" type="file" id="field-archive" name="archive" accept=".gz,.tgz,application/gzip" required aria-describedby="field-archive-help">
+    </div>
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Upload and check</button>
+      <a class="btn" href="{{ list_href }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

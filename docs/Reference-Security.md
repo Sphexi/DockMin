@@ -280,6 +280,36 @@ Secret values of a stack export and the environment values marked secret in a co
 | A passphrase kept beside the archive | Opens every sealed value |
 | Plain values | Not sealed. They are readable by anyone who holds the archive ([Stack and container export](#stack-and-container-export)) |
 
+## Stack import
+
+An administrator can create a managed stack from a stack export archive ([Compose stacks](Usage-Stacks#import-compose), [Swarm stacks](Usage-Swarm#import-swarm-stacks)).
+
+| Item | Value |
+|---|---|
+| Who | Administrators only. Any other user receives `404` on every import route, before a request body is read, and nothing is recorded |
+| Archives accepted | Only archives written by a stack export of the route's kind. The archive is not signed or authenticated: any archive in the format is accepted. The manifest's digests detect damage and do not detect tampering |
+| Upload | A multipart `POST` whose first part is the CSRF token, verified before any byte of the file is read. At most 7 GiB and 64 KiB, within 3,600 seconds. Written to `{data directory}/stack-import/` as a `0600` file, with at least 256 MiB left free at every write |
+| Held upload | Usable only by the user, the session and the environment that made it, under a random 128-bit identifier. One for each user, four in all, 30 minutes. Deleted on every way out, and the whole directory at start |
+| Validation | The whole archive is read and checked before anything is created. Every declared document has its size and SHA-256 checked, and a member the manifest does not declare is refused |
+| Tar rules | The rules of [volume import](#volume-import), applied to each volume of the archive under its own prefix, and shared with it by one implementation: entry types, names, symbolic links, hard links, owner ids, repeated names. Devices, FIFOs, sockets, absolute names, `..` components and entries below a symbolic link are refused |
+| Resource limits | 2,000,000 entries and 64 GiB of file data across every volume, and a ceiling on decompressed bytes, so a compression bomb is refused. At most 2 archives are validated at once |
+| Modes and owners | The setuid and setgid bits are cleared. Numeric owner ids are kept. Only `user.` extended attributes are applied |
+| Passphrase | Entered on the review page. Used once, in a worker thread, and never stored, logged, recorded or put back into a page. A sealed value that was altered or moved is refused ([Export sealing](#export-sealing)) |
+| Attempt limit | 5 failed passphrases for each session, counted for the life of the process and not reset by a success. Further attempts answer `429` until the administrator signs in again. The secret values can then be entered by hand |
+| Opened values | Held in memory with the upload until the import, the discard or the expiry. Stored encrypted by the create. Never in a log line, an activity row or a response |
+| Plan binding | The confirmation carries a keyed SHA-256 over what the review showed of the archive and of the host. The key is random for each process and never stored. A plan that differs, including after a restart, is refused (`changed_since_review`) and nothing is changed |
+| Credential choice | Registry credentials are not in an archive. Each image the deployment pulls needs a credential set, or anonymous, chosen on the review. Nothing is preselected, and a matching registry address does not select a set. Without a choice the import is refused (`credential_choice_required`) |
+| Binding | The image is bound to the set that pulled it, by the deployment ([Images](Usage-Images)) |
+| Labels | The import sets `com.docker.compose.project` and `com.docker.compose.volume`, or `com.docker.stack.namespace`, on each volume it creates, from the stack name. For a Compose stack the labels and driver options the stack file declares for the volume are applied. No label and no driver option recorded in the archive is applied |
+| Names | An existing stack, project, namespace, container, volume, network, service, config or secret is never overwritten, adopted or written to. A collision refuses the import until the stack is given another name |
+| Volumes | Created and written before the stack is stored. The first deployment accepts a project volume that exists only when it is one the import created, by name and creation time. After a restart, and before the first deployment, a volume carrying the project label and no access control of its own is accepted ([Stacks](Usage-Stacks#import-volumes)) |
+| Host paths | Listed with a required choice for each. The import creates no directory on a host. A kept path is stored as archived; a replaced path becomes a new named volume |
+| Host access | A helper container created from an image already on the host, never started, with the volume mounted read-write, no network, a read-only root file system and all capabilities dropped. It is removed when its volume has been written |
+| Failure | Every volume the import created is removed, without force, and no stack record is written. A volume that existed before is never removed |
+| Contents | Not scanned. A container that mounts a volume runs with whatever the files contain, including executables. A stack file passes the checks of a create |
+| Owner | The importing administrator. No team or other grant is carried |
+| Recorded | `stack_imported`, with counts and never a value, a passphrase, a variable or file name, or a path ([Activity](Administration-Activity#stack-import-rows)) |
+
 ## Stack builds
 
 An administrator's Compose stack can build images on its host ([Stacks](Usage-Stacks#builds)). A `RUN` step of a Dockerfile executes on that host while the image builds.

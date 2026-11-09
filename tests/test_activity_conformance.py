@@ -84,6 +84,10 @@ NOT_AUDITED: Mapping[str, str] = {
         "holds a validated upload in memory and removes the files it replaces; the import "
         "itself is recorded by VolumeImportService.import_volume"
     ),
+    "app/services/stack_import_store.py:StackImportStore.hold": (
+        "holds a validated upload in memory and removes the files it replaces; the import "
+        "itself is recorded by StackImportService.import_stack"
+    ),
     "app/backup/archive.py:_ScanningSink.write": (
         "passes the bytes of the archive being written to the compressor after scanning them for "
         "key material; the name matches a repository method but no database is involved"
@@ -370,6 +374,13 @@ PROVISIONING_SUBCLASS_FILES = (
 COLLABORATORS = frozenset(
     {f"{PROVISIONING_FILE}:{PROVISIONING_CLASS}", f"{RUNNER_FILE}:{RUNNER_CLASS}"}
 )
+CREATE_BODIES = frozenset(
+    {
+        "app/services/stacks.py:StackService.create_in_scope",
+        "app/services/swarm_stack_actions.py:SwarmStackActions.create_in_scope",
+    }
+)
+CREATE_BODY_NAME = "create_in_scope"
 TRANSACTION_HELPER = "in_transaction"
 TRANSACTION_HELPER_MODULE = "host_objects"
 SUBSYSTEMS_DIR = APP / "subsystems"
@@ -920,7 +931,11 @@ def scan_tree(
 def _in_collaborator(qualname: str) -> bool:
     """Report whether only audited code can reach the function."""
     owner, _, method = qualname.rpartition(".")
-    return (owner in COLLABORATORS and method.startswith("_")) or qualname in _driven_entries()
+    return (
+        (owner in COLLABORATORS and method.startswith("_"))
+        or qualname in _driven_entries()
+        or qualname in CREATE_BODIES
+    )
 
 
 def unaccounted(entries: Iterable[Entry]) -> list[str]:
@@ -2980,7 +2995,7 @@ def test_the_swarm_stack_actions_leave_no_mutating_entry_point_unaccounted(
     found = swarm_stack_entries(source, write_methods, docker_writes, compose_writes)
 
     assert {entry.qualname for entry in found if entry.mutates} >= {
-        f"{SWARM_STACK_MODULE}:SwarmStackActions.create",
+        f"{SWARM_STACK_MODULE}:SwarmStackActions.create_in_scope",
         f"{SWARM_STACK_MODULE}:SwarmStackActions.deploy",
         f"{SWARM_STACK_MODULE}:SwarmStackActions.redeploy",
         f"{SWARM_STACK_MODULE}:SwarmStackActions.remove",
@@ -3021,3 +3036,21 @@ def test_a_control_release_added_outside_audit_to_the_stack_actions_is_flagged()
     source = SWARM_STACK_ACTIONS.read_text(encoding="utf-8") + STRAY_CONTROL_RELEASE
 
     assert control_hook_calls_outside_audit(source, SWARM_STACK_MODULE) != []
+
+
+def test_the_create_bodies_are_reached_only_from_audited_functions() -> None:
+    reaching: list[str] = []
+    for relative, source in _app_sources(APP, skip_db=True):
+        tree = ast.parse(source)
+        imports = _import_table(tree, relative)
+        for function in ast.walk(tree):
+            if not isinstance(function, FunctionNode) or function.name == CREATE_BODY_NAME:
+                continue
+            uses = any(
+                isinstance(node, ast.Attribute) and node.attr == CREATE_BODY_NAME
+                for node in ast.walk(function)
+            )
+            if uses and not _is_audited(function, imports):
+                reaching.append(f"{relative}:{function.name}")
+
+    assert reaching == []

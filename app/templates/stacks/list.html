@@ -35,6 +35,9 @@
 {% if can_create %}
 <a class="btn btn--primary" href="{{ route_path('environment_stack_new', environment_id=environment.id) }}">Create stack</a>
 {% endif %}
+{% if is_administrator %}
+<a class="btn" href="{{ route_path('environment_stack_import_form', environment_id=environment.id) }}">Import stack</a>
+{% endif %}
 {% endcall %}
 <div id="stacks-results">
   {{ stacks_results(rows, columns, pager, filtered, errors, failure, retry_href, environment_id, visible_count, unmanaged, unmanaged_unavailable, is_administrator, can_create=can_create, dismissed_hidden=dismissed_hidden, show_dismissed=show_dismissed) }}

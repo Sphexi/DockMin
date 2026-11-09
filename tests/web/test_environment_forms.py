@@ -373,7 +373,7 @@ MIN_POST_ROUTES = 16
 PREFIXES = ("/environments", "/groups", "/tags")
 FOREIGN_ORIGIN = "https://evil.example"
 # Checks its own token inside the streamed body.
-STREAMED_UPLOAD = "/contexts/-/upload"
+STREAMED_UPLOADS = ("/contexts/-/upload", "/volumes/-/import", "/stacks/-/import")
 
 
 def post_paths(world: World) -> list[str]:
@@ -382,7 +382,9 @@ def post_paths(world: World) -> list[str]:
     return [
         filled(path, **ids)
         for path, operations in documented.items()
-        if "post" in operations and path.startswith(PREFIXES) and not path.endswith(STREAMED_UPLOAD)
+        if "post" in operations
+        and path.startswith(PREFIXES)
+        and not path.endswith(STREAMED_UPLOADS)
     ]
 
 

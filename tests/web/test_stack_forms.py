@@ -674,7 +674,8 @@ WRONG_TOKEN = "W" * 43
 FIXED_NAMES = ("new", "adopt")
 MALFORMED_NAMES = ("Bad", "has.dot", "-dash", "x" * 64, "a%2Fb", "%2E%2E")
 STREAMED_UPLOAD = "/contexts/-/upload"
-POST_ROUTES, GET_ROUTES = 23, 18
+STREAMED_IMPORT = "/stacks/-/import"
+POST_ROUTES, GET_ROUTES = 27, 21
 DISMISSAL_ROUTES = {
     f"{ROUTE_PREFIX}/-/unmanaged/{{project}}/dismiss",
     f"{ROUTE_PREFIX}/-/unmanaged/{{project}}/restore",
@@ -697,7 +698,7 @@ async def test_every_stack_post_needs_the_csrf_token_and_every_stack_route_needs
     posts = [
         filled(p, environment_id=world.remote_id)
         for p in stack_paths(world.app, "post")
-        if not p.endswith(STREAMED_UPLOAD)
+        if not p.endswith((STREAMED_UPLOAD, STREAMED_IMPORT))
     ]
     gets = [filled(p, environment_id=world.remote_id) for p in stack_paths(world.app, "get")]
     started = len(world.app.state.engine.stack_jobs)

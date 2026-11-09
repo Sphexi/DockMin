@@ -84,13 +84,14 @@ def declared_host_paths(text: str) -> tuple[str, ...]:
         if not isinstance(entries, list):
             continue
         for entry in entries:
-            source = _bind_source(entry)
+            source = bind_source(entry)
             if source is not None:
                 found.add(source)
     return tuple(sorted(found))
 
 
-def _bind_source(entry: object) -> str | None:
+def bind_source(entry: object) -> str | None:
+    """Return the host path a service volume entry binds, as written, or None for any other."""
     source: object = None
     if isinstance(entry, str) and ":" in entry:
         source = entry.split(":", 1)[0]
@@ -176,6 +177,7 @@ __all__ = [
     "MAX_HOST_PATHS",
     "MAX_IMAGES",
     "ProjectHost",
+    "bind_source",
     "declared_host_paths",
     "image_references",
     "read_project_host",

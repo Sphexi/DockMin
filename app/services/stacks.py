@@ -1,7 +1,7 @@
 """The audited stack operations and the project-directory sweeps."""
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from functools import partial
 from typing import Final, Literal
@@ -23,6 +23,7 @@ from app.db.repositories.stack import (
     StackVariableError,
     StoredStack,
 )
+from app.db.repositories.stack_build_context import ContextWrite
 from app.db.repositories.stack_dismissal import StackDismissalRepository
 from app.db.repositories.stack_file import StackFileError, StoredFile
 from app.docker_engine.client import EngineClient
@@ -45,12 +46,16 @@ from app.services.container_actions import BusyView
 from app.services.guards import require_administrator
 from app.services.host_objects import audited_client, hold_all, in_transaction
 from app.services.image_bindings import ImageBindingService
+from app.services.imported_volumes import ImportedVolumes
 from app.services.object_inspector import EngineObjectInspector, EnvironmentUnavailable
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey, ObjectLockRegistry
 from app.services.onboarding_ownership import Ownership
 from app.services.pull_credentials import CredentialChoice
 from app.services.resource_controls import ResourceControlService
+from app.services.stack_build_plan import BuildInputs
+from app.services.stack_builds import BuildAdmission
 from app.services.stack_common import swarm_namespaces_apply
+from app.services.stack_context_source import HeldContexts
 from app.services.stack_deploy import (
     ChangedSinceReview,
     NotDeployed,
@@ -209,7 +214,9 @@ class StackService:
         bindings: ImageBindingService | None,
         bindings_factory: Callable[[Session, ActivityRecorder], ImageBindingService] | None = None,
         self_identity: SelfIdentitySource | None = None,
+        imported: ImportedVolumes | None = None,
     ) -> None:
+        self._imported = imported
         self._db = db
         self._authoriser = authoriser
         self._hosts = inspector.hosts
@@ -271,6 +278,46 @@ class StackService:
     ) -> StackCreated:
         """Validate and store a new stack and put it under the creator's control; no deploy.
 
+        See `create_in_scope`.
+        """
+        return await self.create_in_scope(
+            actor,
+            environment_id,
+            name=name,
+            compose_text=compose_text,
+            variables=variables,
+            choices=choices,
+            resolve_pulls=resolve_pulls,
+            check_collisions=check_collisions,
+            files=files,
+            template=template,
+            allow_builds=allow_builds,
+        )
+
+    async def create_in_scope(
+        self,
+        actor: Principal,
+        environment_id: int,
+        *,
+        name: str,
+        compose_text: str,
+        variables: Sequence[VariableInput] | None = None,
+        choices: Mapping[str, CredentialChoice] | None = None,
+        resolve_pulls: bool = False,
+        check_collisions: bool = False,
+        files: Sequence[CompanionFile] = (),
+        template: str | None = None,
+        allow_builds: bool = True,
+        contexts: Mapping[str, ContextWrite] | None = None,
+        before_store: Callable[[], Awaitable[None]] | None = None,
+    ) -> StackCreated:
+        """Validate and store a new stack and put it under the creator's control; no deploy.
+
+        Runs inside the audit scope of the caller, which must be one that records a stack.
+        `contexts` are build contexts stored with the stack and admitted by its file. `before_store`
+        runs after the file has passed every check and before the row is written; whatever it
+        creates is its caller's to remove when this raises.
+
         With `resolve_pulls` the credentials the first deployment will pull with are resolved
         too, so a choice still needed is raised before anything is stored. With
         `check_collisions` a container name or published port a running container holds refuses.
@@ -305,7 +352,10 @@ class StackService:
                 stored = False
                 try:
                     async with directories.materialise(
-                        project, compose_text, companions
+                        project,
+                        compose_text,
+                        companions,
+                        builds=None if not contexts else BuildAdmission(frozenset(contexts)).check,
                     ) as written:
                         validated = await self._validator.validate(
                             actor,
@@ -321,8 +371,16 @@ class StackService:
                                 choices=choices,
                                 collisions=check_collisions,
                                 files=companions,
+                                builds=None
+                                if not contexts
+                                else BuildInputs(
+                                    HeldContexts(contexts),
+                                    buildx_available=self._runtime.buildx.available,
+                                ),
                             ),
                         )
+                        if before_store is not None:
+                            await before_store()
                         created = await retry_busy(
                             partial(
                                 in_transaction,
@@ -337,6 +395,7 @@ class StackService:
                                     values,
                                     validated,
                                     companions,
+                                    contexts or {},
                                 ),
                             )
                         )
@@ -356,6 +415,7 @@ class StackService:
         values: VariableSet,
         validated: Validated,
         companions: Sequence[CompanionFile],
+        contexts: Mapping[str, ContextWrite],
     ) -> StackCreated:
         audit = current_audit()
         try:
@@ -379,6 +439,8 @@ class StackService:
                     {"variables": "A variable could not be stored."}, "invalid"
                 ) from None
         await self._store_files(stack_id, companions)
+        for context_name, write in contexts.items():
+            await self._stacks.contexts.put(stack_id, context_name, write)
         key = ResourceKey(environment.id, "stack", name)
         replaced = await self._controls.release(key)
         created = await self._controls.claim(key, actor.user_id)
@@ -396,6 +458,8 @@ class StackService:
             control_created=created,
             compose_version=self._runner.version_text(),
         )
+        if contexts:
+            audit.detail["contexts"] = len(contexts)
         if replaced:
             audit.detail["stale_control_replaced"] = True
         if await self._dismissals.drop_dismissal(environment.id, "compose", name):
@@ -702,7 +766,7 @@ class StackService:
         allow_builds: bool = True,
     ) -> StackOutcome:
         """Run the stack's first deployment: validate again, pull, build, `up`, and record it."""
-        return await self._runner.run_up(
+        outcome = await self._runner.run_up(
             actor,
             environment_id,
             name,
@@ -721,6 +785,12 @@ class StackService:
             rebuild=rebuild,
             allow_builds=allow_builds,
         )
+        self._release_imported(environment_id, name)
+        return outcome
+
+    def _release_imported(self, environment_id: int, name: str) -> None:
+        if self._imported is not None:
+            self._imported.release(environment_id, canonical_stack_key(name))
 
     @audited(
         action="stack_redeployed",
@@ -1064,6 +1134,7 @@ class StackService:
             audit.detail.update(
                 stack_id=row.id, volumes=remove_volumes, remove_orphans=remove_orphans
             )
+            self._release_imported(environment_id, row.name)
             self._runner.refuse_self(environment_id, row.name)
             environment = await self._hosts.environment(environment_id)
             cli = await self._queries.ready()
@@ -1154,6 +1225,7 @@ class StackService:
             row = await self._queries.require_stack(actor, environment_id, name, "write")
             require_administrator(actor)
             audit.target_id = row.name
+            self._release_imported(environment_id, row.name)
             holder = LockHolder(UserActor.of(actor), actor.username, "forget")
             async with hold_all(self._locks, [stack_key(environment_id, row.name)], holder):
                 row = await self._runner.reread(environment_id, row.name)

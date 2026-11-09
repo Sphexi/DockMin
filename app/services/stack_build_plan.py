@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final, cast
+from typing import Any, Final, Protocol, cast
 
 from yaml.nodes import MappingNode, Node, ScalarNode
 
@@ -31,6 +31,7 @@ __all__ = [
     "BuildInputs",
     "BuildPlan",
     "BuildPlans",
+    "ContextSource",
     "StoredContexts",
     "build_digest",
     "builds_digest",
@@ -53,6 +54,18 @@ _PROJECT_NAME: Final = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _MAX_TAG_CHARS: Final = 255
 
 _REASON_ORDER: Final = ("refused_construct", "invalid", "tag_in_use", "built_image_missing")
+
+
+class ContextSource(Protocol):
+    """Where a stack's build contexts are read from: their digests and the files inside them."""
+
+    async def digests(self) -> dict[str, str]:
+        """Return each context's content digest by name."""
+        ...
+
+    async def read_file(self, name: str, path: str) -> bytes | None:
+        """Return a file of a context, or None when the context or the file is absent."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +102,7 @@ class StoredContexts:
 class BuildInputs:
     """What a validation needs to admit and plan builds: the contexts and what may run."""
 
-    contexts: StoredContexts
+    contexts: ContextSource
     buildx_available: bool = True
     rebuild: bool = False
 
@@ -188,7 +201,7 @@ async def plan_builds(
     *,
     project: str,
     admission: BuildAdmission,
-    contexts: StoredContexts,
+    contexts: ContextSource,
     client: EngineClient,
     rebuild: bool,
     allow_build: bool,
@@ -283,7 +296,7 @@ async def plan_builds(
 
 
 async def _dockerfile(
-    contexts: StoredContexts,
+    contexts: ContextSource,
     cache: dict[tuple[str, str], bytes | DockerfileRefusal | None],
     context: str,
     path: str,

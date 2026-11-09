@@ -5,7 +5,7 @@ import json
 import posixpath
 import tarfile
 import zlib
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -280,6 +280,91 @@ def _hardlink_target(raw: str, layout: _Layout, display: str) -> str:
     return target
 
 
+class VolumeChecker:
+    """Checks the entries below one volume's data directory in archive order."""
+
+    def __init__(self, limits: ArchiveLimits | None = None) -> None:
+        self.limits = limits or ArchiveLimits()
+        self.layout = _Layout(self.limits)
+        self.counts = {"directory": 0, "file": 0, "symlink": 0, "hardlink": 0}
+        self.skipped = 0
+        self.xattr_dropped = 0
+
+    def summary(self, manifest: VolumeManifest, *, require_data: bool = True) -> ArchiveSummary:
+        """Return what the checked entries hold; EMPTY when `require_data` and there are none."""
+        if require_data and not self.layout.members:
+            raise VolumeArchiveRefused(ArchiveRefusal.EMPTY)
+        return ArchiveSummary(
+            manifest=manifest,
+            files=self.counts["file"],
+            directories=self.counts["directory"],
+            symlinks=self.counts["symlink"],
+            hardlinks=self.counts["hardlink"],
+            bytes=self.layout.total,
+            skipped=self.skipped,
+            xattr_members_dropped=self.xattr_dropped,
+        )
+
+    def check(self, entry: ReadEntry) -> Member:
+        """Return the checked entry, or raise VolumeArchiveRefused naming it."""
+        info = entry.info
+        raw = info.name
+        if info.type in _REGULAR_TYPES and info.sparse is None:
+            kind: Kind = "file"
+        elif info.type == tarfile.DIRTYPE:
+            kind = "directory"
+        elif info.type == tarfile.SYMTYPE:
+            kind = "symlink"
+        elif info.type == tarfile.LNKTYPE:
+            kind = "hardlink"
+        else:
+            raise VolumeArchiveRefused(ArchiveRefusal.MEMBER_TYPE, raw)
+        name = _relative_path(raw, member=raw)
+        if not 0 <= info.uid < _ID_LIMIT or not 0 <= info.gid < _ID_LIMIT:
+            raise VolumeArchiveRefused(ArchiveRefusal.BAD_OWNER, raw)
+        linkname = ""
+        if kind == "symlink":
+            linkname = info.linkname
+            _checked_target(name, linkname, raw)
+        elif kind == "hardlink":
+            linkname = _hardlink_target(info.linkname, self.layout, raw)
+        if not name:
+            if kind != "directory" or "" in self.layout.kinds:
+                raise VolumeArchiveRefused(ArchiveRefusal.NAME_CONFLICT, raw)
+            self.layout.kinds[""] = "directory"
+            return self._member("root", name, entry, linkname, size=0)
+        size = info.size if kind == "file" else 0
+        if kind == "directory" and info.size != 0:
+            raise VolumeArchiveRefused(ArchiveRefusal.MALFORMED, raw)
+        self.layout.accept_name(name, kind, size, raw)
+        self.counts[kind] += 1
+        return self._member(kind, name, entry, linkname, size=size)
+
+    def _member(
+        self, kind: Kind, name: str, entry: ReadEntry, linkname: str, *, size: int
+    ) -> Member:
+        info = entry.info
+        try:
+            mtime = max(0, min(int(info.mtime), _MTIME_LIMIT))
+        except (ValueError, OverflowError):
+            raise VolumeArchiveRefused(ArchiveRefusal.MALFORMED, info.name) from None
+        xattrs = {k: v for k, v in info.pax_headers.items() if k.startswith(_USER_XATTR)}
+        if any(k.startswith(_XATTR) and k not in xattrs for k in info.pax_headers):
+            self.xattr_dropped += 1
+        return Member(
+            kind=kind,
+            name=name,
+            size=size,
+            mode=info.mode & _MODE_BITS & ~_SETID_BITS,
+            uid=info.uid,
+            gid=info.gid,
+            mtime=mtime,
+            linkname=linkname,
+            xattrs=xattrs,
+            _body=entry.body if kind == "file" else None,
+        )
+
+
 class VolumeArchive:
     """One export archive on disk; `members` validates it as it yields, `summary` follows it."""
 
@@ -287,26 +372,14 @@ class VolumeArchive:
         self._path = path
         self._limits = limits or ArchiveLimits()
         self.manifest: VolumeManifest | None = None
-        self._layout = _Layout(self._limits)
-        self._counts = {"directory": 0, "file": 0, "symlink": 0, "hardlink": 0}
-        self._skipped = 0
-        self._xattr_dropped = 0
+        self._checker = VolumeChecker(self._limits)
         self._complete = False
 
     def summary(self) -> ArchiveSummary:
         """Return what the archive holds; only after `members` was read to its end."""
         if not self._complete or self.manifest is None:
             raise RuntimeError("the archive has not been read to its end")
-        return ArchiveSummary(
-            manifest=self.manifest,
-            files=self._counts["file"],
-            directories=self._counts["directory"],
-            symlinks=self._counts["symlink"],
-            hardlinks=self._counts["hardlink"],
-            bytes=self._layout.total,
-            skipped=self._skipped,
-            xattr_members_dropped=self._xattr_dropped,
-        )
+        return self._checker.summary(self.manifest)
 
     def members(self) -> Iterator[Member]:
         """Yield every entry below the data directory, refusing the archive at the first fault.
@@ -346,12 +419,12 @@ class VolumeArchive:
             if finished:
                 raise VolumeArchiveRefused(ArchiveRefusal.OUTSIDE_DATA, entry.info.name)
             if entry.info.name == SKIPPED_NAME:
-                self._skipped = _read_skipped(entry)
+                self._checker.skipped = read_skipped(entry)
                 finished = True
                 continue
-            yield self._check(entry)
+            yield self._checker.check(entry)
         source.finish()
-        if not self._layout.members:
+        if not self._checker.layout.members:
             raise VolumeArchiveRefused(ArchiveRefusal.EMPTY)
         self._complete = True
 
@@ -382,66 +455,9 @@ class VolumeArchive:
             raise VolumeArchiveRefused(ArchiveRefusal.MANIFEST_INVALID, MANIFEST_NAME)
         return manifest
 
-    def _check(self, entry: ReadEntry) -> Member:
-        info = entry.info
-        raw = info.name
-        if info.type in _REGULAR_TYPES and info.sparse is None:
-            kind: Kind = "file"
-        elif info.type == tarfile.DIRTYPE:
-            kind = "directory"
-        elif info.type == tarfile.SYMTYPE:
-            kind = "symlink"
-        elif info.type == tarfile.LNKTYPE:
-            kind = "hardlink"
-        else:
-            raise VolumeArchiveRefused(ArchiveRefusal.MEMBER_TYPE, raw)
-        name = _relative_path(raw, member=raw)
-        if not 0 <= info.uid < _ID_LIMIT or not 0 <= info.gid < _ID_LIMIT:
-            raise VolumeArchiveRefused(ArchiveRefusal.BAD_OWNER, raw)
-        linkname = ""
-        if kind == "symlink":
-            linkname = info.linkname
-            _checked_target(name, linkname, raw)
-        elif kind == "hardlink":
-            linkname = _hardlink_target(info.linkname, self._layout, raw)
-        if not name:
-            if kind != "directory" or "" in self._layout.kinds:
-                raise VolumeArchiveRefused(ArchiveRefusal.NAME_CONFLICT, raw)
-            self._layout.kinds[""] = "directory"
-            return self._member("root", name, entry, linkname, size=0)
-        size = info.size if kind == "file" else 0
-        if kind == "directory" and info.size != 0:
-            raise VolumeArchiveRefused(ArchiveRefusal.MALFORMED, raw)
-        self._layout.accept_name(name, kind, size, raw)
-        self._counts[kind] += 1
-        return self._member(kind, name, entry, linkname, size=size)
 
-    def _member(
-        self, kind: Kind, name: str, entry: ReadEntry, linkname: str, *, size: int
-    ) -> Member:
-        info = entry.info
-        try:
-            mtime = max(0, min(int(info.mtime), _MTIME_LIMIT))
-        except (ValueError, OverflowError):
-            raise VolumeArchiveRefused(ArchiveRefusal.MALFORMED, info.name) from None
-        xattrs = {k: v for k, v in info.pax_headers.items() if k.startswith(_USER_XATTR)}
-        if any(k.startswith(_XATTR) and k not in xattrs for k in info.pax_headers):
-            self._xattr_dropped += 1
-        return Member(
-            kind=kind,
-            name=name,
-            size=size,
-            mode=info.mode & _MODE_BITS & ~_SETID_BITS,
-            uid=info.uid,
-            gid=info.gid,
-            mtime=mtime,
-            linkname=linkname,
-            xattrs=xattrs,
-            _body=entry.body if kind == "file" else None,
-        )
-
-
-def _read_skipped(entry: ReadEntry) -> int:
+def read_skipped(entry: ReadEntry) -> int:
+    """Return the count a skipped.json entry records; VolumeArchiveRefused when it is not one."""
     if entry.info.size > SKIPPED_MAX_BYTES or entry.info.type not in _REGULAR_TYPES:
         raise VolumeArchiveRefused(ArchiveRefusal.MALFORMED, SKIPPED_NAME)
     try:
@@ -493,8 +509,15 @@ def rewrite_volume_archive(
     passes validation.
     """
     archive = VolumeArchive(path, limits)
+    return rewrite_members(archive.members(), on_member=on_member)
+
+
+def rewrite_members(
+    members: Iterable[Member], *, on_member: Callable[[Member], None] | None = None
+) -> Generator[bytes, None, None]:
+    """Yield the tar of checked members; each file's data is read as the tar is produced."""
     buffer = bytearray()
-    for member in archive.members():
+    for member in members:
         if member.kind == "root":
             continue
         if on_member is not None:

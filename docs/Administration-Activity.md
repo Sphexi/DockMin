@@ -745,7 +745,7 @@ The delete confirmation page has a section `Activity held for export`.
 
 ## Rows recorded by other features
 
-Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Stack export rows](#stack-export-rows), [Container export rows](#container-export-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
+Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Stack export rows](#stack-export-rows), [Stack import rows](#stack-import-rows), [Container export rows](#container-export-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
 
 | Rows | Described on |
 |---|---|
@@ -889,6 +889,43 @@ Target type `stack`, the stack's name as stored as the target id (cut to 255 cha
 - A request from a user who is not an administrator, for a name that is not a stack name, or for a stack that does not exist, is not managed or is of the other kind, writes no row. A request refused by the page's own checks (the secret choice, the two passphrases) writes no row.
 - A row holds no variable name or value, no file name or content, no volume name, no path and no passphrase.
 - A `stack_exported` row that cannot be written logs `activity_event_write_failed` with `action` `stack_exported`.
+
+## Stack import rows
+
+Target type `stack`, the stack's name from the form (trimmed, cut to 255 characters) as the target id, in the environment the stack is imported into. Actor: a user, always an administrator. Category `user_action`. An import writes one row ([Compose stacks](Usage-Stacks#import-compose), [Swarm stacks](Usage-Swarm#import-swarm-stacks)). The deployment that follows is a separate `stack_deployed` row.
+
+| Action | Written | Detail keys |
+|---|---|---|
+| `stack_imported` | Once for each confirmation that reaches the service, when it ends: success, or failure | `stack_kind`, `format_version`, `volumes_archived`, `renamed`, `host_paths_kept`, `host_paths_replaced`, `volumes_filled`, `volumes_skipped`, `images`, `secrets`, `volumes_created`, `bytes_written`, `helpers_created`, `helper_container`, and on success the keys of [`stack_created`](Usage-Stacks#recorded-actions) |
+
+| Detail key | Value |
+|---|---|
+| `stack_kind` | `compose` or `swarm`. A Swarm row also carries `kind` `swarm` |
+| `format_version` | The archive's format version |
+| `volumes_archived` | The number of volumes in the archive |
+| `renamed` | `true` when the stack was given a name other than the archived one |
+| `host_paths_kept`, `host_paths_replaced` | The number of host paths kept, and replaced with a named volume |
+| `volumes_filled` | The number of volumes the import creates and writes |
+| `volumes_skipped` | The number of archived volumes that are not written |
+| `images` | The number of images the stack file names |
+| `secrets` | The number of secret variables and secret companion files |
+| `volumes_created` | The number of volumes created. `0` until the first is created |
+| `bytes_written` | Bytes of tar sent to the host for all volumes |
+| `helpers_created` | The number of helper containers created |
+| `helper_container` | The full id of the helper container of the last volume written |
+| `stack_id`, `variables`, `secret_variables`, `files`, `secret_files`, `contexts`, `control_created`, `origin`, `compose_digest`, `services`, `restricted`, `compose_version` | As `stack_created` ([Stacks](Usage-Stacks#recorded-actions)): `variables`, `secret_variables`, `files` and `contexts` are counts; `secret_files` is the names of the secret files |
+| `volumes_removed` | Failure after a volume was created: the names of the volumes removed, comma-separated |
+| `volumes_kept` | The names of the volumes that could not be removed, comma-separated, when any |
+| `collisions` | Reason `collision`: the number of names in use |
+| `interrupted` | `true` when the request ended before the import finished |
+| `reason`, `message` | Failure rows |
+
+- A key is present once its value is known. A failure row holds the keys known when the import stopped: `stack_kind`, `format_version` and `volumes_archived` once the held archive was found; `renamed` to `secrets` once the plan was made; `volumes_created`, `bytes_written` and `helpers_created` once the checks have passed.
+- The target id is the name as typed, and is empty when none was typed, until the name is validated.
+- Failure reasons: `upload_gone`, `changed_since_review`, `collision`, `secrets_needed`, `paths_undecided`, `credential_choice_required`, `helper_image_missing`, `archive_invalid`, `name_in_use`, `engine_error`, `helper_refused`, `archive_rejected`, `interrupted`, and the reasons of the create: `invalid`, `invalid_compose`, `refused_construct`, `restricted`, `preexisting_objects`, `object_busy`, `compose_unavailable` and the host failure reasons ([Stacks](Usage-Stacks#errors), [Host failures](Usage-Containers#host-failures)). An unexpected error records the name of its class.
+- A request cancelled during the create of a volume or the write removes the volumes this import created, and writes a failure row with `interrupted` `true` and reason `interrupted`, on a session of its own.
+- A request from a user who is not an administrator, or with an environment or upload identifier of the wrong form, writes no row. The upload, the review, the passphrase and the discard write no row.
+- A row holds no passphrase, no secret value, no variable or file name, no label and no path. It names the volumes it removed or could not remove.
 
 ## Container export rows
 

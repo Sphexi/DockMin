@@ -2,7 +2,7 @@
 
 import asyncio
 import contextvars
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, field
 from functools import partial
@@ -30,6 +30,7 @@ from app.db.repositories.stack import (
     StoredStack,
 )
 from app.db.repositories.stack import StackOutcome as OutcomeKind
+from app.db.repositories.stack_build_context import ContextWrite
 from app.db.repositories.stack_dismissal import StackDismissalRepository
 from app.docker_engine.client import EngineClient
 from app.docker_engine.errors import Conflict, EngineError
@@ -74,6 +75,7 @@ from app.services.host_objects import (
     settled,
 )
 from app.services.image_bindings import ImageBindingService
+from app.services.imported_volumes import ImportedVolumes
 from app.services.object_inspector import (
     EngineObjectInspector,
     EnvironmentUnavailable,
@@ -346,7 +348,9 @@ class SwarmStackActions(SwarmStackFiles):
         poke: Callable[[int], None],
         bindings_factory: Callable[[Session, ActivityRecorder], ImageBindingService] | None = None,
         self_identity: SelfIdentitySource | None = None,
+        imported: ImportedVolumes | None = None,
     ) -> None:
+        self._imported = imported
         self._self_identity = self_identity or no_identity
         self._db = db
         self._database = database
@@ -406,9 +410,39 @@ class SwarmStackActions(SwarmStackFiles):
     ) -> StackCreated:
         """Validate and store a new Swarm stack under the creator's control; nothing is deployed.
 
-        The credentials the first deployment will pull with are resolved too, so a choice still
+        See `create_in_scope`.
+        """
+        return await self.create_in_scope(
+            actor,
+            environment_id,
+            name=name,
+            compose_text=compose_text,
+            variables=variables,
+            choices=choices,
+            files=files,
+        )
+
+    async def create_in_scope(
+        self,
+        actor: Principal,
+        environment_id: int,
+        *,
+        name: str,
+        compose_text: str,
+        variables: Sequence[VariableInput] | None = None,
+        choices: Mapping[str, CredentialChoice] | None = None,
+        files: Sequence[CompanionFile] = (),
+        contexts: Mapping[str, ContextWrite] | None = None,
+        before_store: Callable[[], Awaitable[None]] | None = None,
+    ) -> StackCreated:
+        """Validate and store a new Swarm stack under the creator's control; nothing is deployed.
+
+        Runs inside the audit scope of the caller, which must be one that records a stack. The
+        credentials the first deployment will pull with are resolved too, so a choice still
         needed is raised before anything is stored. `files` is the stack's companion file set,
-        validated with the file and stored with it.
+        validated with the file and stored with it; `contexts` are stored with it as given.
+        `before_store` runs after every check and before the row is written; whatever it creates
+        is its caller's to remove when this raises.
         """
         audit = current_audit()
         with named_reasons():
@@ -442,6 +476,8 @@ class SwarmStackActions(SwarmStackFiles):
                     async with directories.materialise(
                         project, compose_text, companions, kind="swarm"
                     ):
+                        if before_store is not None:
+                            await before_store()
                         created = await retry_busy(
                             partial(
                                 in_transaction,
@@ -456,6 +492,7 @@ class SwarmStackActions(SwarmStackFiles):
                                     values,
                                     report,
                                     companions,
+                                    contexts or {},
                                 ),
                             )
                         )
@@ -475,6 +512,7 @@ class SwarmStackActions(SwarmStackFiles):
         values: VariableSet,
         report: ValidationReport,
         companions: Sequence[CompanionFile],
+        contexts: Mapping[str, ContextWrite],
     ) -> StackCreated:
         audit = current_audit()
         try:
@@ -494,6 +532,8 @@ class SwarmStackActions(SwarmStackFiles):
             raise StackRejected({"name": "Use a valid stack name."}, "invalid") from None
         await self._write_variables(stack_id, values)
         await self._store_files(stack_id, companions)
+        for context_name, write in contexts.items():
+            await self._stacks.contexts.put(stack_id, context_name, write)
         key = ResourceKey(environment.id, "stack", name)
         replaced = await self._controls.release(key)
         created = await self._controls.claim(key, actor.user_id)
@@ -511,6 +551,8 @@ class SwarmStackActions(SwarmStackFiles):
             control_created=created,
             compose_version=self._version_text(),
         )
+        if contexts:
+            audit.detail["contexts"] = len(contexts)
         if replaced:
             audit.detail["stale_control_replaced"] = True
         if await self._dismissals.drop_dismissal(environment.id, "swarm", name):
@@ -598,7 +640,7 @@ class SwarmStackActions(SwarmStackFiles):
         choices: Mapping[str, CredentialChoice] | None = None,
     ) -> SwarmStackOutcome:
         """Run the stack's first deployment from its stored file and variables."""
-        return await self._run_deploy(
+        outcome = await self._run_deploy(
             actor,
             environment_id,
             name,
@@ -611,6 +653,12 @@ class SwarmStackActions(SwarmStackFiles):
             sink=sink,
             choices=choices,
         )
+        self._release_imported(environment_id, name)
+        return outcome
+
+    def _release_imported(self, environment_id: int, name: str) -> None:
+        if self._imported is not None:
+            self._imported.release(environment_id, canonical_stack_key(name))
 
     @audited(
         action="stack_redeployed",
@@ -698,6 +746,7 @@ class SwarmStackActions(SwarmStackFiles):
             row = await self._planner.require_stack(actor, environment_id, name, "write")
             audit.target_id = row.name
             audit.detail.update(kind="swarm", stack_id=row.id)
+            self._release_imported(environment_id, row.name)
             client = await audited_client(self._hosts, environment_id)
             holder = LockHolder(UserActor.of(actor), actor.username, "remove")
             async with AsyncExitStack() as held:
@@ -749,6 +798,7 @@ class SwarmStackActions(SwarmStackFiles):
         with named_reasons():
             row = await self._planner.require_stack(actor, environment_id, name, "write")
             require_administrator(actor)
+            self._release_imported(environment_id, row.name)
             audit.target_id = row.name
             audit.detail.update(kind="swarm", stack_id=row.id)
             holder = LockHolder(UserActor.of(actor), actor.username, "forget")

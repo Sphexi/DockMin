@@ -38,6 +38,7 @@ from app.services.acting import Acting, AutomationAuthority, is_administrator
 from app.services.authorisation import Authoriser
 from app.services.container_provisioning import NETWORK_UNAVAILABLE, VOLUME_UNAVAILABLE
 from app.services.image_bindings import RebindRefused, parse_pull_reference
+from app.services.imported_volumes import ImportedVolumes
 from app.services.object_inspector import (
     NETWORK_ID,
     VOLUME_OR_NETWORK_NAME,
@@ -576,11 +577,13 @@ class StackValidator:
         inspector: EngineObjectInspector,
         controls: ResourceControlRepository,
         credentials: PullCredentialResolver,
+        imported: ImportedVolumes | None = None,
     ) -> None:
         self._authoriser = authoriser
         self._inspector = inspector
         self._controls = controls
         self._credentials = credentials
+        self._imported = imported
         self._collisions = CollisionChecker(authoriser=authoriser, inspector=inspector)
 
     async def validate(
@@ -910,7 +913,11 @@ class StackValidator:
                 objects.append(f"Volume {volume_name}")
                 continue
             control = await self._controls.get_for(environment_id, "volume", volume.name)
-            if not in_project(volume.labels, stack) or control is not None:
+            if self._imported is not None and self._imported.registered(environment_id, stack):
+                own = self._imported.accepts(environment_id, stack, volume.name, volume.created_at)
+            else:
+                own = in_project(volume.labels, stack)
+            if not own or control is not None:
                 objects.append(f"Volume {volume_name}")
         for network_name in scanned.project_networks:
             try:

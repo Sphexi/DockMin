@@ -62,6 +62,7 @@ All paths are under `/environments/{id}/stacks`.
 | Forget confirmation, forget | `/{name}/forget` | `GET`, `POST` |
 | Export confirmation | `/{name}/export` | `GET` |
 | Export download | `/{name}/export` | `POST` |
+| Import ([Import pages](#import-pages)) | `/-/import`, `/-/import/{upload_id}`, `/-/import/{upload_id}/unlock`, `/-/import/{upload_id}/cancel` | `GET`, `POST` |
 | Access control | `/{name}/access`, `/{name}/access/delete` | `POST` |
 | Reveal a secret variable | `/{name}/variables/{variable_id}/reveal` | `POST` |
 | Masked row of a secret variable | `/{name}/variables/{variable_id}` | `GET` |
@@ -1587,7 +1588,7 @@ Export downloads a managed Compose stack as one gzip archive. Administrators onl
 | Lock | The stack and each chosen volume, from the confirmed download until it ends ([Locks and busy](#locks-and-busy)) |
 | Concurrency | One export at a time on an environment, two in all, shared with volume and container exports ([Export limits](#export-limits)) |
 | Swarm stacks | [Export (Swarm stacks)](Usage-Swarm#export-swarm-stacks) |
-| Import | Not available |
+| Import | [Import (Compose)](#import-compose) |
 | Recorded | `stack_export_started` and `stack_exported` ([Recorded actions](#recorded-actions)) |
 
 ### Export confirmation
@@ -1770,6 +1771,370 @@ A refusal before the download starts renders a page at the real status code, wit
 | Written | `format_version` `1`, in the manifest and in the manifest of each volume |
 | Reading | A later release reads every earlier `format_version` |
 | Newer archive | An archive whose `format_version`, or the `format_version` of a volume in it, is above the version the release knows is refused, with the version named |
+
+## Import (Compose)
+
+Import creates one managed Compose stack from a [stack export archive](#export-archive), creates and fills its volumes, and starts its first deployment. Administrators only.
+
+1. Open `Import stack` on the stack list.
+2. Choose the archive and `Upload and check`. The archive is read in full. Nothing is created.
+3. Open the sealed values with the passphrase, or enter each secret value, when the archive holds secrets.
+4. Read the review. Change the name if a name is in use, decide each host path, and choose a credential set for each image, then choose `Check the choices`.
+5. Choose `Import stack`. The stack, its volumes and their data are created, and the progress page of the first deployment opens.
+
+| Item | Value |
+|---|---|
+| Who | Administrators. A standard user receives `404` on every import route, before a request body is read, and nothing is recorded |
+| Pages | [Import pages](#import-pages) |
+| Accepts | An archive whose manifest `kind` is `compose_stack`. A Swarm stack archive and a container archive are refused at upload, naming where each belongs. A stack imports only as the kind it was exported as |
+| Upload | At most 7 GiB as uploaded, within 3,600 seconds, with 15 seconds allowed between body messages ([Import limits](#import-limits)) |
+| Disk | The upload is kept in a private directory under the data directory until the import ends, expires or is discarded ([Import limits](#import-limits)) |
+| Validation | Every member of the archive is checked before anything is created ([Import archive checks](#import-archive-checks)) |
+| Secret values | Opened with the passphrase on the review page, or entered one by one ([Import secret values](#import-secret-values)) |
+| Name | Defaults to the archived stack's name. A new name renames the project and every name derived from it ([Import review](#import-review)) |
+| Collisions | Every name the import would create is checked on the host. Nothing is overwritten. A collision removes `Import stack` until it is resolved by a new name |
+| Host paths | Each bind source is listed. Each is kept or replaced with a new named volume ([Import host paths](#import-host-paths)) |
+| Images | Nothing is pulled by the import. Each image is pulled by the deployment through the credential set chosen on the review ([Import images and credentials](#import-images-and-credentials)) |
+| Volumes | Created and filled before the stack is stored, then accepted by the first deployment ([Import volumes](#import-volumes)) |
+| Stack record | Stored with the archived file, variables, companion files and build contexts, by the checks of a [create](#create) |
+| Deploy | Starts as a job when the import completes ([Import deploy](#import-deploy)) |
+| Owner | The importing administrator ([Ownership](#ownership)). No team or other grant is carried |
+| Not carried | The items in [What is left out](#export-what-is-left-out) |
+| Lock | The stack name, and each volume that is written, while the import runs ([Locks and busy](#locks-and-busy)) |
+| Swarm stacks | [Import (Swarm stacks)](Usage-Swarm#import-swarm-stacks) |
+| Recorded | `stack_imported`, then `stack_deployed` ([Recorded actions](#recorded-actions)) |
+
+### Import pages
+
+All paths are under `/environments/{id}/stacks`.
+
+| Page | Path | Method |
+|---|---|---|
+| Upload form | `/-/import` | `GET` |
+| Upload | `/-/import` | `POST` |
+| Review | `/-/import/{upload_id}` | `GET` |
+| Check the choices, import | `/-/import/{upload_id}` | `POST` |
+| Open the sealed values | `/-/import/{upload_id}/unlock` | `POST` |
+| Discard the upload | `/-/import/{upload_id}/cancel` | `POST` |
+
+- `{upload_id}` is 32 lowercase hexadecimal characters. Any other form of at most 64 characters answers `404`; a longer one answers `422`.
+- `Import stack` sits beside `Create stack` on the stack list, for administrators.
+- Every page works without script. Every page is sent with `Cache-Control: no-store`.
+- The review form posts `action=check` or `action=import`. A post with any other `action` is a check.
+- A review form reads at most 400 fields. A field name is cut to 512 characters and a secret value to 70,000.
+
+#### Import upload
+
+`GET /environments/{id}/stacks/-/import`.
+
+| Element | Text |
+|---|---|
+| Heading | `Import stack`, with the environment name and badge |
+| Panel `Upload an archive` | `The archive must hold a Compose stack written by a stack export. It is checked in full before anything is created, and you review every object it will create, choose the credentials for each image and decide what happens to host paths before the stack is created.` |
+| Field `Archive` | Required file input, `.gz`, `.tgz` or `application/gzip`. Help: `A .tar.gz file written by a stack export, up to 7 GiB as uploaded. Every member passes the same rules as a volume import: devices, FIFOs, sockets, absolute names, names containing .. and entries below a symbolic link are refused.` |
+| Buttons | `Upload and check`, `Cancel` |
+
+The upload is a multipart `POST` with the fields in this order: `csrf_token`, then `archive`. The token is verified before any byte of the file is read.
+
+| Result | Status | Shown |
+|---|---|---|
+| Archive accepted | `303` | The review |
+| Archive refused, wrong kind, upload refused for size or space | `422` | The upload page, with the message beside `Archive` ([Import archive checks](#import-archive-checks)) |
+| Token missing or wrong, or Origin not accepted | `403` | |
+| The body is not a multipart form of the token followed by one file | `400` | |
+| No body data for 15 seconds, or the body takes over 3,600 seconds | `408`, `Connection: close` | |
+| The body exceeds 7 GiB plus 64 KiB | `413` | |
+
+### Import archive checks
+
+The whole archive is read once, in a worker thread, before the review is shown. Two archives are validated at once across the process, shared with volume import and build context validation.
+
+| Check | Rule |
+|---|---|
+| Compression | gzip only |
+| First member | `manifest.json`, at most 16 MiB, a valid [manifest](#export-manifest) |
+| Kind | `compose_stack` on this route |
+| Version | [Import format versions](#import-format-versions) |
+| Documents | Every document the manifest declares (`stack/compose.yaml`, each plain `stack/files/{name}`, each `stack/contexts/{index}`) is present once, with its declared size and SHA-256. A member the manifest does not declare is refused |
+| Text | The stack file and every plain companion file are UTF-8 text |
+| Volumes | Each `volumes/{index}/` comes in the manifest's order. It holds `manifest.json`, equal to the same volume's section of the top-level manifest, then its entries, then `skipped.json` when present |
+| Volume entries | The rules of [Accepted and refused entries](Usage-Volumes#accepted-and-refused-entries): types, names, symbolic links, hard links, owner ids, repeated names. Each volume's entries sit below its own prefix |
+| Empty volume | A volume with no entries is accepted |
+| Shared limits | 2,000,000 entries and 64 GiB of file data across every volume together |
+| Stack file | The checks of a [create](#checks) run when the review is made, not at upload |
+| Build contexts | Verified against their digests at upload, and read from the held file again at import |
+
+| Condition | Message beside `Archive` |
+|---|---|
+| Not gzip | `The file is not a gzip archive.` |
+| Truncated or corrupt stream, or an unreadable tar | `The file is not a readable export archive.` |
+| More decompressed bytes than the ceiling | `The archive extracts to more than the limit.` |
+| The first member is not `manifest.json` | `The archive does not start with manifest.json.` |
+| `manifest.json` over 16 MiB | `The archive's manifest.json is too large.` |
+| The manifest is not valid | `The archive's manifest.json is not a valid export manifest.` |
+| A newer `format_version` | `The archive's format version is {N}; this build reads up to 1.` |
+| A member the manifest does not declare, a missing or repeated document, a wrong size or digest, or volumes out of order | `The archive's members do not match its manifest.` With ` Entry: {name}.` when one entry is at fault |
+| A declared document that is not a regular file or is over its limit | `The archive holds a document that is not usable.` |
+| A stack file or companion file that is not UTF-8 | `A document of the archive is not UTF-8 text.` |
+| The manifest holds no stack | `The archive does not hold a stack.` |
+| A volume manifest that is not valid, differs from the top-level one or is missing | `A volume manifest of the archive is not valid.`, `A volume manifest of the archive differs from the archive's manifest.`, `A volume of the archive has no manifest.` |
+| An entry of a volume breaks a rule | `Volume {index}: ` and the message of [Refusals of the archive](Usage-Volumes#refusals-of-the-archive) |
+| A Swarm stack archive | `The archive holds a Swarm stack. Import it from the Swarm stacks list.` |
+| A container archive | `The archive holds a container, not a stack.` |
+| More than 7 GiB uploaded | `The archive is larger than the upload limit.` |
+| Less than 256 MiB free on the data volume after the upload's size | `There is not enough free space on the data volume for this upload.` |
+
+- The entry named is shown with unprintable characters replaced by `?`, cut to 80 characters.
+- A refused upload is removed from disk at once.
+
+### Import review
+
+`GET /environments/{id}/stacks/-/import/{upload_id}`. Nothing is created or recorded. The page reads the held upload and the host, never the request body.
+
+| Section | Content |
+|---|---|
+| Heading | `Review the import`. Subtitle: `Nothing has been created yet. Check everything the archive will create, then confirm.` Button `Back to stacks` |
+| `The archive` | Environment; Kind (`Compose stack`); Format version (`{N}, written by dockmin {version}`); Exported (time); Source stack (the name in the manifest); Size as uploaded; Volume data (`{size} in {N} volumes`); SHA-256 of the uploaded file |
+| `Sealed values` | Shown when the archive's `secrets` is `sealed`. [Import secret values](#import-secret-values) |
+| `The stack this creates` | Field `Name`, the collisions, and the warnings of the checks |
+| `Objects it creates` | A table of `Kind`, `Name` and `Note`: each container, network and volume |
+| `Volumes and their data` | [Import volumes](#import-volumes) |
+| `Host paths` | Shown when the file binds a host path. [Import host paths](#import-host-paths) |
+| `Secret values` | Shown when the archive holds a secret variable or file. [Import secret values](#import-secret-values) |
+| `Variables, files and build contexts` | The count and names of each. A secret variable is marked `(secret)`; a file shows its size in bytes and `secret` when it is |
+| `Images` | [Import images and credentials](#import-images-and-credentials) |
+| `What happens` | Three statements ([What the import does](#what-the-import-does)) |
+| Buttons | `Import stack` (absent while a name collides, while the file is not checked, or when volume data is to be written and the host has no image), `Check the choices`, `Back to stacks`, and a separate form `Discard the upload` |
+
+| Element | Text |
+|---|---|
+| `Name` help | `Every project-derived name is built from this one: its containers, networks and volumes. Change it and choose Check to see the names it gives. The stack is created under this name only.` |
+| Name that breaks the grammar | The message of [Stack names](#stack-names) beside `Name`. The typed text is kept and the review is made for the archived name |
+| Alert `Names already in use` | `Nothing existing is overwritten. Change the name above and choose Check, or discard the upload.` A table of `Kind`, `Name` and `Why it cannot be used` |
+| Objects before the name is free | `The objects are listed once the names above are free.` and, under the alert, `Further collisions are checked once the stack name is free.` |
+| No object | `The stack file declares no object that is created on the host.` |
+| Objects note | `The stack record, with its stored file, variables, companion files and build contexts, is created first. Containers and networks are created when the stack is deployed, which starts as soon as the import completes.` |
+| Stored file note | `The stored stack file is the archive's own` and, when a host path is replaced, `, with the host paths you replace rewritten to named volumes` |
+
+##### What the import does
+
+| Statement |
+|---|
+| `The stack and the volumes it creates become yours; no team or other access is carried from the archive.` |
+| `Resource controls, automation rules, webhooks and image bindings are not in the archive. Each image is bound to the credential set you choose when it is pulled.` |
+| `The stack is deployed as soon as the import completes. If it is refused or fails, the stack stays and can be deployed from its page.` |
+
+#### Import rename
+
+| Item | Value |
+|---|---|
+| Field | `Name`, with the grammar of [Stack names](#stack-names) |
+| Effect | The project name is the stack name. Containers, networks and volumes that Compose names from the project take the new name. A name the file writes out (`container_name`, a `name:` on a network or volume) is not changed |
+| Check | `Check the choices` posts the name and shows the names it gives and the collisions. A rename changes the plan, so `Import stack` after it without a check answers `The plan changed since you reviewed it; nothing was changed.` (`409`, reason `changed_since_review`) |
+| Volume data | An archived volume named `{archived stack}_{key}` fills the declared volume `{new name}_{key}` |
+| Nothing overwritten | An object that holds a name stays as it is. The collision stays listed until the name changes |
+
+#### Import collisions
+
+Each name the import would create is compared with the host.
+
+| Kind | Meaning | Text |
+|---|---|---|
+| `stack` | A stack of either kind, a Compose project, or a Swarm namespace has the name in any case, or leftovers of a dismissed project remain | `A stack, Compose project or Swarm namespace with this name already exists.` |
+| `volume` | A volume with the name exists and is not this stack's | `A volume with this name already exists and does not belong to this stack.` |
+| `network` | A network with the name exists and is not this stack's | `A network with this name already exists and does not belong to this stack.` |
+| `container` | A container with the name exists, in any state, or a running container holds the explicit `container_name` | `A container with this name already exists.` or the text of [Container name and port collisions](#container-name-and-port-collisions) |
+| `port` | A running container publishes a port the file publishes | The text of [Container name and port collisions](#container-name-and-port-collisions) |
+
+- A stack name collision is found first. It hides the other collisions and the object list until the name is free.
+- A volume or network collision is listed on its own and leaves the object list to the next check.
+- The existing-object rules are those of [Objects that already exist](#objects-that-already-exist).
+- A dismissed project whose leftovers remain is a stack name collision. A dismissed project with no leftovers is cleared by the import ([Dismissed entries](#dismissed-entries)).
+
+### Import secret values
+
+| Item | Value |
+|---|---|
+| Archive with `secrets` `none` | No `Sealed values` panel and no `Secret values` section |
+| Archive with `secrets` `sealed` | The `Sealed values` panel offers `Passphrase` and `Open the sealed values`. A value can instead be entered in `Secret values` |
+| Archive with `secrets` `omitted` | No `Sealed values` panel. `Secret values` asks for each value |
+| Panel text, not opened | `The archive's secret values are sealed under a passphrase. Enter it to open them, or enter each value by hand in the form below. The passphrase is used once and is not stored or shown again. {N} attempts left in this session.` One attempt reads `1 attempt left in this session.` |
+| Panel text, opened | `The sealed values were opened with the passphrase. They are held until you confirm, discard the upload or it expires, and are never shown.` |
+| Field | `Passphrase`, a password field with `autocomplete="off"`. Never put back into a page |
+| Open | `POST /environments/{id}/stacks/-/import/{upload_id}/unlock`. The passphrase is applied in a worker thread and used once. The opened values are held in memory with the upload |
+| Success | `303` to the review with the notice `The sealed values were opened.` |
+| Wrong passphrase, or a sealed value that was altered | `422`, the review with `The passphrase did not open the archive. {N} attempts left in this session.` at `Passphrase`. The sealed values stay unopened |
+| Attempt limit | 5 failed attempts for each session, counted for the life of the process, whatever the upload. A success does not reset the count. Further attempts answer `429` with `Too many wrong passphrases in this session. Sign in again to try more, or enter the secret values by hand.` Signing in again starts a new session |
+| Empty passphrase | `422`, `Enter the passphrase.` Not counted |
+| Archive with no sealed values | `422`, `This archive holds no sealed values.` |
+| Entry | `Secret values` lists each secret variable and file by name with a password field `Value of {kind} {name}`, `autocomplete="off"`, for each value that is not opened. Help: `Not opened. Open the archive above, or enter the value.` for a sealed archive, `The archive carries only the name. Enter the value.` for one that left them out. Opened values show `Opened from the archive` |
+| Entered values | Posted with `Check the choices` and `Import stack`, held for that request only, and never put back into a page. They are entered again after a check |
+| Precedence | An opened value is used in place of an entered one |
+| Required | `Import stack` is refused while a secret is neither opened nor entered |
+| Secret file | The value is UTF-8 text |
+| Storage | Values are stored encrypted by the create, as a [secret variable](#secret-variables) or [secret file](#secret-files) is |
+| Logged, recorded | No passphrase and no value is logged or recorded. A failed attempt logs `stack_import_unlock_failed` with the environment id |
+
+The algorithm: [Export sealing](Reference-Security#export-sealing).
+
+### Import host paths
+
+A host path is the source of a bind in a service's `volumes`, in short or long syntax, that starts with `/`, `./`, `../` or `~`. A `./{name}` that names a companion file of the stack is not listed.
+
+| Item | Value |
+|---|---|
+| Listed | `Host paths`: for each path, `Used by {services}` and a choice |
+| Choices | `Keep the path` and `Replace it with a new named volume`, followed by the volume's name once chosen and checked. None is selected. Each is required |
+| Text | `The stack file binds these paths on the host. Choose what happens to each. Keeping a path leaves the file as it is, and the deployment can create the directory on the host if it is missing. Replacing it rewrites the file to use a new, empty named volume, and no directory is created.` |
+| Keep | The stored file is the archived file. The import creates no directory. A deployment may create the directory of a short-syntax bind that is missing, as Compose does |
+| Replace | The file is rewritten before it is checked and stored: the source becomes `hostpath-{N}`, the `bind` options of a long-syntax entry are dropped, and the volume `hostpath-{N}` is declared at the top level. `{N}` counts from 1 in the order of the paths. The volume is created empty by the deployment |
+| Rewrite | The file is loaded as YAML and written again. Comments and formatting are not kept. A file that cannot be rewritten is refused: `The stack file cannot be rewritten to replace host paths.` |
+| Not decided | `Import stack` is refused with `Choose what to do with each host path the stack binds.` (`409`, reason `paths_undecided`) |
+| Contents | The directory's contents are not in the archive and are not read |
+
+### Import volumes
+
+| Item | Value |
+|---|---|
+| Table | `Volumes and their data`: `Volume`, `Filled from`, `Entries`, `Size` |
+| `Filled from` | The archived volume's name; `A new empty volume replacing a host path`; or `Created empty when the stack is deployed` |
+| Matching | An archived volume fills a declared volume when its name is the declared name, or, when the declared name is `{stack}_{key}`, when its name is `{archived stack}_{key}` |
+| Not written | Declared volumes the archive holds no data for are created by the deployment. `Archived volumes that are not written:` lists an archived volume that no declaration claims (`The stack file declares no volume that this one fills.`) and one whose declaration names a driver other than `local` (`The stack file gives the volume a driver other than local, so its data is not written.`) |
+| External volumes | Not created and not filled |
+| Created with | Driver `local`, the file's own `driver_opts` and labels, and the labels `com.docker.compose.project` (the stack name) and `com.docker.compose.volume` (the volume's key in the file). Archived labels and driver options are not applied |
+| Written | Before the stack record is stored. A helper container, created from an image already on the host and never started, mounts the volume read-write and receives the files ([Import helper](Usage-Volumes#import-helper)) |
+| Files | Written as archived: numeric owner ids and modes are kept, setuid and setgid bits are cleared, owner names are emptied. The volume's root owner and mode are not applied. Only `user.` extended attributes are applied |
+| Re-validation | Each volume is read from the held file again as it is sent, under the same rules |
+| Helper image | `dockmin creates a helper container from the image {first 12 digits of the image id}, which is already on the host, once for each volume. It is never started, has no network and no capabilities, and is removed when its volume has been written.` With no image on the host: the alert `The host has no image to use`, `The helper container is created from an image that is already on the host, and nothing is pulled. Pull or load an image on the host, then check the import again.` `Import stack` is absent |
+| Statements | `Each volume with data is created before the stack is deployed, labelled as the stack's own, and written as archived: numeric owner ids and modes are kept, except that setuid and setgid bits are cleared. A container that mounts the volume runs with whatever the files contain.` `The volume's own root owner and mode are not applied, and extended attributes other than user. ones are not written.` `If a volume cannot be written, every volume this import created is removed and nothing else changes.` |
+| Name check | Each volume to create is checked absent on the host under its volume lock. One that exists refuses the import (`409`, reason `name_in_use`) |
+| Owner | No access control is written for a volume. After the first deployment the stack's volumes are member objects of the stack ([Ownership](#ownership)) |
+| No data | A stack with no volume to write creates nothing before the deployment and needs no helper image |
+
+How the deployment accepts the volumes:
+
+| Situation | Behaviour |
+|---|---|
+| First deployment after the import | The [pre-existing object check](#objects-that-already-exist) accepts a project volume that exists only when it is one this import created, with the creation time the host reported then. A project volume of another origin is refused (`409`, reason `preexisting_objects`), whatever its labels. A volume of the stack with an access control of its own is refused as before |
+| A created volume recreated or replaced before the deployment | Its creation time differs. The deployment refuses it |
+| Ends | When the stack's first deployment succeeds, when the stack is removed or forgotten, and when the import fails |
+| Failed deployment | The binding stays until a deployment succeeds |
+| After a restart of dockmin before the first deployment | The binding is held in memory and is gone. The existing rule applies: a project volume is accepted when its `com.docker.compose.project` label equals the stack name and it has no access control of its own |
+| After the first deployment | The existing rule applies to every later deployment |
+
+### Import images and credentials
+
+| Item | Value |
+|---|---|
+| Table | `Images`: `Reference`, `Used by`, `Archive digest` and `On this host`. `not recorded` when the archive holds no digest |
+| `On this host` | `The same digest`; `A different digest: {digest}. The stored file keeps the tag, so a pull resolves whatever the tag names.`; `Not on this host. A pull resolves the tag when it runs, and can return a different digest.`; `The archive recorded no digest.` |
+| Note | `Images are not in the archive. The stored file keeps each tag as exported; nothing is pinned by digest.` With no image: `The stack file names no image outright.` |
+| Pickers | One under each image the deployment would pull, as in [Images and credentials](#images-and-credentials): a radio for `Anonymous (no credentials)` and one for each usable credential set, each required, with the binding of the image stated |
+| Preselected | Nothing. A set that matches the registry's address, a default set and the only fitting set are all unselected. Anonymous is a choice like any other |
+| No usable set | `Anonymous (no credentials)` is shown as text and posted |
+| Not chosen | `Import stack` is refused (`409`, reason `credential_choice_required`) with `Choose how to pull this image.` beside the image. Nothing is created |
+| Pull | The deployment pulls each image through the chosen set and binds the image to it ([Images and credentials](#images-and-credentials)). The import itself pulls nothing |
+| Binding | Resource controls and image bindings of the source are not in the archive. A binding is made only by the deployment |
+
+### Import confirmation
+
+`POST /environments/{id}/stacks/-/import/{upload_id}` with `action=import`. The form carries the CSRF token, `expected_plan`, the name, one choice for each host path, one choice for each image and a value for each secret that is not opened.
+
+| Step | Detail |
+|---|---|
+| 1 | Administrator, and the environment. The upload is held for this user, session and environment, else `The upload is gone` |
+| 2 | The plan is made again from the held archive and the host and compared with `expected_plan`, else `changed_since_review` |
+| 3 | No collision, every secret opened or entered, every host path decided, else the review again with the refusal ([Import refusals](#import-refusals)) |
+| 4 | A credential choice for each image the deployment pulls, else `credential_choice_required` |
+| 5 | The helper image, when volume data is to be written; the build contexts are read from the held file |
+| 6 | The stack name is locked, and the checks of a [create](#create) run on the stored file: the pre-check, the restrictions, the existing objects, the container name and port collisions, and the credential resolution |
+| 7 | Each volume to fill is locked, checked absent, created, labelled and written, one at a time |
+| 8 | In one transaction: the stack row, the variables, the companion files, the build contexts, the stack's access control and the success row. A dismissal of the same name is cleared |
+| 9 | The held upload is removed. The deployment starts as a job |
+
+| Item | Value |
+|---|---|
+| Plan binding | `expected_plan` is a keyed SHA-256 over the archive's digest, the name, the objects and volumes, the skipped volumes, the host path sources, each image's status, the collisions and the variable, file and context lists. The key is random for each process and is never stored, so a restart between the review and the confirmation answers `changed_since_review` |
+| Not in the plan | The choice for each host path, the credential choices and the secret values. Deciding them does not change the plan |
+| Admission | The stored file passes the checks of a create ([Checks](#checks)) |
+| Stack state | Stored as a created stack with origin `Created here` and status `Not deployed` |
+| Held upload | Removed once any volume has been created, whether the import then succeeds or fails. Kept after a refusal that created nothing |
+
+### Import deploy
+
+| Item | Value |
+|---|---|
+| Starts | When the import completes. The import redirects (`303`) to the progress page of the first deployment ([Operation progress](#operation-progress)) with the notice `Imported compose stack {name}: {N} volumes written, {N} variables.` (`volume` and `variable` when the count is 1), and up to three warnings of the checks |
+| Operation | The first deployment, as after a [create](#create): the credential choices of the review, the container name and port check on, the pulls, `up`, and the bindings ([Deploy and redeploy](#deploy-and-redeploy)) |
+| Recorded | `stack_deployed`, with the image bindings ([Recorded actions](#recorded-actions)) |
+| Job limit | The import reserves a job slot first. With none free it answers `429`, page `Too many operations are running`, and creates nothing |
+| Deployment refused or failed | The stack, its volumes and their data stay. The progress page shows the outcome. The stack is deployed from its page |
+| Job cannot start after the import | `429`, page `Stack imported`, alert `The stack was not deployed` with the reason, and `The compose stack {name} exists with its files, variables and volume data. Deploy it from its page.` Facts: Stack, Variables, Files, Build contexts, Volumes written, Volume data, Owner. Buttons `Open the stack`, `Back to stacks` |
+| Owner | `You`, or `Not recorded. An administrator can assign access to the stack.` |
+
+### Import failure behaviour
+
+| Stage | Result |
+|---|---|
+| Before the first volume is created | Nothing is changed. The upload stays held |
+| A volume cannot be written, or a later check refuses the stack | Every volume this import created is removed, in reverse order, and no stack record is written. Only a volume this import created is removed, without force. The page answers `502`, `The import failed`: `The archive's data could not be written to the host. Every volume this import created was removed.` The upload is removed |
+| A volume cannot be removed | The same page: `The archive's data could not be written to the host. These volumes could not be removed; remove them from the volumes list: {names}.` The row records the names in `volumes_kept` |
+| A refusal of the stack after a volume was created (a name in use, a refused file) | The volumes are removed and the refusal is shown as for any refusal |
+| The request is cancelled or the client leaves | The volumes are removed. A failure row with reason `interrupted` is written on a session of its own |
+| The helper container | Removed when its volume has been written, however that ends |
+| The stack record | Written last, in one transaction with the success row. A failed import leaves none |
+
+### Import refusals
+
+A refusal at the confirmation renders the review again at the status shown, with the error summarised at the top, unless the table names another page. A refusal that created nothing keeps the upload held.
+
+| Condition | Status | Page | Message | Reason |
+|---|---|---|---|---|
+| Not an administrator, an environment or upload id of the wrong form | 404 | | Not found | No row |
+| The upload is not held for this session, user and environment, or was discarded | 409 | `The upload is gone` | `This upload is no longer held. Upload the archive again; nothing was changed.` Link `Upload the archive again` | `upload_gone` |
+| The plan differs from the review's | 409 | The review | `The plan changed since you reviewed it; nothing was changed.` | `changed_since_review` |
+| A name collides | 409 | The review | `Names this import would create are already in use: {kind} {name}; ...` for up to ten, with the table of collisions | `collision` |
+| A secret is neither opened nor entered | 409 | The review | `The values of some secrets are neither opened nor entered.` | `secrets_needed` |
+| A host path has no choice | 409 | The review | `Choose what to do with each host path the stack binds.` | `paths_undecided` |
+| An image has no credential choice | 409 | The review | `Choose how to pull this image.` beside the image | `credential_choice_required` |
+| The host has no image for the helper | 409 | The review | `The host has no image to create the helper container from. Pull or load an image on the host, then try again.` | `helper_image_missing` |
+| The stack file is refused by the checks of a create | The status of the check | The review, with the check's messages | [Checks](#checks), [Errors](#errors) | The check's reason |
+| The stack name is in use, or project objects exist | 409 | The review | The collisions | `name_in_use`, `preexisting_objects` |
+| Another action holds the stack or a volume | 409 | `This stack is busy` | [Locks and busy](#locks-and-busy) | `object_busy` |
+| Too many operations are running | 429 | `Too many operations are running` | The job limit | No row |
+| The host is unreachable, or did not answer in time | 503 | The host message | [Host failures](Usage-Containers#host-failures) | `unreachable`, `outcome_unknown` |
+| The data could not be written | 502 | `The import failed` | [Import failure behaviour](#import-failure-behaviour) | [Failure reasons](Administration-Activity#stack-import-rows) |
+
+### Import limits
+
+| Limit | Value |
+|---|---|
+| Upload | 7 GiB as uploaded, with 64 KiB of multipart framing |
+| Upload time | 3,600 seconds for the whole body; 15 seconds without a body message. The 256 KiB body cap and 30 second deadline of every other route are unchanged ([Body size](Reference-Deployment#body-size)) |
+| Free space | At least 256 MiB free on the data volume before the first byte, plus the declared length when the request has one, and after every write |
+| Entries | 2,000,000 across every volume |
+| File data | 64 GiB across every volume |
+| Decompressed bytes read | The file data limit, plus the volume allowance (8 KiB for each allowed entry and 2 MiB), plus 128 KiB, 20 files of 64 KiB and 64 MiB for the documents, plus the 16 MiB manifest and 17 MiB for each volume's manifest and `skipped.json`. Past it the archive is refused and no entry is named |
+| Volumes | At most 64, the limit of the manifest |
+| Stack file, companion files, build contexts | As [Export limits](#export-limits) and [Create](#create) |
+| Validation at once | 2 archives across the process, shared with volume import and build context validation |
+| Held uploads | 1 for each user, 4 in all, 30 minutes. A newer upload by the same user replaces the earlier one; the oldest is dropped past four. An upload whose import is running is never dropped and does not expire |
+| Removed | On a refused archive, a failed upload, a newer upload by the same user, discard, expiry, shutdown, and at start, when the whole directory is deleted. When any volume has been created, and when the import succeeds |
+| Usable by | The user, the session and the environment that uploaded it |
+| Unlock | 5 failed attempts for each session |
+| Write stall | The import fails when the host accepts no byte for 60 seconds. The host's reply is waited for 600 seconds |
+| Write time | No total limit |
+| Memory | Each volume's tar is rebuilt in a worker thread in steps of at most 256 KiB. The stack file, the plain files and the entered values are held in memory. A held upload keeps its file's text and the opened secret values in memory until the upload is dropped |
+
+The held file is `{data directory}/stack-import/{32 hexadecimal digits}.tar.gz`, mode `0600`, written under a `.partial` name and renamed when complete ([Data directory](Reference-Deployment#data-directory)). The reverse proxy limits are in [Deployment](Reference-Deployment#reverse-proxy-limits-for-stack-imports).
+
+### Import format versions
+
+| Item | Value |
+|---|---|
+| Read | `format_version` `1`, and every earlier version a later release reads |
+| Newer archive | Refused when the `format_version` of the manifest, or of a volume manifest in it, is above the version the release knows. The message names the version: `The archive's format version is {N}; this build reads up to 1.` |
+| Written | [Export format version](#export-format-version) |
 
 ## Adopt
 
@@ -2346,6 +2711,7 @@ Beneath the data directory:
 |---|---|
 | `stacks/{token}/compose.yaml` | The working copy of one stack's file. `{token}` is 32 random hexadecimal digits chosen at create. The directory is `0700`, the file `0600` |
 | `stacks/{token}/{file name}` | A [companion file](#companion-files) that Compose reads as an environment file or as a Compose file, written before an invocation, `0600`. Not present for a file used only as a config or secret source |
+| `stack-import/` | One file for each held stack import upload ([Import limits](#import-limits)) |
 | `compose-work/` | Per-invocation work directories, which hold `sources.yaml` when the stack has config or secret files ([Data directory](Reference-Deployment#data-directory)). A build's work directory holds the extracted [build context](#build-contexts), deleted when the build ends |
 
 | Rule | Value |
@@ -2378,12 +2744,13 @@ Every operation records one activity row, for success and for failure, with the 
 | `stack_adopted` | Adopt, from a pasted file or from a read |
 | `stack_files_read` | Read from host: one row for each read, whatever its result ([Read from host](#read-from-host)) |
 | `stack_export_started`, `stack_exported` | Export of a Compose or a Swarm stack ([Export](#export)). Keys: [Activity](Administration-Activity#stack-export-rows) |
+| `stack_imported` | Import of a Compose or a Swarm stack ([Import (Compose)](#import-compose)). Keys: [Activity](Administration-Activity#stack-import-rows). The deployment that follows writes `stack_deployed` |
 | `stack_variable_revealed` | Reveal of a secret variable, of a Compose or a Swarm stack ([Reveal a secret variable](#reveal-a-secret-variable)). Keys: [Activity](Administration-Activity) |
 | `stack_dismissed`, `stack_dismissal_cleared` | Dismiss and restore of a project or namespace that is not managed here ([Dismiss](#dismiss)). Keys: [Activity](Administration-Activity) |
 
 | Detail key | Present on |
 |---|---|
-| `stack_id` | All except `stack_files_read`, `stack_variable_revealed`, `stack_dismissed`, `stack_dismissal_cleared`, `stack_export_started` and `stack_exported` |
+| `stack_id` | All except `stack_files_read`, `stack_variable_revealed`, `stack_dismissed`, `stack_dismissal_cleared`, `stack_export_started` and `stack_exported`. `stack_imported` carries it on success |
 | `origin` | `stack_created` (`created`) |
 | `compose_digest` | `stack_created`, `stack_updated`, `stack_deployed`, `stack_redeployed`, `stack_adopted`: SHA-256 of the file |
 | `resolved_digest` | `stack_deployed`, `stack_redeployed`: SHA-256 of the resolved configuration with secret values masked |
@@ -2689,6 +3056,7 @@ All paths are under `/environments/{id}/swarm/stacks`.
 | Forget confirmation, forget | `/{namespace}/forget` | `GET`, `POST` |
 | Export confirmation | `/{namespace}/export` | `GET` |
 | Export download | `/{namespace}/export` | `POST` |
+| Import ([Import pages](Usage-Swarm#import-pages-swarm-stacks)) | `/-/import`, `/-/import/{upload_id}`, `/-/import/{upload_id}/unlock`, `/-/import/{upload_id}/cancel` | `GET`, `POST` |
 | Access control | `/{namespace}/access`, `/{namespace}/access/delete` | `POST` |
 | Reveal a secret variable | `/{namespace}/variables/{variable_id}/reveal` | `POST` |
 | Masked row of a secret variable | `/{namespace}/variables/{variable_id}` | `GET` |
@@ -3463,6 +3831,7 @@ Swarm stack operations use the `stack_*` actions with `kind` set to `swarm`. Cat
 | `stack_adopted` | Adopt, from a pasted file or from a reconstruction |
 | `stack_files_read` | Reconstruct from the cluster: one row for each reconstruction, whatever its result |
 | `stack_export_started`, `stack_exported` | Export ([Export (Swarm stacks)](Usage-Swarm#export-swarm-stacks)). Keys: [Activity](Administration-Activity#stack-export-rows) |
+| `stack_imported` | Import ([Import (Swarm stacks)](Usage-Swarm#import-swarm-stacks)). Keys: [Activity](Administration-Activity#stack-import-rows). The deployment that follows writes `stack_deployed` |
 | `stack_variable_revealed` | Reveal of a secret variable of a Swarm stack ([Reveal a secret variable](#reveal-a-secret-variable)) |
 | `stack_dismissed`, `stack_dismissal_cleared` | Dismiss and restore of a namespace that is not managed here ([Swarm stack list and page](#swarm-stack-list-and-page)) |
 

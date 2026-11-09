@@ -1040,6 +1040,7 @@ def _stack_parts(
         inspector=inspector,
         controls=control_repo,
         credentials=credentials,
+        imported=engine.imported_volumes,
     )
     queries = StackQueryService(
         authoriser=access.authoriser,
@@ -1070,6 +1071,7 @@ def _stack_parts(
         tls=tls,
         locks=engine.locks,
         poke=poke,
+        imported=engine.imported_volumes,
     )
     logs = StackLogService(
         authoriser=access.authoriser,
@@ -1143,6 +1145,7 @@ def build_stack_services(
             bindings=bindings,
             bindings_factory=bindings_factory,
             self_identity=self_identity,
+            imported=engine.imported_volumes,
         ),
         jobs=engine.stack_jobs,
         logs=parts.logs,
@@ -1185,6 +1188,7 @@ def build_stack_services(
             poke=poke,
             bindings_factory=bindings_factory,
             self_identity=self_identity,
+            imported=engine.imported_volumes,
         ),
         swarm_adopter=SwarmStackAdopter(
             db=db,

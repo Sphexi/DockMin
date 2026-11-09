@@ -86,7 +86,7 @@ dockmin reads the client address and the request scheme from `X-Forwarded-For` a
 | Client address | Send `X-Forwarded-For` with the client's address |
 | Scheme | Send `X-Forwarded-Proto: https`. dockmin then treats the request as HTTPS and sends `Strict-Transport-Security` |
 | `Host` | Preserve the public host, or list the public origin in `DOCKMIN_TRUSTED_ORIGINS` ([below](#terminals-and-streams-behind-a-reverse-proxy)) |
-| Request bodies | Allow at least 256 KiB. Larger bodies are for `POST /restore/archive` ([Reverse proxy limits for backups](#reverse-proxy-limits-for-backups)), the build context upload ([Reverse proxy limits for build contexts](#reverse-proxy-limits-for-build-contexts)) and the volume import upload ([Reverse proxy limits for volume imports](#reverse-proxy-limits-for-volume-imports)) only |
+| Request bodies | Allow at least 256 KiB. Larger bodies are for `POST /restore/archive` ([Reverse proxy limits for backups](#reverse-proxy-limits-for-backups)), the build context upload ([Reverse proxy limits for build contexts](#reverse-proxy-limits-for-build-contexts)), the volume import upload ([Reverse proxy limits for volume imports](#reverse-proxy-limits-for-volume-imports)) and the stack import upload ([Reverse proxy limits for stack imports](#reverse-proxy-limits-for-stack-imports)) only |
 | Security headers | dockmin sends its own ([Security headers](#security-headers)). A header the proxy adds is sent in addition |
 | TLS and renewal | The proxy's |
 | Proxy on the same host | List `127.0.0.1` and `::1` in `DOCKMIN_TRUSTED_PROXIES` |
@@ -190,6 +190,7 @@ An error from these layers is an HTML page, an `error_state` fragment for an HTM
 | Exempt | `POST /restore/archive`. Its limits: [Backups](Administration-Backups#upload) |
 | Own cap | `POST /environments/{id}/stacks/{name}/contexts/-/upload`: 16 MiB and 64 KiB, within 300 s. Its limits: [Stacks](Usage-Stacks#build-contexts) |
 | Own cap | `POST /environments/{id}/volumes/-/import`: 7 GiB and 64 KiB, within 3,600 s. Its limits: [Volumes](Usage-Volumes#import-limits) |
+| Own cap | `POST /environments/{id}/stacks/-/import` and `POST /environments/{id}/swarm/stacks/-/import`: 7 GiB and 64 KiB, within 3,600 s. Its limits: [Stacks](Usage-Stacks#import-limits) |
 | Memory | Multipart parts under the cap stay in memory; nothing is written to `/tmp` |
 
 Limits inside the cap are checked by the routes: a Compose file is at most 131,072 bytes and each PEM field at most 65,536 bytes.
@@ -702,7 +703,7 @@ The binary is located once at start and run by its absolute path. The requiremen
 
 ### Data directory
 
-dockmin creates three directories beneath `DOCKMIN_DATA_DIR` (`/data` in the image) at start. Start fails when any of them is a symbolic link. A self-signed certificate adds `server-tls/`, and backups and restores create two more on demand, and a volume import creates one.
+dockmin creates three directories beneath `DOCKMIN_DATA_DIR` (`/data` in the image) at start. Start fails when any of them is a symbolic link. A self-signed certificate adds `server-tls/`, and backups and restores create two more on demand, and a volume import and a stack import each create one.
 
 | Path | Mode | Content |
 |---|---|---|
@@ -722,6 +723,7 @@ dockmin creates three directories beneath `DOCKMIN_DATA_DIR` (`/data` in the ima
 | `sqlite-tmp/` | `0700` | SQLite temporary files, when `SQLITE_TMPDIR` names it (the image does). Created at start |
 | `backup-work/` | `0700` | One directory per archive being produced, holding the snapshot and the finished archive. Removed when the download or upload ends, and deleted whole at every process start |
 | `volume-import/` | `0700` | One `0600` file per held volume import upload, `{32 hexadecimal digits}.tar.gz`, written under a `.partial` name until complete. Created at the first upload. Each file is removed when its upload is discarded, expires after 30 minutes, is replaced, or its import ends. The whole directory is deleted at every process start and a symbolic link at that path is removed ([Volumes](Usage-Volumes#held-uploads)) |
+| `stack-import/` | `0700` | One `0600` file per held stack import upload, `{32 hexadecimal digits}.tar.gz`, written under a `.partial` name until complete. Created at the first upload. Each file is removed when its upload is discarded, expires after 30 minutes, is replaced, or once a volume of its import has been created. The whole directory is deleted at every process start and a symbolic link at that path is removed ([Stacks](Usage-Stacks#import-limits)) |
 | `restore/` | `0700` | One directory per restore, named by the restore id: the uploaded or fetched archive (`archive.tar.gz` for a command-line restore), `staging/`, and after a swap `previous/` (the replaced data) and `rejected/` (restored files that did not start). Deleted at the restore's end or at start, except a directory holding `previous/` or `rejected/`, which is kept and logged as `restore_previous_data_present`. The product never deletes `previous/` or `rejected/` ([Backups](Administration-Backups#paths-and-previous-data)) |
 
 - `backup-work/` and `restore/` must be on the same filesystem as `dockmin.db` and `stacks/`. A restore moves data with renames.
@@ -733,6 +735,7 @@ dockmin creates three directories beneath `DOCKMIN_DATA_DIR` (`/data` in the ima
 | Producing an archive | 2 × (database size + write-ahead log size) + 64 MiB, plus the archive itself |
 | Receiving a restore upload, or fetching an archive from a bucket | The archive's size, and at least 256 MiB left at every write |
 | Receiving a volume import upload | The declared length of the request when it has one, and at least 256 MiB left at the start and at every write. The file is removed when the import ends |
+| Receiving a stack import upload | The declared length of the request when it has one, and at least 256 MiB left at the start and at every write. The file is removed when the import ends |
 | Restoring from the command line | The archive's size plus 256 MiB for the copy the command makes, then the staging space below |
 | Staging a restore | 2 × the total size of the archive's members + 64 MiB |
 | A restore that completes | The uploaded archive, the staged copy, and the replaced data kept in `previous/` |
@@ -753,6 +756,12 @@ dockmin creates three directories beneath `DOCKMIN_DATA_DIR` (`/data` in the ima
 | Path | Requirement |
 |---|---|
 | `POST /environments/{id}/volumes/-/import` | Allow a request body of at least 7 GiB and 64 KiB. nginx: `client_max_body_size 8g;` (its default is 1 MiB). Do not spool the body to a small disk: nginx `proxy_request_buffering off;`. dockmin refuses a body over 7 GiB and 64 KiB with `413`, and answers `408` when no data arrives for 15 s or the body takes more than 3,600 s |
+
+### Reverse proxy limits for stack imports
+
+| Path | Requirement |
+|---|---|
+| `POST /environments/{id}/stacks/-/import`, `POST /environments/{id}/swarm/stacks/-/import` | Allow a request body of at least 7 GiB and 64 KiB. nginx: `client_max_body_size 8g;` (its default is 1 MiB). Do not spool the body to a small disk: nginx `proxy_request_buffering off;`. dockmin refuses a body over 7 GiB and 64 KiB with `413`, and answers `408` when no data arrives for 15 s or the body takes more than 3,600 s |
 
 ### Reverse proxy limits for build contexts
 
