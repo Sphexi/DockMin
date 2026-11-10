@@ -40,6 +40,7 @@ from app.db.repositories.environment_tls import EnvironmentTlsRepository, Stored
 from app.db.repositories.errors import DuplicateError, MissingReferenceError
 from app.db.repositories.job_run import JobRunRepository
 from app.db.repositories.pagination import Page
+from app.db.repositories.registry_access import RegistryAccessRepository
 from app.db.repositories.tag import (
     MAX_TAG_OPTIONS,
     MAX_TAGS_PER_ENVIRONMENT,
@@ -394,6 +395,7 @@ class EnvironmentService:
         tags: TagRepository,
         snapshots: EnvironmentSnapshotRepository,
         grants: EnvironmentAccessRepository,
+        registry_access: RegistryAccessRepository,
         users: UserRepository,
         teams: TeamRepository,
         authoriser: Authoriser,
@@ -415,6 +417,7 @@ class EnvironmentService:
         self._tags = tags
         self._snapshots = snapshots
         self._grants = grants
+        self._registry_access = registry_access
         self._users = users
         self._teams = teams
         self._authoriser = authoriser
@@ -603,11 +606,23 @@ class EnvironmentService:
                     client_key=material.client_key,
                 )
                 audit.detail["tls_warnings"] = len(material.validation.warnings)
+            granted = await self._registry_access.grant_default_entries(created.id)
+            if granted:
+                audit.detail["registry_grants"] = ",".join(str(entry) for entry in granted)
             audit.target_id = str(created.id)
         self._poker.poke(created.id)
         self._announce_connection_change()
         detail = await self.get(actor, created.id)
         return replace(detail, tls_warnings=_warnings_of(material))
+
+    async def registry_addresses(self, actor: Principal, environment_id: int) -> tuple[str, ...]:
+        """List the registry addresses an image check on the environment contacts, by address.
+
+        Administrators only; an address is listed when a set granted to the environment is at it.
+        """
+        require_administrator(actor)
+        await self._require_manager(actor, environment_id)
+        return tuple(await self._registry_access.granted_addresses(environment_id))
 
     @audited(
         action="environment_updated",

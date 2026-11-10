@@ -259,6 +259,7 @@ def build_environment_services(
         tags=tags,
         snapshots=EnvironmentSnapshotRepository(db),
         grants=grants,
+        registry_access=RegistryAccessRepository(db),
         users=users,
         teams=teams,
         authoriser=authoriser,

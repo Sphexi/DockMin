@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Anonymous binding result - dockmin{% endblock %}
+{% set crumb_page = "Anonymous binding result" %}
+{% block content %}
+{% set labels = {"bound": ("Bound", "ok"), "skipped": ("Skipped", "warn"), "failed": ("Failed", "danger")} %}
+{% call page_header("Anonymous binding result", environment.name) %}
+<a class="btn btn--primary" href="{{ images_href }}">Back to the images</a>
+{% endcall %}
+
+<div class="panel" role="status">
+  <p>{{ result.count("bound") }} bound, {{ result.count("skipped") }} skipped, {{ result.count("failed") }} failed at {{ result.registries|join(", ") }}.</p>
+  <p>Each image was handled on its own and has its own entry in the activity log. Nothing was pulled and nothing on the host changed.</p>
+</div>
+
+{% if result.items %}
+<section class="section" aria-labelledby="items-heading">
+  <h2 id="items-heading">Images</h2>
+  <div class="data-table__scroll" role="region" aria-label="Images" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Result for each image</caption>
+      <thead>
+        <tr><th scope="col">Reference</th><th scope="col">Result</th><th scope="col">Detail</th></tr>
+      </thead>
+      <tbody>
+        {% for item in result.items %}
+        {% set shown = labels[item.status] %}
+        <tr>
+          <th scope="row" class="cell-wrap mono">{{ item.display }}</th>
+          <td>{{ badge(shown[0], shown[1]) }}</td>
+          <td>{{ item.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

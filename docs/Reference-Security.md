@@ -22,10 +22,12 @@ Roles, the authorisation model and the restrictions on standard users: [Access c
 |---|---|---|---|
 | Template catalogue fetch | The address an administrator saved for the catalogue, and its redirects | An administrator choosing `Enable and fetch` or `Refresh`. Never at start, on a page load or on a schedule | [Template catalogues](Administration-Template-Catalogues) |
 | Registry connection test, Amazon ECR token, image update check | The registry address of a credential set or image, and its token service | An administrator's connection test, a token needed for an ECR set, a user's update check, or a run of a `container-updater` automation | [Registries](Administration-Registries#registry-connections) |
+| Adoption review, bulk anonymous binding review | Manifest `HEAD` requests to addresses that have a credential set granted to the environment, and the token service of each | An administrator starting the review. Never at start, on a page load or on a schedule | [Images](Usage-Images#bind-unbound-images-anonymously), [Environments](Usage-Environments#adopt-everything-on-this-host) |
 | dockmin update check | The registry of dockmin's own image reference: a manifest `HEAD` and a tag list `GET` | An administrator's update check ([Instance](Administration-Instance)) | [Registries](Administration-Registries#registry-connections) |
 | Object storage, notification receivers, environment hosts, access platform key URL | The address an administrator saved | The feature that names it | [Address policy](#address-policy) |
 
 - A fresh installation contacts no catalogue.
+- A registry address is contacted only when a credential set is granted to the environment at it. A new instance holds two entries with authentication off, `docker.io` and `ghcr.io`, granted to each environment created afterwards ([Registries](Administration-Registries#entries-a-new-instance-starts-with)). The dockmin server contacts them only for an administrator's check or review and for the update checks that already contact configured registries. Pulls are made by the Docker host. Nothing contacts them at start, at setup, when an environment is created or when a page loads. Deleting an entry ends the contact.
 - Every destination passes the [address policy](#address-policy).
 
 ## Address policy

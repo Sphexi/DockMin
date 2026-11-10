@@ -788,7 +788,7 @@ Targets: container, Compose stack, Swarm stack, Swarm service, labels. Not offer
 | Any other `Unknown`, `registry_not_configured` and registry failures included | Counted `unknown` | Counted `unknown`. Nothing is written |
 
 - A result that could not be decided is never treated as up to date.
-- The check connects only to registries an administrator configured ([Registries](Administration-Registries)).
+- The check connects only to an address that has a credential set granted to the environment, entries with authentication off included ([Registries](Administration-Registries#anonymous-entries)). An anonymous binding at `docker.io` or `ghcr.io` is checked on an environment the entries of a new instance are granted to ([Registries](Administration-Registries#entries-a-new-instance-starts-with)).
 - The tables above describe containers and Compose stacks. Swarm services and stacks are compared with the digest in the service's own image ([Swarm detection](#swarm-detection)).
 
 ### Standalone containers

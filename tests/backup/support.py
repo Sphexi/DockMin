@@ -75,6 +75,9 @@ def _migrated(path: Path, up_to: int | None) -> Database:
                 shutil.copy(file, directory / file.name)
     connection = connect(path)
     migrate(connection, directory)
+    if up_to is None:
+        connection.execute("DELETE FROM registry_credential")
+        connection.execute("DELETE FROM sqlite_sequence WHERE name = 'registry_credential'")
     connection.close()
     return Database(path)
 

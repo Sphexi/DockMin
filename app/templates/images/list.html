@@ -77,7 +77,16 @@
 {% if can_remove %}
 <a class="btn" href="{{ route_path('environment_image_prune', environment_id=environment.id) }}">Prune images</a>
 {% endif %}
+{% if can_bind_anonymously and environment.status == "reachable" %}
+<form class="inline-form" method="post" action="{{ route_path('anonymous_binding_start', environment_id=environment.id) }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="btn">Bind unbound images anonymously</button>
+</form>
+{% endif %}
 {% endcall %}
+{% if can_bind_anonymously and environment.status == "reachable" %}
+<p class="field__help">Binding unbound images anonymously sends one manifest HEAD request per image to a registry with an entry that has no authentication, then lists the matches for confirmation. Nothing is pulled.</p>
+{% endif %}
 <div id="images-results">
   {{ images_results(rows, columns, pager, total, filtered, environment_id, errors, failure, retry_href, checkable, orphans, can_create, can_remove, max_batch=max_batch) }}
 </div>

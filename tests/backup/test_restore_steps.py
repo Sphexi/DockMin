@@ -53,6 +53,7 @@ GAP = restore_steps.ACTIVITY_ID_GAP
 LIVE_FLOOR = 7_000
 RESTORE_ID = "e" * 32
 RESEALED_VERSION = 3
+SEEDED_ENTRIES = "SELECT count(*) FROM registry_credential WHERE seeded_default = 1"
 
 
 @pytest.fixture(scope="module")
@@ -400,6 +401,11 @@ async def test_an_archive_made_before_the_latest_migration_is_migrated_on_stagin
 
     assert produced.manifest.schema_version == OLD_SCHEMA
     assert (checked.migrated_from, checked.schema_version) == (OLD_SCHEMA, latest_version())
+    restored = sqlite3.connect(staging / STAGED)
+    try:
+        assert restored.execute(SEEDED_ENTRIES).fetchone()[0] == 0
+    finally:
+        restored.close()
 
 
 class Resealed:

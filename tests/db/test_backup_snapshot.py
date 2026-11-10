@@ -20,6 +20,7 @@ RAISED_FLOOR = 1_000_000_003
 LOWER_FLOOR = 5
 PLANTED = "sqlite_persist"
 HIDDEN_VIEW = "sqlite_view"
+SEEDED_REGISTRY_ENTRIES = 2
 
 
 @pytest.fixture(scope="module")
@@ -145,7 +146,7 @@ def test_the_instance_counts_cover_every_kind_of_object(reading: sqlite3.Connect
         counts.registry_credentials,
         counts.object_storage_targets,
         counts.automation_rules,
-    ) == (4, 1, 2, 0, 1, 3)
+    ) == (4, 1, 2, SEEDED_REGISTRY_ENTRIES, 1, 3)
 
 
 @pytest.mark.parametrize("limit", [0, -1, True])

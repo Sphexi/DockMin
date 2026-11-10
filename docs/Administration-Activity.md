@@ -745,7 +745,7 @@ The delete confirmation page has a section `Activity held for export`.
 
 ## Rows recorded by other features
 
-Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Stack export rows](#stack-export-rows), [Stack import rows](#stack-import-rows), [Container export rows](#container-export-rows), [Container import rows](#container-import-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
+Rows with no feature page of their own: [Instance restart](#instance-restart), [Stack rows](#stack-rows), [Volume export rows](#volume-export-rows), [Volume import rows](#volume-import-rows), [Stack export rows](#stack-export-rows), [Stack import rows](#stack-import-rows), [Container export rows](#container-export-rows), [Container import rows](#container-import-rows), [Reveal and dismissal rows](#reveal-and-dismissal-rows), [Adopt everything rows](#adopt-everything-rows), [Anonymous registry rows](#anonymous-registry-rows), [Template catalogue rows](#template-catalogue-rows) and [Self-protection refusals](#self-protection-refusals).
 
 | Rows | Described on |
 |---|---|
@@ -1042,6 +1042,19 @@ Target type `container`, the archived container's name (from the archive's manif
 
 - Every skipped and failed target is reported on the result page.
 - A row holds no file content, no variable value and no credential. `image_bound` names a credential set by id.
+
+## Anonymous registry rows
+
+Three existing actions carry a detail key for anonymous registry entries. No action name is added.
+
+| Action | Target type | Key | Present when |
+|---|---|---|---|
+| `image_bound` | `image_binding` | `bulk` (`true`) | Written by `Bind unbound images anonymously` ([Images](Usage-Images#bind-unbound-images-anonymously)). Absent from every other `image_bound` row. The row holds `verified` `true`, `pulled` `false`, `credential_set_id` `null`, `anonymous` `true` and `digest`. One row for each binding; the rows of one apply share a request id ([Request id](#request-id)). Starting the review, the confirmation and a refused apply write no row |
+| `environment_created` | `environment` | `registry_grants` | The environment was granted registry entries when it was created. The ids of the entries, comma-separated ([Environments](Usage-Environments#registry-entries-on-a-new-environment)) |
+| `registry_credential_updated` | `registry_credential` | `seeded_default_cleared` (`true`) | The edit removed the `Added with this instance` mark ([Registries](Administration-Registries#entries-a-new-instance-starts-with)) |
+
+- The two entries a new instance starts with are created with the database and write no row.
+- A row holds no credential. An entry with authentication off stores none.
 
 ## Template catalogue rows
 

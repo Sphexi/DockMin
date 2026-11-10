@@ -56,6 +56,7 @@ from tests.registry_support import (
     ADDRESS,
     ECR_ADDRESS,
     OTHER_ADDRESS,
+    add_anonymous,
     add_ecr,
     bind_image,
     grant_environment,
@@ -1193,3 +1194,89 @@ async def test_resolving_forwards_min_remaining_to_the_derived_token_refresh(
     await credentials.resolve(ENV_A, ECR_IMAGE, principal=ADMIN, min_remaining=min_remaining)
 
     assert image_rig.registry.deriver.issued == exchanges
+
+
+async def open_entry(image_rig: ImageRig, name: str = "open", **overrides: object) -> int:
+    """Create an entry with no authentication at the test registry and grant it to ENV_A."""
+    created = await add_anonymous(image_rig.registry, name, **overrides)
+    await grant_environment(image_rig.db, created.id, ENV_A)
+    return created.id
+
+
+async def test_the_picker_and_the_offer_leave_out_an_entry_that_reads_as_anonymous(
+    image_rig: ImageRig,
+) -> None:
+    account = await register(image_rig, "account")
+    await open_entry(image_rig)
+    bindings = image_rig.containers.bindings
+
+    picker = await bindings.picker(ADMIN, ENV_A, REFERENCE)
+    offer = await bindings.offer(ADMIN, ENV_A, REFERENCE)
+
+    assert [candidate.id for candidate in picker.candidates] == [account]
+    assert picker.preselected_value == "anonymous"
+    assert [candidate.id for candidate in offer.candidates] == [account]
+    assert offer.preselected == CredentialChoice(account)
+
+
+async def test_an_entry_alone_at_an_address_preselects_anonymous_on_the_offer(
+    image_rig: ImageRig,
+) -> None:
+    await open_entry(image_rig)
+
+    offer = await image_rig.containers.bindings.offer(ADMIN, ENV_A, REFERENCE)
+
+    assert offer.candidates == ()
+    assert offer.preselected == CredentialChoice(None)
+
+
+async def test_a_binding_that_names_the_entry_keeps_it_listed_and_preselected(
+    image_rig: ImageRig,
+) -> None:
+    entry = await open_entry(image_rig)
+    await bind_image(image_rig.db, entry, ENV_A)
+
+    offer = await image_rig.containers.bindings.picker(ADMIN, ENV_A, REFERENCE)
+
+    assert [candidate.id for candidate in offer.candidates] == [entry]
+    assert offer.preselected_value == str(entry)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"verify_tls": False}, {"ca_bundle": "-----BEGIN CERTIFICATE-----"}],
+    ids=["verification-off", "ca-bundle"],
+)
+async def test_an_entry_that_connects_differently_from_an_anonymous_read_stays_listed(
+    image_rig: ImageRig, overrides: dict[str, object]
+) -> None:
+    entry = await open_entry(image_rig, "private", **overrides)
+
+    offer = await image_rig.containers.bindings.picker(ADMIN, ENV_A, REFERENCE)
+
+    assert [candidate.id for candidate in offer.candidates] == [entry]
+
+
+async def test_an_unbound_reference_with_only_an_open_entry_is_pulled_anonymously(
+    image_rig: ImageRig, resolve: Resolve
+) -> None:
+    await open_entry(image_rig)
+
+    resolved = await resolve(ADMIN)
+
+    assert (resolved.credential_set_id, resolved.registry_auth, resolved.source) == (
+        None,
+        None,
+        "no_match",
+    )
+
+
+async def test_an_open_entry_beside_one_account_does_not_make_the_pull_ask(
+    image_rig: ImageRig, resolve: Resolve
+) -> None:
+    account = await register(image_rig, "account")
+    await open_entry(image_rig)
+
+    resolved = await resolve(ADMIN)
+
+    assert (resolved.credential_set_id, resolved.source) == (account, "only_match")

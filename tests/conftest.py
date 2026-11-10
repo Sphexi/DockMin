@@ -371,6 +371,9 @@ def migrated_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     connection = connect(path)
     try:
         migrate(connection)
+        # Tests number and count registry sets themselves; the defaults are tested on their own.
+        connection.execute("DELETE FROM registry_credential")
+        connection.execute("DELETE FROM sqlite_sequence WHERE name = 'registry_credential'")
     finally:
         connection.close()
     return path

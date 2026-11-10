@@ -223,6 +223,32 @@ async def add_ecr(
     return await rig.credentials.create(ecr_fields(name, **overrides), SecretStr(secret))
 
 
+DEFAULT_ENTRIES = (
+    ("Docker Hub (anonymous)", "dockerhub", "docker.io", "{}"),
+    (
+        "GitHub Container Registry (anonymous)",
+        "ghcr",
+        "ghcr.io",
+        '{"organisation":null,"use_organisation":false}',
+    ),
+)
+
+
+async def seed_default_entries(db: Session) -> list[int]:
+    """Insert the two entries a new database starts with and return their ids."""
+    ids: list[int] = []
+    for name, provider, url, extras in DEFAULT_ENTRIES:
+        inserted = await db.execute(
+            "INSERT INTO registry_credential (name, provider, url, authentication_enabled, "
+            "secret_kind, provider_extras, seeded_default, created_at, updated_at) "
+            "VALUES (?, ?, ?, 0, 'static', ?, 1, ?, ?)",
+            (name, provider, url, extras, STAMP, STAMP),
+        )
+        assert inserted.last_row_id is not None
+        ids.append(inserted.last_row_id)
+    return ids
+
+
 async def grant_environment(db: Session, credential_id: int, environment_id: int) -> None:
     await db.execute(
         "INSERT INTO registry_environment_access (registry_credential_id, environment_id) "

@@ -428,7 +428,13 @@ class BindingPullCredentials:
             )
         if principal is None:
             raise CredentialChoiceRequired(())
-        fitting = await self._candidates.at(principal, environment_id, parsed.registry_address)
+        fitting = tuple(
+            candidate
+            for candidate in await self._candidates.at(
+                principal, environment_id, parsed.registry_address
+            )
+            if not candidate.reads_as_anonymous
+        )
         match fitting:
             case ():
                 return PullDecision(parsed, CredentialChoice(None), "no_match", seen)
@@ -583,7 +589,14 @@ class ImageBindingService:
         *,
         anonymous_default: bool,
     ) -> CredentialOffer:
-        fitting = await self._candidates.at(principal, environment_id, reference.registry_address)
+        named = None if stored is None else stored.registry_credential_id
+        fitting = tuple(
+            candidate
+            for candidate in await self._candidates.at(
+                principal, environment_id, reference.registry_address
+            )
+            if not candidate.reads_as_anonymous or candidate.id == named
+        )
         ids = {candidate.id for candidate in fitting}
         view = binding_view(
             reference.key,
@@ -807,10 +820,12 @@ class ImageBindingService:
         choice: CredentialChoice,
         *,
         digest: str,
+        bulk: bool = False,
     ) -> VerifiedBind:
         """Bind an unbound reference to a set whose registry digest matched the local image.
 
-        Administrators only. Nothing is pulled and the host is not contacted. Returns skipped,
+        Administrators only. Nothing is pulled and the host is not contacted. `bulk` marks a
+        binding written from a reviewed list of many. Returns skipped,
         and writes no row, when the reference already has a binding. Raises ValidationFailed for
         a pinned reference, a malformed digest, or an anonymous choice where no set at the
         registry is granted to the environment; CredentialSetUnavailable for a set the
@@ -832,6 +847,8 @@ class ImageBindingService:
             verified=True,
             pulled=False,
         )
+        if bulk:
+            audit.detail["bulk"] = True
         if set_id is None:
             if not await self._bindings.has_granted_set_at(environment_id, parsed.registry_address):
                 audit.reason = "registry_not_configured"

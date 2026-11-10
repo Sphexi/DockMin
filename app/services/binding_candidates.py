@@ -133,8 +133,10 @@ class BindingCandidateScanner:
     """Finds, without writing or pulling, the credential sets an unbound image could be bound to.
 
     Candidates are the sets granted to the environment at the reference's registry address (ten
-    at most), then anonymous where one of them is of a provider that admits it. Each gets one
-    manifest HEAD and matches when the digest returned is among the local `RepoDigests`.
+    at most), then anonymous where one of them is of a provider that admits it. A set with
+    authentication off that connects as an anonymous read does is not tried as a second
+    candidate; it enables the anonymous one. Each gets one manifest HEAD and matches when the
+    digest returned is among the local `RepoDigests`.
     """
 
     def __init__(
@@ -197,6 +199,38 @@ class BindingCandidateScanner:
         )
         return UnboundImageScan(environment_id, outcomes, complete)
 
+    async def check_anonymously(
+        self,
+        principal: Principal,
+        environment_id: int,
+        references: Sequence[tuple[ImageReference, tuple[str, ...]]],
+    ) -> tuple[ReferenceOutcome, ...]:
+        """Send one anonymous manifest HEAD for each reference, within the scan's bounds.
+
+        References past the cap, and those the time budget does not reach, come back
+        `not_checked`. Raises RuntimeError inside a write transaction. No credential set is read.
+        """
+        if self._bindings.in_transaction:
+            raise RuntimeError("registry checks run outside a write transaction")
+        limits = self._limits
+        selected, left = references[: limits.references], references[limits.references :]
+        run = _Run(
+            principal,
+            environment_id,
+            asyncio.Semaphore(limits.in_flight),
+            self._monotonic() + limits.total_seconds,
+            limits,
+        )
+        anonymous = _Registry((), True, False)
+        checked = await _all(
+            [self._reference(run, reference, digests, anonymous) for reference, digests in selected]
+        )
+        skipped = [
+            ReferenceOutcome(reference.key, reference.familiar, digests, "not_checked")
+            for reference, digests in left
+        ]
+        return (*checked, *skipped)
+
     async def _outcomes(
         self,
         principal: Principal,
@@ -253,10 +287,11 @@ class BindingCandidateScanner:
             except CandidateListTooLarge:
                 found[address] = _Registry((), False, False, too_many=True)
                 continue
+            separate = [offered for offered in sets if not offered.reads_as_anonymous]
             found[address] = _Registry(
-                sets[:MAX_CANDIDATE_SETS],
+                tuple(separate[:MAX_CANDIDATE_SETS]),
                 any(PROVIDERS[offered.provider].anonymous_allowed for offered in sets),
-                len(sets) > MAX_CANDIDATE_SETS,
+                len(separate) > MAX_CANDIDATE_SETS,
             )
         return found
 

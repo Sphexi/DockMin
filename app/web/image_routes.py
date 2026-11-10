@@ -400,6 +400,7 @@ async def list_images(
         {
             **results,
             "environment": environment,
+            "can_bind_anonymously": actor.is_administrator,
             "q": filters.q or "",
             "dangling": filters.dangling or "",
             "usage": filters.usage or "",

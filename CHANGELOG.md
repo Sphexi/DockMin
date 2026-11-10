@@ -2,6 +2,20 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Anonymous registry entries: an entry with authentication off makes its address configured on the environments it is granted to, so images there can be bound anonymously and checked for updates: [Anonymous entries](https://github.com/Sphexi/DockMin/wiki/Administration-Registries#anonymous-entries).
+- Two entries a new instance starts with, `Docker Hub (anonymous)` and `GitHub Container Registry (anonymous)`, marked `Added with this instance` and granted to each environment created afterwards. They exist only in a database with no user and no registry set, and a removal is final: [Entries a new instance starts with](https://github.com/Sphexi/DockMin/wiki/Administration-Registries#entries-a-new-instance-starts-with).
+- `Bind unbound images anonymously` on the image list: a reviewed job that sends one manifest `HEAD` for each tagged image with no binding, groups the matches by registry with one confirmation each, and binds them anonymously without a pull. It checks at most 200 references, 5 at a time, within 120 seconds: [Bind unbound images anonymously](https://github.com/Sphexi/DockMin/wiki/Usage-Images#bind-unbound-images-anonymously).
+- The `bulk` detail key on `image_bound`, `registry_grants` on `environment_created` and `seeded_default_cleared` on `registry_credential_updated`: [Anonymous registry rows](https://github.com/Sphexi/DockMin/wiki/Administration-Activity#anonymous-registry-rows).
+- A sentence on the environment page naming the registry addresses an adoption review contacts: [Adopt everything on this host](https://github.com/Sphexi/DockMin/wiki/Usage-Environments#adopt-everything-on-this-host).
+
+### Changed
+
+- An entry with authentication off, certificate verification on and no CA bundle enables the anonymous candidate in the adoption review instead of counting as a second match, and is left out of the pull picker unless an image is bound to it: [Anonymous entries](https://github.com/Sphexi/DockMin/wiki/Administration-Registries#anonymous-entries).
+
 ## 0.3.0 - 2026-11-09
 
 ### Added

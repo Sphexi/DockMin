@@ -10,6 +10,7 @@
     <div class="cell-stack">
       <a href="{{ route_path('registry_detail', credential_id=row.id) }}">{{ row.name }}</a>
       {% if row.is_default_for_host %}{{ badge("Default", "ok") }}{% endif %}
+      {% if row.seeded_default %}{{ badge("Added with this instance", "info") }}{% endif %}
       {{ tls_badge(row.verify_tls) }}
     </div>
   </th>

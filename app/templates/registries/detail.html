@@ -61,6 +61,10 @@
         <span class="cell-note">The default is preselected when an image from this address is pulled. It never decides a pull on its own.</span>
       </div>
     </dd>
+    {% if detail.seeded_default %}
+    <dt>Origin</dt>
+    <dd>{{ badge("Added with this instance", "info") }}</dd>
+    {% endif %}
     <dt>Images bound</dt>
     <dd>{{ detail.bound_images }}</dd>
     {% for extra in presentation.extras %}

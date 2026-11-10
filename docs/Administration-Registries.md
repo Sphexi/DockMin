@@ -49,6 +49,7 @@ A registry credential set holds the address, the login and the TLS settings dock
 | `Offered nowhere` | Shown under the Environments count when the set has no environment grant |
 | `TLS not verified` | Badge beside the name when certificate verification is off |
 | `Default` | Badge beside the name when the set is the default for its address |
+| `Added with this instance` | Badge beside the name when the set is one of the [entries a new instance starts with](#entries-a-new-instance-starts-with) and still carries that mark |
 | Users and teams | The number of user grants plus team grants |
 | Empty list | `No registries`, with the `Add registry` action |
 
@@ -261,6 +262,51 @@ A registry on this server or a link-local network is refused unless `DOCKMIN_PER
 | Turned on on an edit | The user name and the secret are required |
 
 An anonymous set records that pulls from the address need no login. The registry decides per repository, when the image is pulled, whether anonymous access is allowed. The connection test does not check it.
+
+## Anonymous entries
+
+An entry with authentication off makes its address configured on every environment it is granted to.
+
+| Where the address counts as configured | Effect |
+|---|---|
+| Binding an image anonymously | An unbound image at the address can be bound anonymously ([Images](Usage-Images#bind-unbound-images-anonymously)) |
+| Update checks | A check of an anonymous binding at the address sends a manifest `HEAD`. With no set at the address granted to the environment, the check reads `Unknown`, reason `registry_not_configured` |
+| Adoption review | The review checks unbound images at the address ([Environments](Usage-Environments#adopt-everything-on-this-host)) |
+
+| Item | Behaviour |
+|---|---|
+| Binding made through the entry | Recorded as `Anonymous`, not as the entry. The entry only makes the address configured |
+| Entry deleted | Bindings that were made anonymously stay anonymous. Their update checks read `Unknown`, reason `registry_not_configured`, once no set at the address is granted to the environment |
+| Standard user | Needs no grant on the entry. Anonymous needs none |
+| Stored | No user name and no secret |
+
+An entry reads as anonymous when authentication is off, certificate verification is on and no CA bundle is stored. The provider does not matter.
+
+| Entry | Adoption review | Pull picker | Pull with no choice made |
+|---|---|---|---|
+| Reads as anonymous | Enables the one anonymous candidate. It is not counted as a second match | Not listed beside `Anonymous (no credentials)`, unless an existing binding names it. That binding keeps it listed and preselected | Anonymous, unless another set fits ([Images](Usage-Images#which-set-a-pull-uses)) |
+| Authentication off with a CA bundle or with verification off | Tried as itself | Listed, with `no authentication` | Tried as itself, as any set at the address |
+
+## Entries a new instance starts with
+
+A new instance holds two entries with authentication off.
+
+| Name | Provider | Address |
+|---|---|---|
+| `Docker Hub (anonymous)` | Docker Hub | `docker.io` |
+| `GitHub Container Registry (anonymous)` | GitHub Container Registry | `ghcr.io` |
+
+| Item | Behaviour |
+|---|---|
+| When they exist | Added once, when the database holds no user and no registry set. A database that holds a user or a registry set when it is upgraded gets neither |
+| Removal | Delete them as any set ([Deleting](#deleting)). A removed entry is not created again: not at a restart, not by a restore. A restore returns the database as it was |
+| Mark | `Added with this instance` on the list and as `Origin` on the set's page |
+| Mark cleared | When an edit turns authentication on or changes the provider or the address. Recorded as `seeded_default_cleared` ([Recorded actions](#recorded-actions)). A name or TLS edit keeps it |
+| Name, TLS settings | Editable |
+| Grant | Each environment created afterwards, the local socket environment of first-run setup included, is granted every entry that still has the mark and authentication off. Recorded as `registry_grants` in `environment_created` ([Activity](Usage-Environments#recorded-actions)). Environments that exist already are not granted the entries |
+| Withdraw a grant | Per environment, as for any set ([Remove a grant](#remove-a-grant)) |
+| Contacted | Never at start, at setup, when an environment is created or when a page loads. Only by an administrator's pull, an administrator-run check ([Images](Usage-Images#bind-unbound-images-anonymously), [Environments](Usage-Environments#adopt-everything-on-this-host)) and the update checks that already contact configured registries ([Registry connections](#registry-connections)) |
+| Docker Hub limits | Unauthenticated manifest `HEAD` requests do not count against Docker Hub's pull limit. A refusal with `429` reads `rate_limited` and is not retried |
 
 ## Secret handling
 
@@ -589,7 +635,7 @@ A pull form offers `Anonymous (no credentials)` or one credential set, under the
 
 | Item | Value |
 |---|---|
-| Options | `Anonymous (no credentials)`, then every set offered for the reference's registry address, by name, at most 200. Each set shows its provider, its address, `no authentication` when it has none, and `Default for this registry.` |
+| Options | `Anonymous (no credentials)`, then every set offered for the reference's registry address, by name, at most 200. Each set shows its provider, its address, `no authentication` when it has none, and `Default for this registry.` An entry that [reads as anonymous](#anonymous-entries) is left out unless the reference is bound to it |
 | No set offered | `Anonymous (no credentials)` as text with `No credential set is available for this registry.`, and no control |
 | Submitted value | `anonymous` or a set id. A set that is not offered to the user for the reference is refused ([Access](#access)) |
 | Binding | The pull binds the reference to the value chosen ([Images](Usage-Images#credential-bindings)). Choosing a value other than the current binding rebinds it |
@@ -680,7 +726,7 @@ Target type: `registry_credential`; target id: the set's id.
 | Action | Detail recorded |
 |---|---|
 | `registry_credential_created` | `name`, `provider`, `address`, `authentication_enabled`, `verify_tls`, `ca_bundle` (whether a bundle is stored), `duplicates` |
-| `registry_credential_updated` | `name`, `changed`, `secret_replaced`, `duplicates`, and when the address changed: `address`, `bindings_marked_missing` (the number of images moved to `credential_missing`) and, if the set was the default, `default_cleared`. `changed` lists the fields that differ from `name`, `provider`, `address`, `authentication`, `username`, `extras`, `verify_tls`, `ca_bundle` |
+| `registry_credential_updated` | `name`, `changed`, `secret_replaced`, `duplicates`, `seeded_default_cleared` (`true`, only when the edit removed the `Added with this instance` mark), and when the address changed: `address`, `bindings_marked_missing` (the number of images moved to `credential_missing`) and, if the set was the default, `default_cleared`. `changed` lists the fields that differ from `name`, `provider`, `address`, `authentication`, `username`, `extras`, `verify_tls`, `ca_bundle` |
 | `registry_credential_deleted` | `name`, `provider`, `address`, `bindings_marked_missing` |
 | `registry_credential_default_set`, `registry_credential_default_cleared` | `name`, `address` |
 | `registry_credential_tested` | `address`, `passed`, `failed_stage`, `duration_ms` |
@@ -695,7 +741,7 @@ Target type: `registry_credential`; target id: the set's id.
 
 ## Registry connections
 
-The dockmin server connects to registries directly, over HTTPS. It makes these connections when an administrator runs a registry connection test, when a token for an Amazon ECR set is needed, when an [image update check](Usage-Images#update-check) runs, and when an administrator checks for a dockmin update ([Instance](Administration-Instance)).
+The dockmin server connects to registries directly, over HTTPS. It makes these connections when an administrator runs a registry connection test, when a token for an Amazon ECR set is needed, when an [image update check](Usage-Images#update-check) runs, when an administrator runs a [bulk anonymous binding review](Usage-Images#bind-unbound-images-anonymously) or an [adoption review](Usage-Environments#adopt-everything-on-this-host), and when an administrator checks for a dockmin update ([Instance](Administration-Instance)).
 
 | Purpose | Destination | Port |
 |---|---|---|
@@ -711,7 +757,8 @@ The dockmin server connects to registries directly, over HTTPS. It makes these c
 | Direct egress | Allow outbound TCP from the dockmin server to the destinations above. A proxy is not used |
 | Egress policy | Compose provides none. The default bridge network allows all outbound traffic; a restriction is applied at the host's firewall |
 | Internal addresses | Refused unless permitted ([Address policy](Reference-Security#address-policy)) |
-| Update check requests | On a user's request and on each run of a `container-updater` automation ([Automation](Operations-Automation#detection)). `HEAD /v2/<repository>/manifests/<tag>` to a registry an administrator configured, and `GET` to its token service when the registry asks for a token. No image data is fetched. Nothing is sent when no check is requested and no automation runs |
+| Update check requests | On a user's request and on each run of a `container-updater` automation ([Automation](Operations-Automation#detection)). `HEAD /v2/<repository>/manifests/<tag>` to a registry address that has a credential set granted to the environment, entries with authentication off included, and `GET` to its token service when the registry asks for a token. No image data is fetched. Nothing is sent when no check is requested and no automation runs |
+| Bulk anonymous binding and adoption reviews | On an administrator's request only. `HEAD` requests, no login, at most 200 references, 5 at a time ([Images](Usage-Images#bind-unbound-images-anonymously)) |
 | Pulls and pushes | The Docker host connects to the registry, not dockmin. The host needs outbound access to the registry. dockmin sends the credential set's login to the host with the request |
 | Proxy variables | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and their lower-case forms are not read |
 | Operating system roots | The image dockmin runs from must contain root certificates. Looked up in the TLS library's default file or directory, then `/etc/ssl/certs/ca-certificates.crt`, then `/etc/pki/tls/certs/ca-bundle.crt` |

@@ -28,6 +28,7 @@ from app.db.repositories.registry_access import (
 )
 from app.db.repositories.registry_credential import (
     AddressMatch,
+    CredentialFields,
     RegistryCredentialRepository,
     RegistryListEntry,
     RegistryListRepository,
@@ -98,6 +99,7 @@ class RegistryListRow:
     environment_count: int
     grantee_count: int
     is_default_for_host: bool
+    seeded_default: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +149,7 @@ class RegistryDetail:
     access: GrantList
     duplicates: tuple[DuplicateReference, ...]
     is_default_for_host: bool
+    seeded_default: bool
     bound_images: int
     created_at: str
     updated_at: str
@@ -460,7 +463,9 @@ class RegistryCredentialService:
         A blank secret keeps the stored one, except when the provider, address, region, GitLab
         instance URL, certificate bundle or certificate verification changes, which requires it
         again. Every edit clears the cached derived secret. A new address clears the set's
-        default-for-host flag and moves every image bound to it to credential_missing.
+        default-for-host flag and moves every image bound to it to credential_missing. Turning
+        authentication on, or changing the provider or address, removes the mark that the set
+        was added with the instance.
         """
         require_administrator(actor)
         await self._require(credential_id)
@@ -494,6 +499,9 @@ class RegistryCredentialService:
                     raise ValidationFailed({"name": NAME_EXISTS}) from None
                 if not written:
                     raise ResourceNotFound("not found")
+                if current.seeded_default and _leaves_default(current, plan.fields):
+                    await self._credentials.clear_seeded_default(credential_id)
+                    audit.detail["seeded_default_cleared"] = True
                 updated = await self._require(credential_id)
                 audit.detail.update(
                     name=updated.name,
@@ -846,6 +854,7 @@ class RegistryCredentialService:
             access=await self._grant_list(stored.id),
             duplicates=await self._duplicates_of(stored),
             is_default_for_host=stored.is_default_for_host,
+            seeded_default=stored.seeded_default,
             bound_images=await self._bindings.count_for_credential(stored.id),
             created_at=stored.created_at,
             updated_at=stored.updated_at,
@@ -866,6 +875,14 @@ def _affected_image(row: AffectedBinding) -> AffectedImage:
     except ReferenceInvalid:
         reference = row.image_reference
     return AffectedImage(row.environment_id, row.environment_name, reference)
+
+
+def _leaves_default(current: StoredRegistryCredential, fields: CredentialFields) -> bool:
+    return (
+        fields.authentication_enabled
+        or fields.provider != current.provider
+        or fields.url != current.url
+    )
 
 
 def _known(text: str | None) -> ProviderKind | None:
@@ -931,6 +948,7 @@ def _row_of(entry: RegistryListEntry) -> RegistryListRow:
         environment_count=entry.environment_count,
         grantee_count=entry.grantee_count,
         is_default_for_host=entry.is_default_for_host,
+        seeded_default=entry.seeded_default,
     )
 
 

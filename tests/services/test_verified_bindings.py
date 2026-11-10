@@ -41,9 +41,11 @@ from tests.registry_support import (
     ECR_ADDRESS,
     ISSUED_USERNAME,
     OTHER_ADDRESS,
+    add_anonymous,
     add_ecr,
     bind_image,
     grant_environment,
+    seed_default_entries,
 )
 from tests.services.conftest import ImageRig
 
@@ -454,3 +456,77 @@ async def test_bind_verified_refuses_what_it_may_not_bind_and_writes_nothing(
 
     assert await binding_rows(image_rig.db) == []
     assert "success" not in [r["result"] for r in await rows_for(image_rig.db, "image_bound")]
+
+
+async def open_entry(image_rig: ImageRig, name: str = "open", **overrides: Any) -> int:
+    """Create an entry with no authentication at the test registry and grant it to ENV_A."""
+    created = await add_anonymous(image_rig.registry, name, **overrides)
+    await grant_environment(image_rig.db, created.id, ENV_A)
+    return created.id
+
+
+async def test_an_entry_with_no_authentication_alone_makes_the_image_bind_anonymously(
+    image_rig: ImageRig,
+) -> None:
+    await open_entry(image_rig)
+    in_use(image_rig)
+    manifests = ByLogin({ANONYMOUS: LOCAL})
+
+    scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
+
+    found = outcome_of(scan)
+    assert found.outcome == "binds"
+    assert found.choices == (CredentialChoice(None),)
+    assert statuses(found) == {None: ("match", None)}
+    assert len(manifests.calls) == 1
+
+
+async def test_the_default_docker_hub_entry_makes_a_public_hub_image_bind_anonymously(
+    image_rig: ImageRig,
+) -> None:
+    hub, _ = await seed_default_entries(image_rig.db)
+    await grant_environment(image_rig.db, hub, ENV_A)
+    in_use(image_rig, HUB_REFERENCE)
+    manifests = ByLogin({ANONYMOUS: LOCAL})
+
+    scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
+
+    found = outcome_of(scan, HUB_REFERENCE)
+    assert (found.outcome, found.choices) == ("binds", (CredentialChoice(None),))
+    assert manifests.addresses() == {"docker.io"}
+
+
+async def test_a_credential_set_that_also_reads_the_image_beside_an_open_entry_is_ambiguous(
+    image_rig: ImageRig,
+) -> None:
+    alpha = await register(image_rig, "alpha")
+    await open_entry(image_rig)
+    in_use(image_rig)
+    manifests = ByLogin({"user-alpha": LOCAL, ANONYMOUS: LOCAL})
+
+    scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
+
+    found = outcome_of(scan)
+    assert found.outcome == "ambiguous"
+    assert found.choices == (CredentialChoice(alpha), CredentialChoice(None))
+    assert len(manifests.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"verify_tls": False}, {"ca_bundle": "-----BEGIN CERTIFICATE-----"}],
+    ids=["verification-off", "ca-bundle"],
+)
+async def test_an_entry_that_connects_differently_from_an_anonymous_read_is_tried_as_itself(
+    image_rig: ImageRig, overrides: dict[str, Any]
+) -> None:
+    await open_entry(image_rig, "private", **overrides)
+    in_use(image_rig)
+    manifests = ByLogin({ANONYMOUS: LOCAL})
+
+    scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
+
+    found = outcome_of(scan)
+    assert {check.name for check in found.tried} == {"private", None}
+    targets = {(t.verify_tls, t.ca_bundle) for t, _, _ in manifests.calls}
+    assert len(targets) == 2

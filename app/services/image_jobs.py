@@ -54,7 +54,12 @@ NO_LONGER_PERMITTED: Final = "You no longer have permission for this action."
 _LAYER_ID = re.compile(r"[0-9a-f]{12}")
 
 type JobKind = Literal[
-    "pull", "push", "container_create", "container_recreate", "onboarding_review"
+    "pull",
+    "push",
+    "container_create",
+    "container_recreate",
+    "onboarding_review",
+    "anonymous_binding_review",
 ]
 type JobState = Literal["running", "succeeded", "failed", "cancelled"]
 type LayerStage = Literal[
@@ -89,7 +94,7 @@ _STAGES: Final[Mapping[str, LayerStage]] = {
 }
 _MOUNTED_PREFIX: Final = "Mounted from"
 _CONTAINER_KINDS: Final = frozenset({"container_create", "container_recreate"})
-_FRESH_CONTEXT_KINDS: Final = _CONTAINER_KINDS | {"onboarding_review"}
+_FRESH_CONTEXT_KINDS: Final = _CONTAINER_KINDS | {"onboarding_review", "anonymous_binding_review"}
 _PULL_STAGE: Final = "pull"
 _DONE: Final = frozenset({"complete", "exists", "pushed", "mounted"})
 _TRANSFERRING: Final = frozenset({"downloading", "pushing"})

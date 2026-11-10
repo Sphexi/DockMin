@@ -20,7 +20,8 @@ _INNER_ALIASES = frozenset({"rua", "rta", "tm"})
 _OFFERED = (
     "SELECT rc.id AS id, rc.name AS name, rc.provider AS provider, rc.url AS url, "
     "rc.authentication_enabled AS authentication_enabled, rc.verify_tls AS verify_tls, "
-    "rc.secret_kind AS secret_kind, rc.is_default_for_host AS is_default_for_host "
+    "rc.secret_kind AS secret_kind, rc.is_default_for_host AS is_default_for_host, "
+    "rc.ca_bundle IS NOT NULL AS has_ca_bundle "
     "FROM registry_credential rc "
     "JOIN registry_environment_access rea ON rea.registry_credential_id = rc.id"
 )
@@ -71,6 +72,12 @@ class OfferedCredentialSet:
     verify_tls: bool
     secret_kind: SecretKind
     is_default_for_host: bool
+    has_ca_bundle: bool = False
+
+    @property
+    def reads_as_anonymous(self) -> bool:
+        """Report whether the set connects exactly as an anonymous read does."""
+        return not self.authentication_enabled and self.verify_tls and not self.has_ca_bundle
 
 
 class RegistryAccessRepository(Repository[OfferedCredentialSet]):
@@ -86,6 +93,7 @@ class RegistryAccessRepository(Repository[OfferedCredentialSet]):
             verify_tls=bool(row["verify_tls"]),
             secret_kind=cast(SecretKind, row["secret_kind"]),
             is_default_for_host=bool(row["is_default_for_host"]),
+            has_ca_bundle=bool(row["has_ca_bundle"]),
         )
 
     async def eligible_for_pull(
@@ -164,6 +172,52 @@ class RegistryAccessRepository(Repository[OfferedCredentialSet]):
                 "VALUES (?, ?)",
                 (credential_id, environment_id),
             )
+
+    async def grant_default_entries(self, environment_id: int) -> list[int]:
+        """Grant every default entry that still has authentication off; return the entry ids."""
+        rows = await self._session.fetch_limited(
+            "SELECT id FROM registry_credential "
+            "WHERE seeded_default = 1 AND authentication_enabled = 0 ORDER BY id LIMIT ?",
+            (MAX_OFFERED_SETS,),
+            limit=MAX_OFFERED_SETS,
+        )
+        granted = [int(row["id"]) for row in rows]
+        for credential_id in granted:
+            await self.add_environment(credential_id, environment_id)
+        return granted
+
+    async def granted_addresses(self, environment_id: int) -> list[str]:
+        """List the addresses at which any set is granted to the environment, in order."""
+        rows = await self._session.fetch_limited(
+            "SELECT DISTINCT rc.url AS url FROM registry_credential rc "
+            "JOIN registry_environment_access rea ON rea.registry_credential_id = rc.id "
+            "WHERE rea.environment_id = ? ORDER BY rc.url LIMIT ?",
+            (environment_id, MAX_OFFERED_SETS),
+            limit=MAX_OFFERED_SETS,
+        )
+        return [str(row["url"]) for row in rows]
+
+    async def anonymous_entries(self, environment_id: int) -> list[OfferedCredentialSet]:
+        """List the granted entries with authentication off, by address then name."""
+        rows = await self._session.fetch_limited(
+            f"{_OFFERED} WHERE rea.environment_id = ? AND rc.authentication_enabled = 0 "
+            "ORDER BY rc.url, rc.name, rc.id LIMIT ?",
+            (environment_id, MAX_OFFERED_SETS),
+            limit=MAX_OFFERED_SETS,
+        )
+        return [self._map_row(row) for row in rows]
+
+    async def authenticated_set_counts(self, environment_id: int) -> dict[str, int]:
+        """Count, by address, the granted sets that have authentication on."""
+        rows = await self._session.fetch_limited(
+            "SELECT rc.url AS url, count(*) AS total FROM registry_credential rc "
+            "JOIN registry_environment_access rea ON rea.registry_credential_id = rc.id "
+            "WHERE rea.environment_id = ? AND rc.authentication_enabled = 1 "
+            "GROUP BY rc.url LIMIT ?",
+            (environment_id, MAX_OFFERED_SETS),
+            limit=MAX_OFFERED_SETS,
+        )
+        return {str(row["url"]): int(row["total"]) for row in rows}
 
     async def remove_environment(self, credential_id: int, environment_id: int) -> bool:
         """Withdraw an environment's grant; False if there was none."""

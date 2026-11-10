@@ -44,6 +44,10 @@
     <button type="submit" class="btn">Adopt everything on this host</button>
   </form>
   <p class="field__help">Reads the host and lists every unmanaged project and namespace, every image in use with no credential binding and every object with no access settings. Nothing is changed until you confirm, and nothing is pulled, redeployed or restarted.</p>
+  <p class="field__help">
+    {% if registry_addresses %}Checking images sends manifest HEAD requests to these registry addresses: <span class="mono">{{ registry_addresses|join(", ") }}</span>.
+    {% else %}No registry credential set is granted to this environment, so no registry is contacted.{% endif %}
+  </p>
 </section>
 {% endif %}
 {% endif %}

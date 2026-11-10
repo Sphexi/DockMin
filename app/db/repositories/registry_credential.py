@@ -37,7 +37,8 @@ _TABLE = "registry_credential"
 _COLUMNS = (
     "id, name, provider, url, authentication_enabled, username, secret_kind, secret_ciphertext, "
     "derived_secret_ciphertext, derived_secret_expires_at, derived_secret_refreshed_at, "
-    "provider_extras, verify_tls, ca_bundle, is_default_for_host, created_at, updated_at"
+    "provider_extras, verify_tls, ca_bundle, is_default_for_host, seeded_default, created_at, "
+    "updated_at"
 )
 _SELECT = f"SELECT {_COLUMNS} FROM registry_credential"
 _FOLD_SCAN_PAGE = 500
@@ -72,6 +73,7 @@ class StoredRegistryCredential:
     verify_tls: bool
     ca_bundle: str | None = field(repr=False)
     is_default_for_host: bool
+    seeded_default: bool
     created_at: str
     updated_at: str
 
@@ -127,6 +129,7 @@ class RegistryListEntry:
     environment_count: int
     grantee_count: int
     is_default_for_host: bool
+    seeded_default: bool
 
 
 def _extras_json(extras: Mapping[str, object]) -> str:
@@ -187,6 +190,7 @@ class RegistryCredentialRepository(SecretRepository[StoredRegistryCredential]):
             verify_tls=bool(row["verify_tls"]),
             ca_bundle=row["ca_bundle"],
             is_default_for_host=bool(row["is_default_for_host"]),
+            seeded_default=bool(row["seeded_default"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
@@ -372,6 +376,13 @@ class RegistryCredentialRepository(SecretRepository[StoredRegistryCredential]):
             )
         return result.rowcount > 0
 
+    async def clear_seeded_default(self, credential_id: int) -> bool:
+        """Remove the mark that a set was added with the instance; False if the set is gone."""
+        result = await self._execute(
+            "UPDATE registry_credential SET seeded_default = 0 WHERE id = ?", (credential_id,)
+        )
+        return result.rowcount > 0
+
     async def delete(self, credential_id: int) -> bool:
         """Delete a set; False if absent, StillReferencedError if an image binding uses it."""
         in_use = False
@@ -407,6 +418,7 @@ class RegistryListRepository(Repository[RegistryListEntry]):
             environment_count=int(row["environment_count"]),
             grantee_count=int(row["grantee_count"]),
             is_default_for_host=bool(row["is_default_for_host"]),
+            seeded_default=bool(row["seeded_default"]),
         )
 
     async def count(self) -> int:
@@ -427,6 +439,7 @@ class RegistryListRepository(Repository[RegistryListEntry]):
             "SELECT rc.id AS id, rc.name AS name, rc.provider AS provider, rc.url AS url, "
             "rc.authentication_enabled AS authentication_enabled, rc.verify_tls AS verify_tls, "
             "rc.secret_kind AS secret_kind, rc.is_default_for_host AS is_default_for_host, "
+            "rc.seeded_default AS seeded_default, "
             "(SELECT count(*) FROM registry_environment_access rea "
             "WHERE rea.registry_credential_id = rc.id) AS environment_count, "
             "(SELECT count(*) FROM registry_credential_user_access rua "

@@ -68,6 +68,10 @@ SELF_RECORDING = frozenset(
 
 NOT_AUDITED: Mapping[str, str] = {
     "app/services/navigation.py:remember_navigation": ("display preference; grants nothing"),
+    "app/services/anonymous_bindings.py:AnonymousBindingService.apply": (
+        "binds each confirmed reference through bind_verified, one audited image_bound "
+        "operation each"
+    ),
     "app/services/onboarding.py:OnboardingService.apply": (
         "runs each target of the confirmed plan as its own audited operation: stack_adopted, "
         "image_bound and resource_control_created"

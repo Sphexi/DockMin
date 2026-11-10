@@ -344,6 +344,20 @@ On creation, the number of such conditions is recorded in the activity entry as 
 | Edit from local to remote | All three items are required |
 | Edit from remote to local | Stored TLS material is deleted. Supplying TLS items with the local kind is refused: `TLS material applies only to a remote environment.` |
 
+## Registry entries on a new environment
+
+A new environment is granted every registry entry that carries the `Added with this instance` mark and has authentication off ([Registries](Administration-Registries#entries-a-new-instance-starts-with)).
+
+| Item | Behaviour |
+|---|---|
+| When | In the transaction that creates the environment, for a local socket environment, a remote TLS environment and the environment of the [first-run panel](#first-run-panel) |
+| Entries | `Docker Hub (anonymous)` and `GitHub Container Registry (anonymous)` on a new instance, until they are deleted or edited to use authentication |
+| Effect | `docker.io` and `ghcr.io` are configured on the environment. Images at those addresses can be bound anonymously and checked for updates ([Images](Usage-Images#bind-unbound-images-anonymously)) |
+| Recorded | `registry_grants` in the detail of `environment_created` ([Recorded actions](#recorded-actions)) |
+| Environments that exist | Not granted. Grant an entry as any set ([Registries](Administration-Registries#grant-a-set-to-an-environment)) |
+| Withdraw | Per environment ([Registries](Administration-Registries#remove-a-grant)) |
+| Contacted | Creating the environment contacts no registry |
+
 ## Connection test
 
 | Kind | Stages, in order |
@@ -521,7 +535,7 @@ The page reads the host when it loads, for the cards, the stack grid and the con
 | Part | Content | Shown to |
 |---|---|---|
 | Connection | `Test connection` and `Refresh counts` | Administrators |
-| Existing workloads | `Adopt everything on this host` ([Adopt everything on this host](#adopt-everything-on-this-host)), shown when the stored status is `reachable` | Administrators |
+| Existing workloads | `Adopt everything on this host` ([Adopt everything on this host](#adopt-everything-on-this-host)), shown when the stored status is `reachable`, and a sentence naming the registry addresses an image check contacts | Administrators |
 | Host, Status, Engine | Three boxes in one row from `70rem` wide; stacked below that | Everyone |
 | Cards | Five cards ([Cards](#cards)) | Everyone |
 | Stacks | A grid of the managed stacks ([Stack grid](#stack-grid)) | Everyone, when the host was read |
@@ -716,6 +730,7 @@ One reviewed confirmation adopts every unmanaged Compose project and Swarm names
 | Start | `Adopt everything on this host`, in the `Existing workloads` section of the [environment page](#environment-page). Shown when the stored status is `reachable` |
 | Scope | One environment per review |
 | Host not reachable | `409`, `The environment is not reachable`: `Test the connection, then start the review again.` |
+| Registries contacted | Named on the environment page before the start: `Checking images sends manifest HEAD requests to these registry addresses: {addresses}.`, listing the address of every credential set granted to the environment, entries with authentication off included. With none: `No registry credential set is granted to this environment, so no registry is contacted.` |
 | Flow | Review job, review page, confirmation, apply, result page |
 | Changes to the host | The review creates and removes the helper containers of the stack reads ([Read from host](Usage-Stacks#read-from-host)). Apply changes nothing on the host |
 
@@ -992,7 +1007,7 @@ Deleting is reached from `Delete` on the environment page or from `Delete select
 
 | Action | Detail keys |
 |---|---|
-| `environment_created` | `name`, `endpoint`, `status`, `failed_stage`, `tls_warnings` (remote only) |
+| `environment_created` | `name`, `endpoint`, `status`, `failed_stage`, `tls_warnings` (remote only), `registry_grants` (the ids of the registry entries granted at create, comma-separated; only when any were granted) |
 | `environment_updated` | `previous_name`, `name`; `previous_endpoint`, `endpoint`, `status`, `failed_stage` when the connection changed; `tls` (`replaced` or `removed`) |
 | `environment_connection_tested` | `status`, `failed_stage`, `recorded` (`false` when the connection changed during the test) |
 | `environment_deleted` | `name`, `kind`, `endpoint`, `rules`, `job_runs` |

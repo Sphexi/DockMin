@@ -488,13 +488,16 @@ async def _detail_page(
 ) -> Response:
     detail = await services.environments.get(actor, environment_id)
     access_view = None
+    registry_addresses: tuple[str, ...] = ()
     if actor.is_administrator:
         access_view = await services.access.for_environment(actor, environment_id)
+        registry_addresses = await services.environments.registry_addresses(actor, environment_id)
     return _page(
         request,
         "environments/detail.html",
         {
             "detail": detail,
+            "registry_addresses": registry_addresses,
             "environment": detail.summary,
             "overview": await overview.overview(actor, environment_id),
             "access_view": access_view,

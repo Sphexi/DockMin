@@ -54,6 +54,7 @@ def stored(**overrides: object) -> StoredRegistryCredential:
         "verify_tls": True,
         "ca_bundle": None,
         "is_default_for_host": False,
+        "seeded_default": False,
         "created_at": STAMP,
         "updated_at": STAMP,
     }

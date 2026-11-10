@@ -27,6 +27,7 @@ from app.docker_engine.probe import (
 )
 from app.docker_engine.registry import EngineClientRegistry
 from app.docker_engine.transport import ConnectionSettings
+from app.services.anonymous_binding_store import AnonymousBindingReviewStore
 from app.services.engine_setup import EngineRuntime
 from app.services.environment_connector import ProbeCoordinator
 from app.services.environments import ConnectionInput, EnvironmentSpec, TlsInput
@@ -164,6 +165,9 @@ class FakeEngineRuntime:
     image_jobs: ImageJobRegistry = field(default_factory=ImageJobRegistry)
     stack_jobs: StackJobRegistry = field(default_factory=StackJobRegistry)
     imported_volumes: ImportedVolumes = field(default_factory=ImportedVolumes)
+    anonymous_binding_reviews: AnonymousBindingReviewStore = field(
+        default_factory=AnonymousBindingReviewStore
+    )
     compose: Any = None
     instance_name: str = "dockmin"
 
