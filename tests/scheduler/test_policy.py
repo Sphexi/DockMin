@@ -109,7 +109,7 @@ def test_a_random_source_outside_zero_to_one_is_clamped() -> None:
     [
         pytest.param("failure", 3, id="failure-adds-one"),
         pytest.param("success", 0, id="success-resets"),
-        pytest.param("partial", 0, id="partial-resets"),
+        pytest.param("partial", 2, id="partial-leaves-it"),
         pytest.param("skipped", 2, id="skipped-leaves-it"),
         pytest.param("interrupted", 2, id="interrupted-leaves-it"),
         pytest.param("dry_run", 2, id="unknown-leaves-it"),

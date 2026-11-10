@@ -8,7 +8,7 @@ import pytest
 
 from tests.automation_support import HEALTH, STACK_RESTARTER, Subject, cid, detail_of
 from tests.docker_engine.container_engine import created_id
-from tests.image_support import digest, mark_missing
+from tests.image_support import digest, move_sets_elsewhere
 from tests.stack_support import project_box, seed_stack_row
 from tests.swarm_stack_support import NAME, NAMESPACE_LABEL
 from tests.swarm_updater_support import (
@@ -112,9 +112,7 @@ async def test_the_updaters_pull_recreate_rollback_and_refusal_rows_are_all_attr
     await world.run(job)
     await world.save_rule(rule_id)
     world.host.clear_faults()
-    await mark_missing(
-        world.db, (await world.db.fetch_one("SELECT id FROM registry_credential"))["id"]
-    )
+    await move_sets_elsewhere(world.db)
     world.new_image(4)
     await world.run(job)
 
@@ -146,7 +144,7 @@ async def test_the_swarm_service_updated_rolled_back_and_refused_rows_are_all_at
     await swarm_web.subject.run(job)
     swarm_web.manifests.default = digest(3)
     swarm_web.service.pop("UpdateStatus", None)
-    await mark_missing(swarm_web.rig.db, swarm_web.set_id)
+    await move_sets_elsewhere(swarm_web.rig.db)
     swarm_web.subject.advance(SWEEP_PAUSE)
     await swarm_web.subject.run(job)
 
@@ -210,7 +208,7 @@ async def test_the_swarm_stacks_refusal_row_is_attributed(swarm_shop: Shop) -> N
     known = len(shop.subject.events())
     rule_id, job = await shop.subject.rule(STACK, UPDATE, name=RULE)
     shop.move()
-    await mark_missing(shop.rig.db, shop.set_id)
+    await move_sets_elsewhere(shop.rig.db)
     await shop.subject.run(job)
 
     rows = assert_attributed(shop.subject, UPDATER, rule_id, since=known)

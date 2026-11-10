@@ -60,7 +60,7 @@ from app.services.image_bindings import CredentialOffer, RebindRefused
 from app.services.image_jobs import TooManyJobs
 from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectBusy
-from app.services.pull_credentials import CHOICE_FIELD, BindingCredentialMissing
+from app.services.pull_credentials import CHOICE_FIELD
 from app.services.registry_resolution import CredentialSetUnavailable
 from app.web.container_import_panel import (
     IMPORT_FIELD,
@@ -684,7 +684,7 @@ async def create_container(
         return await _rendered_form(
             request, containers, actor, environment_id, form, state, status_code=400
         )
-    except (BindingCredentialMissing, CredentialSetUnavailable) as refused:
+    except CredentialSetUnavailable as refused:
         return await _review_again(
             request, containers, actor, environment_id, form, 409, error=str(refused)
         )
@@ -1011,7 +1011,7 @@ async def recreate_container(
             pull=False,
             credential_choice=choice,
         )
-    except (BindingCredentialMissing, CredentialSetUnavailable) as refused:
+    except CredentialSetUnavailable as refused:
         return await again(409, error=str(refused))
     except TooManyJobs as busy:
         return await again(429, error=str(busy))

@@ -101,7 +101,7 @@
 {% if checkable %}
 <div class="toolbar">
   {{ update_form(checkable, route_path("environment_image_updates", environment_id=environment_id)) }}
-  <p class="field__help">Compares the bound references on this page with their registries.</p>
+  <p class="field__help">Compares the tag references on this page with their registries.</p>
 </div>
 {% endif %}
 {{ update_results(none, announce=false) }}

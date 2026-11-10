@@ -53,7 +53,6 @@ RECORDING_ERRORS: Final = (sqlite3.Error, DatabaseError, RepositoryError, Produc
 _REASON_ORDER: Final = (
     "invalid",
     "restricted",
-    "credential_missing",
     "credential_unavailable",
     "credential_choice_required",
 )

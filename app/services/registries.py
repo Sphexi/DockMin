@@ -73,8 +73,8 @@ from app.services.registry_input import (
 DEFAULT_PAGE_SIZE: Final = 25
 PULLED_NOTE: Final = "Images already pulled and containers already running are not touched."
 BINDINGS_NOTE: Final = (
-    'The bindings stay and read "credential set deleted". Automatic updates for these images '
-    "stop until each is pulled again with another credential set."
+    'The bindings stay and read "bound set deleted". These images are checked and updated '
+    "anonymously until each is pulled again with another credential set."
 )
 MAX_AFFECTED_SHOWN: Final = 500
 ACTIVITY_NOTE: Final = "Activity history is kept."

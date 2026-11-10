@@ -507,6 +507,8 @@ class OnboardingService:
         self, actor: Principal, environment_id: int, planned: PlannedImage
     ) -> ApplyItem:
         reference = planned.target.reference
+        if planned.choice.credential_set_id is None:
+            return _item("image", reference, "skipped", "It is read without a binding.")
         try:
             outcome = await self._bindings.bind_verified(
                 actor, environment_id, reference, planned.choice, digest=planned.digest
@@ -515,8 +517,7 @@ class OnboardingService:
             return _failed("image", reference, error)
         if outcome == "skipped":
             return _item("image", reference, "skipped", "It has a binding now.")
-        where = "anonymously" if planned.set_name is None else f"to {planned.set_name}"
-        return _item("image", reference, "done", f"Bound {where}.")
+        return _item("image", reference, "done", f"Bound to {planned.set_name}.")
 
     async def _write_controls(
         self, actor: Principal, environment_id: int, review: OnboardingReview, plan: Plan

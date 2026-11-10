@@ -88,7 +88,6 @@ async def test_the_list_shows_each_reference_with_its_binding_and_pages_through_
     alpha = await make_set(admin_client, world, "alpha", address="ghcr.io")
     gone = await make_set(admin_client, world, "gone", address="docker.io")
     await bind(world, alpha, GHCR_REFERENCE)
-    await bind(world, None, "docker.io/library/nginx:1")
     await bind(world, gone, "docker.io/library/nginx:latest")
     await bind(world, alpha, "ghcr.io/o/removed:1")
     async with world.app.state.database.session() as db:
@@ -103,8 +102,7 @@ async def test_the_list_shows_each_reference_with_its_binding_and_pages_through_
     assert page.status_code == OK
     assert "4 images." in text
     assert "Bound to alpha" in text
-    assert "Anonymous pull" in text
-    assert "Credential set deleted" in text and "was gone" in text
+    assert "Bound set deleted" in text and "was gone; updates use anonymous access" in text
     assert "Dangling" in text
     assert f"{image_id(NGINX)[:12]}" in text
     assert repair_links(page) == [
@@ -344,7 +342,7 @@ async def test_the_pull_dialog_offers_the_sets_that_fit_and_asks_again_until_one
     assert offered_choices(named) == ["anonymous", str(first), str(second)]
     assert checked_choice(named) == [str(first)]
     assert "Default for this registry" in text_of(named)
-    assert "Not bound yet" in text_of(named)
+    assert "Not bound" in text_of(named)
     assert "Anonymous (no credentials)" in text_of(named)
     assert "elsewhere" not in named.text
     assert swap.status_code == OK
@@ -368,7 +366,7 @@ async def test_bound_and_credential_missing_references_are_changed_by_administra
     world: World,
     daemon: ContainerEngine,
 ) -> None:
-    await make_set(admin_client, world, "alpha", default=True, users=True)
+    default = await make_set(admin_client, world, "alpha", default=True, users=True)
     bound = await make_set(admin_client, world, "beta", users=True)
     other = await make_set(admin_client, world, "gamma", users=True)
     await bind(world, bound, PULL_KEY)
@@ -399,17 +397,15 @@ async def test_bound_and_credential_missing_references_are_changed_by_administra
     assert checked_choice(admin_bound) == [str(bound)]
     assert "Bound to beta" in text_of(admin_bound)
     assert "changes the binding for every user" in text_of(admin_bound)
-    assert "Choose another set, or an anonymous pull, to repair the binding." in text_of(
-        admin_missing
-    )
-    assert checked_choice(admin_missing) == []
+    assert "updates use anonymous access" in text_of(admin_missing)
+    assert checked_choice(admin_missing) == [str(default)]
     assert offered_choices(standard_bound) == [str(bound)]
     assert "Only an administrator can change which credential set" in text_of(standard_bound)
-    assert offered_choices(standard_missing) == []
-    assert "Only an administrator can change which credential set" in text_of(standard_missing)
+    assert offered_choices(standard_missing) == ["anonymous", str(default), str(bound), str(other)]
+    assert "Only an administrator can change which credential set" not in text_of(standard_missing)
     assert rebind.status_code == FORBIDDEN
     assert "Only an administrator can change which credential set" in text_of(rebind)
-    assert repair.status_code == CONFLICT and "has been deleted" in text_of(repair)
+    assert repair.status_code == BAD_REQUEST and ASK in text_of(repair)
     assert (local.status_code, local_post.status_code) == (FORBIDDEN, FORBIDDEN)
     assert len(world.app.state.engine.image_jobs) == 0
     assert daemon.calls("POST") == []

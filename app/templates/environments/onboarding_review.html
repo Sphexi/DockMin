@@ -82,7 +82,7 @@
               {% if row.offered %}
               <input class="choice__input" type="checkbox" name="image" value="{{ row.index }}"{% if row.ticked %} checked{% endif %} aria-label="Bind {{ row.reference }}">
               {% else %}
-              <input class="choice__input" type="checkbox" disabled aria-label="{{ row.reference }} cannot be bound">
+              <input class="choice__input" type="checkbox" disabled aria-label="{{ row.reference }} {{ 'needs no binding' if row.unneeded else 'cannot be bound' }}">
               {% endif %}
             </td>
             <th scope="row" class="cell-wrap mono">{{ row.reference }}</th>

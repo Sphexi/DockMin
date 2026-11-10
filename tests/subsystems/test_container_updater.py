@@ -1,6 +1,7 @@
 """container-updater on standalone containers: detection, update, refusal, rollback and holds."""
 
 from datetime import timedelta
+from functools import reduce
 from typing import Any
 
 import pytest
@@ -10,19 +11,28 @@ from app.db.repositories.job_run import MAX_RUN_DETAIL_KEYS
 from app.docker_engine.errors import EngineError
 from app.registry_client.manifests import ManifestCheckKind
 from app.scheduler.model import RunResult
-from app.services.activity import UserActor
+from app.scheduler.policy import failures_after
+from app.services.activity import ActivityRecorder, SubsystemActor, UserActor
 from app.services.image_bindings import BindingPullCredentials, SetCandidates
 from app.services.image_updates import ImageUpdateService
 from app.services.object_locks import LockHolder, ObjectKey
-from app.services.pull_credentials import BindingCredentialMissing
+from app.services.registry_resolution import CredentialSetUnavailable
 from app.subsystems.container_updater import ContainerUpdater
 from tests.access_support import ADMIN, ENV_A, PEER_ID, STANDARD
 from tests.automation_support import Subject, counts
 from tests.docker_engine.container_engine import created_id
 from tests.docker_engine.fake_engine import Refuse
-from tests.image_support import REFERENCE, REFERENCE_KEY, digest, full_id, mark_missing, register
+from tests.image_support import (
+    REFERENCE,
+    REFERENCE_KEY,
+    digest,
+    full_id,
+    mark_missing,
+    move_sets_elsewhere,
+    register,
+)
 from tests.provisioning_support import OLD, old_body
-from tests.registry_support import ADDRESS, grant_user
+from tests.registry_support import ADDRESS, bind_image, grant_user
 from tests.services.conftest import ImageRig
 from tests.support import present
 from tests.updater_support import (
@@ -76,6 +86,20 @@ def compose_managed_web(world: World) -> None:
     world.host.add_configured(THIRD, "composed", body, "running")
 
 
+async def hand_refusal(world: World, rule_id: int, signature: str) -> None:
+    """Write the refusal row a container carried before its reason stopped refusing."""
+    await ActivityRecorder(world.db, world.rig.runtime.clock).record_failure(
+        SubsystemActor(UPDATER, rule_id, None, "Heal web"),
+        action="image_update_refused",
+        target_type="container",
+        target_id=OLD,
+        environment_id=ENV_A,
+        reason="credential_missing",
+        detail={"name": "web", "reference": REFERENCE, "refused": signature},
+        message="x",
+    )
+
+
 async def failed_update(world: World) -> tuple[int, int]:
     """Run an update whose replacement exits, and return the rule and job ids."""
     world.new_image(3)
@@ -115,10 +139,7 @@ async def test_a_dry_run_forecasts_the_update_and_writes_and_changes_nothing(
 async def test_a_dry_run_counts_a_refusal_without_writing_it(
     world: World, image_rig: ImageRig
 ) -> None:
-    await mark_missing(
-        image_rig.db,
-        (present(await image_rig.db.fetch_one("SELECT id FROM registry_credential")))["id"],
-    )
+    await move_sets_elsewhere(image_rig.db)
     _, job = await world.rule(container("web"))
 
     result = await world.run(job, dry=True)
@@ -192,23 +213,25 @@ async def test_the_pull_resolves_only_the_bound_set_with_no_user_and_no_choice(
     assert candidate_reads == []
 
 
-async def test_a_credential_missing_binding_is_refused_once_then_held_and_nothing_is_pulled(
+async def test_a_binding_that_does_not_fit_the_image_is_refused_once_then_held_without_a_pull(
     world: World, image_rig: ImageRig
 ) -> None:
-    set_id = (present(await image_rig.db.fetch_one("SELECT id FROM registry_credential")))["id"]
-    await register(image_rig, "other")
-    await mark_missing(image_rig.db, set_id)
+    await move_sets_elsewhere(image_rig.db)
     rule_id, job = await world.rule(container("web"))
 
     result = await world.run(job)
     world.advance(10)
     held = await world.run(job)
 
-    assert (result.outcome, result.reason, result.attempted) == ("failure", "credential_missing", 1)
+    assert (result.outcome, result.reason, result.attempted) == (
+        "failure",
+        "credential_mismatch",
+        1,
+    )
     assert counts(result)["refused"] == 1
     [row] = world.rows("image_update_refused")
     assert (row["result"], row["target_id"]) == ("failure", OLD)
-    assert row["detail"]["reason"] == "credential_missing"
+    assert row["detail"]["reason"] == "credential_mismatch"
     assert (row["actor_subsystem"], row["rule_id"]) == (UPDATER, rule_id)
     assert world.verbs() == []
     assert (held.outcome, counts(held)["held"]) == ("success", 1)
@@ -219,17 +242,131 @@ async def test_a_credential_that_vanishes_between_the_check_and_the_pull_is_refu
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def refuse(self: Any, *arguments: Any, **keywords: Any) -> Any:
-        raise BindingCredentialMissing()
+        raise CredentialSetUnavailable("missing")
 
     monkeypatch.setattr(BindingPullCredentials, "resolve", refuse)
     _, job = await world.rule(container("web"))
 
     result = await world.run(job)
 
-    assert result.reason == "credential_missing"
+    assert result.reason == "credential_unavailable"
     [row] = world.rows("image_update_refused")
-    assert row["detail"]["reason"] == "credential_missing"
+    assert row["detail"]["reason"] == "credential_unavailable"
     assert world.verbs() == []
+
+
+async def test_an_image_whose_bound_set_was_deleted_is_updated_anonymously_and_counted(
+    world: World, image_rig: ImageRig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_id = (present(await image_rig.db.fetch_one("SELECT id FROM registry_credential")))["id"]
+    await mark_missing(image_rig.db, set_id)
+    chosen: list[int | None] = []
+    original = BindingPullCredentials.resolve
+
+    async def spy(self: Any, *arguments: Any, **keywords: Any) -> Any:
+        resolved = await original(self, *arguments, **keywords)
+        chosen.append(resolved.credential_set_id)
+        return resolved
+
+    monkeypatch.setattr(BindingPullCredentials, "resolve", spy)
+    _, job = await world.rule(container("web"))
+
+    result = await world.run(job)
+
+    detail = counts(result)
+    assert result.outcome == "success"
+    assert (detail["updated"], detail["anonymous_fallback"]) == (1, 1)
+    assert chosen == [None]
+    assert world.rows("image_update_refused") == []
+    assert world.verbs()[:6] == RECREATE_VERBS
+
+
+async def test_an_unbound_image_is_updated_with_no_binding_written(
+    world: World, image_rig: ImageRig
+) -> None:
+    await image_rig.db.execute("DELETE FROM image_credential_binding")
+    _, job = await world.rule(container("web"))
+
+    result = await world.run(job)
+
+    assert (result.outcome, counts(result)["updated"]) == ("success", 1)
+    assert "anonymous_fallback" not in counts(result)
+    assert (await image_rig.db.fetch_one("SELECT 1 FROM image_credential_binding")) is None
+
+
+async def test_an_image_that_needs_authentication_is_refused_once_held_and_released_by_a_binding(
+    world: World, image_rig: ImageRig
+) -> None:
+    await image_rig.db.execute("DELETE FROM image_credential_binding")
+    world.manifests.default = ManifestCheckKind.AUTHENTICATION
+    _, job = await world.rule(container("web"))
+
+    first = await world.run(job)
+    world.advance(10)
+    held = await world.run(job)
+
+    assert (first.outcome, first.reason, first.attempted) == (
+        "failure",
+        "authentication_required",
+        1,
+    )
+    [row] = world.rows("image_update_refused")
+    assert (row["detail"]["reason"], row["target_id"]) == ("authentication_required", OLD)
+    assert (held.outcome, counts(held)["held"]) == ("success", 1)
+    assert len(world.rows("image_update_refused")) == 1
+    assert reduce(failures_after, [first.outcome, held.outcome], 0) == 0
+    assert world.verbs() == []
+
+    set_id = (present(await image_rig.db.fetch_one("SELECT id FROM registry_credential")))["id"]
+    await bind_image(image_rig.db, set_id, ENV_A, REFERENCE_KEY)
+    world.new_image(2)
+    world.advance(10)
+    released = await world.run(job)
+
+    assert (released.outcome, counts(released)["updated"]) == ("success", 1)
+    assert world.verbs()[:6] == RECREATE_VERBS
+
+
+async def test_a_report_run_over_an_image_that_needs_authentication_fails_each_time(
+    world: World, image_rig: ImageRig
+) -> None:
+    await image_rig.db.execute("DELETE FROM image_credential_binding")
+    world.manifests.default = ManifestCheckKind.AUTHENTICATION
+    _, job = await world.rule(container("web"), REPORT)
+
+    results = [await world.run(job), await world.run(job)]
+
+    for result in results:
+        assert (result.outcome, result.reason) == ("failure", "authentication_required")
+    assert world.rows() == [] and world.verbs() == []
+
+
+async def test_a_transient_check_failure_fails_every_run_and_is_never_held(
+    world: World,
+) -> None:
+    world.manifests.default = ManifestCheckKind.TIMEOUT
+    _, job = await world.rule(container("web"))
+
+    first = await world.run(job)
+    world.advance(10)
+    second = await world.run(job)
+
+    for result in (first, second):
+        assert (result.outcome, result.reason) == ("failure", "timeout")
+    assert world.rows() == [] and world.verbs() == []
+
+
+async def test_a_stored_refusal_for_a_retired_reason_is_ignored_and_the_image_updates(
+    world: World,
+) -> None:
+    rule_id, job = await world.rule(container("web"))
+    await hand_refusal(world, rule_id, f"{REFERENCE}=not_bound")
+
+    result = await world.run(job)
+
+    assert (result.outcome, counts(result)["updated"]) == ("success", 1)
+    assert "held" not in counts(result)
+    assert world.verbs()[:6] == RECREATE_VERBS
 
 
 async def test_a_failed_start_rolls_back_records_both_rows_and_then_holds_until_a_rule_save(
@@ -318,17 +455,19 @@ async def test_a_permanent_recreate_refusal_is_held_until_the_rule_is_saved(worl
     assert len(world.rows("container_recreated")) == 2
 
 
-async def test_a_registry_outage_counts_unknown_and_writes_nothing(world: World) -> None:
+async def test_a_registry_outage_fails_the_run_with_its_kind_and_writes_nothing(
+    world: World,
+) -> None:
     world.manifests.default = ManifestCheckKind.TCP
     _, job = await world.rule(container("web"))
 
     result = await world.run(job)
 
-    assert (result.outcome, counts(result)["unknown"]) == ("success", 1)
+    assert (result.outcome, result.reason, counts(result)["failed"]) == ("failure", "tcp", 1)
     assert world.rows() == [] and world.verbs() == []
 
 
-async def test_a_registry_that_no_credential_set_names_is_reported_unknown_never_current(
+async def test_a_registry_that_no_credential_set_names_is_checked_anonymously(
     world: World,
 ) -> None:
     unconfigured = "elsewhere.example/app:1"
@@ -337,18 +476,13 @@ async def test_a_registry_that_no_credential_set_names_is_reported_unknown_never
     world.host.add_configured(
         OTHER, "other", old_body(network_id, config={"Image": unconfigured}), "running"
     )
-    await world.db.execute(
-        "INSERT INTO image_credential_binding (environment_id, image_reference, "
-        "registry_credential_id, state, bound_at, updated_at) VALUES (?, ?, NULL, 'bound', ?, ?)",
-        (ENV_A, unconfigured, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
-    )
     _, job = await world.rule(container("other"), REPORT)
 
     result = await world.run(job)
 
-    detail = counts(result)
-    assert (detail["unknown"], detail.get("up_to_date")) == (1, None)
-    assert world.manifests.calls == []
+    [(target, _, login)] = world.manifests.calls
+    assert counts(result)["update_available"] == 1
+    assert (target.address, login) == ("elsewhere.example", None)
 
 
 async def test_a_failed_pull_fails_the_container_with_one_pull_row_and_no_recreate(

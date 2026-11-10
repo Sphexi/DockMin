@@ -549,7 +549,7 @@ async def delete_registry(
 ) -> Response:
     """Delete the set if its name and the number of bound images are still the reviewed ones.
 
-    The bound images stay and read "credential set deleted".
+    The bound images stay and read "bound set deleted".
     """
     try:
         if not _digits(expected_bindings):

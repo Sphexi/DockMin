@@ -82,10 +82,10 @@
 {% if checkable %}
 <div class="toolbar">
   {{ update_form(checkable, route_path("environment_image_updates", environment_id=detail.environment_id), back=detail.id) }}
-  <p class="field__help">Compares the bound tags of this image with their registries.</p>
+  <p class="field__help">Compares the tags of this image with their registries.</p>
 </div>
 {% else %}
-<p class="field__help">Only bound tags can be checked. Pull a tag to bind it to a credential set.</p>
+<p class="field__help">Only tags can be checked.</p>
 {% endif %}
 {{ update_results(none, announce=false) }}
 {% endmacro %}

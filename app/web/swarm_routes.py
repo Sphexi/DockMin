@@ -31,7 +31,6 @@ from app.services.object_inspector import (
 )
 from app.services.object_locks import ObjectBusy
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoiceRequired,
 )
 from app.services.registry_resolution import CredentialSetUnavailable
@@ -181,7 +180,6 @@ ACTION_ERRORS: Final = (
     NodeRefused,
     SwarmObjectRefused,
     EngineRefused,
-    BindingCredentialMissing,
     CredentialSetUnavailable,
     EnvironmentUnavailable,
     SwarmListTooLarge,
@@ -223,7 +221,7 @@ def failure_of(error: Exception, swarm: SwarmServices, actor: Principal) -> Fail
         return Failure(409, "There is nothing to roll back to", str(error))
     if isinstance(error, SwarmObjectInUse):
         return Failure(409, "It is in use", str(error))
-    if isinstance(error, BindingCredentialMissing | CredentialSetUnavailable):
+    if isinstance(error, CredentialSetUnavailable):
         return Failure(409, "The credential set cannot be used", str(error))
     if isinstance(error, ServiceGone | NodeGone | SwarmObjectGone):
         return Failure(404, "It no longer exists", str(error))

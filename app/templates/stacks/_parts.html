@@ -109,11 +109,11 @@
 {% for choice in offers %}
 {% set offer = choice.offer %}
 {% set binding = offer.binding %}
-{% set locked = (not offer.may_rebind) and binding.state != "unbound" %}
+{% set locked = (not offer.may_rebind) and binding.state == "bound" %}
 {% set prefix = "credential-" ~ choice.index %}
 {% if locked and offer.preselected is none %}
 <div class="panel panel--notice" role="note">
-  <p><span class="mono cell-wrap">{{ choice.reference }}</span>: {% if binding.state == "credential_missing" %}the credential set this image was pulled with has been deleted. {% else %}this image is bound to a credential set you cannot use. {% endif %}Only an administrator can change which credential set it uses.</p>
+  <p><span class="mono cell-wrap">{{ choice.reference }}</span>: this image is bound to a credential set you cannot use. Only an administrator can change which credential set it uses.</p>
 </div>
 {% elif locked or not offer.candidates %}
 {% set bound_name = namespace(text="Anonymous (no credentials)") %}
@@ -137,8 +137,8 @@
   <legend>Credential set for <span class="mono cell-wrap">{{ choice.reference }}</span></legend>
   <input type="hidden" name="{{ prefix }}-reference" value="{{ choice.reference }}">
   <p class="field__help">Registry <span class="mono">{{ offer.reference.registry_address }}</span>. {{ binding_text(binding) }}.
-    {%- if binding.state != "unbound" %} Choosing a different option changes the binding for every user of this image.
-    {%- else %} The set that pulls the image is bound to it, so updates use the same set.{% endif %}</p>
+    {%- if binding.state == "bound" %} Choosing a different set changes the binding for every user of this image. Choosing Anonymous removes the binding.
+    {%- else %} The set that pulls the image is bound to it, so updates use the same set. An anonymous pull binds nothing.{% endif %}</p>
   {% if choice.error %}
   <p class="field__error" role="alert">{{ choice.error }}</p>
   {% endif %}

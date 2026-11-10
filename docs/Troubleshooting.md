@@ -299,10 +299,9 @@ The command prints the version of the binary the image carries. For a container 
 
 | Symptom | Cause | Action |
 |---|---|---|
-| An image reference shows `Credential set deleted` or `Registry address changed`, with `was <set name>`. The binding filter `Credential set deleted` (`credential_missing`) lists it | The registry credential set the image was pulled with was deleted, or its registry address was edited | An administrator pulls the reference again, choosing another set or `Anonymous` (`Repair` opens the pull form). The binding is then rebound ([When a set is deleted or its address changes](Usage-Images#when-a-set-is-deleted-or-its-address-changes)) |
-| A pull or recreate answers `409`: `The credential set this image was pulled with has been deleted. Choose another set.` | The same | The same. A standard user cannot choose a set |
-| The update check reports `unknown` with reason `credential_missing` | Automatic updates for the reference stopped | Repair the binding |
-| A `container-updater` run fails with reason `credential_missing`, an `image_update_refused` event is written, and later runs count the object `held` | The rule's object has a reference bound to the lost set | Repair the binding. The hold ends when the cause changes or a user acts on the object ([Refusals and holds](Operations-Automation#refusals-and-holds)) |
+| An image reference shows `Bound set deleted` or `Registry address changed`, with `was <set name>; updates use anonymous access`. The binding filter `Bound set deleted` (`credential_missing`) lists it | The registry credential set the image was bound to was deleted, or its registry address was edited | None needed for a public image: checks and updates are anonymous. For a private image, pull it again and choose a set, or use `Repair` ([When a set is deleted or its address changes](Usage-Images#when-a-set-is-deleted-or-its-address-changes)) |
+| The update check reports `unknown` with reason `authentication_required` | The registry refused the anonymous check: the image is private, or the registry requires a login for it | An administrator binds the image to a credential set by pulling it with the set chosen ([Update check](Usage-Images#update-check)) |
+| A `container-updater` run is `partial` or `failure` with reason `authentication_required` and the automation notifies | The same, for an image the automation checks | The same. In update mode the first run refuses the image and later runs hold it, without a failure, until the image is bound or the reason changes. Report mode fails the object on every run ([Refusals and holds](Operations-Automation#refusals-and-holds)) |
 
 ## dockmin could not identify its container
 

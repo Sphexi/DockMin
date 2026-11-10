@@ -352,7 +352,7 @@ A new environment is granted every registry entry that carries the `Added with t
 |---|---|
 | When | In the transaction that creates the environment, for a local socket environment, a remote TLS environment and the environment of the [first-run panel](#first-run-panel) |
 | Entries | `Docker Hub (anonymous)` and `GitHub Container Registry (anonymous)` on a new instance, until they are deleted or edited to use authentication |
-| Effect | `docker.io` and `ghcr.io` are configured on the environment. Images at those addresses can be bound anonymously and checked for updates ([Images](Usage-Images#bind-unbound-images-anonymously)) |
+| Effect | The entries are listed as granted to the environment. They are not required: images at any address are checked and updated anonymously without an entry ([Images](Usage-Images#update-check)) |
 | Recorded | `registry_grants` in the detail of `environment_created` ([Recorded actions](#recorded-actions)) |
 | Environments that exist | Not granted. Grant an entry as any set ([Registries](Administration-Registries#grant-a-set-to-an-environment)) |
 | Withdraw | Per environment ([Registries](Administration-Registries#remove-a-grant)) |
@@ -872,7 +872,7 @@ The confirmation writes nothing. It holds the selection with the review.
 | Notice | `Nothing is pulled, redeployed or restarted.` No container, service, network, volume, config or secret is changed and no image is downloaded |
 | `Left out: changed since the review` | Each ticked target that is no longer eligible, with the reason, when there is one |
 | `Stacks to adopt as is` | Each stack, with its kind |
-| `Images to bind without a pull` | Each reference, with the set or `an anonymous pull` |
+| `Images to bind without a pull` | Each reference, with the set |
 | `Access settings to create` | Each object, with `owner {name}` and `team {name} ({level})` |
 | Left administrators-only | `{N} ticked objects stay visible to administrators only: no owner or team applies.` |
 | Stacks with no ownership | `The stacks adopted here get no access settings either, so they stay visible to administrators only.` |
@@ -949,7 +949,7 @@ A target that fails shows the product message of the error, or `The operation fa
 | Done detail | Message |
 |---|---|
 | Stack | `Adopted as is.` |
-| Image | `Bound to {set}.` or `Bound anonymously.` |
+| Image | `Bound to {set}.`, or `It is read without a binding.` (skipped) for an image whose choice is anonymous |
 | Object | `Access set: owner {name}, team {name} ({level}).`, with the parts that apply |
 
 ### Recorded actions of adopt everything

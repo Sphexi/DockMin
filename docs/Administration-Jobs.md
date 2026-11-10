@@ -332,7 +332,7 @@ A fire arrives while the job's previous run is still in progress.
 | `skipped` | The run did not act, and says why |
 | `interrupted` | The run was cut short |
 
-Every outcome other than `success` and `partial` has a reason, a lowercase code of up to 64 characters.
+Every outcome other than `success` and `partial` has a reason, a lowercase code of up to 64 characters. A `partial` run of an automation has one too ([Automation](Operations-Automation#outcomes)).
 
 | Outcome | Reason | Meaning |
 |---|---|---|
@@ -412,7 +412,7 @@ A restore suspends the scheduler ([Backups](Administration-Backups#the-offline-g
 | Item | Behaviour |
 |---|---|
 | A run fails when | It reports `failure`, raises an error, exceeds its time limit, finds its owner without access, or records no required activity event |
-| Counter | `consecutive failures` rises by 1 on `failure`. `success` and `partial` reset it to 0. `skipped`, `interrupted` and dry runs leave it |
+| Counter | `consecutive failures` rises by 1 on `failure`. `success` resets it to 0. `partial`, `skipped`, `interrupted` and dry runs leave it |
 | Threshold | The count at which the job is disabled. 5 unless the subsystem declares another. An automation sets its own with the parameter `max_consecutive_failures` (1 to 100). A subsystem with no threshold never disables its jobs |
 | Backoff | After a failure of a scheduled run: `min(1 hour, 60 s × 2^(n−1))`, where `n` is the failure count, multiplied by a random factor from 0.5 up to but excluding 1.0. The retry time is now plus that delay. Interval schedule: the next run is the first slot of the schedule's own phase at or after the retry time, and not earlier than the next scheduled fire. Cron schedule: the later of the next scheduled fire and the retry time |
 | No backoff | Jobs with no threshold, failed `manual` runs, and webhook jobs |
@@ -620,6 +620,7 @@ Actions a run takes are attributed to the subsystem that owns the job. The sched
 | `activity_log_exported` | `activity-log-exporter`, its automation and the run | `object_storage_target` | A failed export, result `failure` only ([Activity](Administration-Activity#failure-row)) |
 | `container_log_exported` | `container-log-exporter`, its automation and the run | `container`, `service`, `object_storage_target` | A failed export, result `failure` only ([Subsystems](Reference-Subsystems#log-exporter-failures)) |
 | `automation_run_failed` | The owning subsystem, its automation and the run | `scheduled_job` | A run of an automation ended `failure`. Not written for a dry run. Detail: `reason` |
+| `automation_run_partial` | The owning subsystem, its automation and the run | `scheduled_job` | A run of an automation ended `partial`. Not written for a dry run. Result `failure`. Detail: `reason` |
 | `environment_unreachable`, `environment_reachable` | `environment-snapshot-refresher`; no automation, no run | `environment` | An environment's status moved between `reachable` and `unreachable` ([Subsystems](Reference-Subsystems#environment-snapshot-refresher)) |
 | `notification_delivery_failed` | `notification-sender` | `notification_channel` | A message was not delivered after three attempts ([Notifications](Administration-Notifications#delivery)) |
 | `backup_uploaded`, `backup_remote_pruned` | `backup-syncer`, its automation and the run | `object_storage_target` | A stored or failed archive; a retention pass that deleted or failed ([Backups](Administration-Backups#activity-rows)) |

@@ -65,7 +65,7 @@ EXPECTED_CREATE_DETAIL: dict[str, Any] = {
     "anonymous": True,
     "credential_source": "no_match",
     "control_created": True,
-    "binding": "created",
+    "binding": "skipped",
 }
 
 

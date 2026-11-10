@@ -13,7 +13,6 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
 
-from app.db.repositories.image_binding import ImageBindingRepository
 from app.registry_client.manifests import ManifestClient
 from app.registry_client.references import ImageReference
 from app.registry_client.tags import TagClient
@@ -169,12 +168,8 @@ def install_registry(monkeypatch: pytest.MonkeyPatch) -> Registry:
         script.calls.append(f"tags {reference.path}")
         return script.tags
 
-    async def granted(self: ImageBindingRepository, environment_id: int, address: str) -> bool:
-        return True
-
     monkeypatch.setattr(ManifestClient, "head_digest", head)
     monkeypatch.setattr(TagClient, "list_tags", tags)
-    monkeypatch.setattr(ImageBindingRepository, "has_granted_set_at", granted)
     monkeypatch.setattr("app.services.instance.product_version", lambda: RUNNING_TAG)
     return script
 

@@ -36,7 +36,7 @@
   <h2 id="images-heading">Images to bind without a pull</h2>
   {% if plan.images %}
   {% set items = [] %}
-  {% for item in plan.images %}{% set _ = items.append({"name": item.target.reference, "detail": "to " ~ (item.set_name if item.set_name else "an anonymous pull")}) %}{% endfor %}
+  {% for item in plan.images %}{% set _ = items.append({"name": item.target.reference, "detail": "to " ~ item.set_name}) %}{% endfor %}
   {{ confirm_targets(items, "image") }}
   {% else %}
   <p>No image is ticked.</p>

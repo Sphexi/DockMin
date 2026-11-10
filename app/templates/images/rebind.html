@@ -15,7 +15,7 @@
 {{ error_state("The credential set was not changed", error) }}
 {% endif %}
 
-<p>The chosen credential set is checked against the registry first. The binding changes only if the registry accepts it, and the image is not pulled.</p>
+<p>A chosen credential set is checked against the registry first. The binding changes only if the registry accepts it, and the image is not pulled. Choosing Anonymous removes the binding without a check.</p>
 
 <form class="form form--wide" method="post" action="{{ post_href }}" data-submit-once>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -33,7 +33,7 @@
   </dl>
   {{ credential_fieldset(offer, selected, fields.get("credential_choice"), catalogue, true) }}
   <div class="form__actions">
-    <button type="submit" class="btn btn--primary">Verify and rebind</button>
+    <button type="submit" class="btn btn--primary">Verify and change binding</button>
     <a class="btn" href="{{ pull_href }}">Pull the image instead</a>
     <a class="btn" href="{{ list_href }}">Cancel</a>
   </div>

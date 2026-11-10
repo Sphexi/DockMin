@@ -38,6 +38,7 @@ type ObjectStatus = Literal[
 ]
 
 ALL_OBJECTS_FAILED: Final = "all_objects_failed"
+SOME_OBJECTS_FAILED: Final = "some_objects_failed"
 PERMISSION_DENIED: Final = "permission_denied"
 SUPPRESSED: Final = "suppressed"
 _COUNTED: Final = (
@@ -171,6 +172,7 @@ class ObjectTally:
             return RunResult(
                 "partial",
                 attempted=self._attempted,
+                reason=self._failure_reasons[0] if failed == 1 else SOME_OBJECTS_FAILED,
                 message="Some objects could not be acted on.",
                 detail=detail,
             )

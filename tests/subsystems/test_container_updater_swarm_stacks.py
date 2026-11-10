@@ -17,8 +17,8 @@ from app.services.swarm_stack_plan import StackCredentialsRefused, SwarmStackPla
 from tests.access_support import ADMIN, ENV_A, STANDARD, digest_of
 from tests.automation_support import counts
 from tests.docker_engine.swarm_engine import DIGEST
-from tests.image_support import REFERENCE, digest, mark_missing, register
-from tests.registry_support import bind_image
+from tests.image_support import REFERENCE, digest, move_sets_elsewhere, register
+from tests.registry_support import OTHER_ADDRESS, bind_image
 from tests.swarm_stack_support import NAME, NAMESPACE_LABEL
 from tests.swarm_updater_support import (
     NEW_DIGEST,
@@ -194,12 +194,12 @@ async def test_a_stack_in_a_state_the_updater_must_leave_alone_is_counted_and_no
     assert rows(shop.subject) == [] and shop.sent() == before
 
 
-async def test_a_missing_credential_set_refuses_the_stack_once_under_its_name_and_holds_it(
+async def test_a_set_that_does_not_fit_refuses_the_stack_once_under_its_name_and_holds_it(
     swarm_shop: Shop,
 ) -> None:
     shop = swarm_shop
     shop.move()
-    await mark_missing(shop.rig.db, shop.set_id)
+    await move_sets_elsewhere(shop.rig.db)
     _, job = await shop.subject.rule(STACK, UPDATE)
     before = shop.sent()
 
@@ -207,10 +207,16 @@ async def test_a_missing_credential_set_refuses_the_stack_once_under_its_name_an
     again = await shop.subject.run(job)
 
     [row] = rows(shop.subject, "image_update_refused")
-    assert first.reason == "credential_missing"
+    assert first.reason == "credential_mismatch"
     assert (row["target_type"], row["target_id"]) == ("stack", NAME)
     assert rows(shop.subject, "stack_redeployed") == [] and shop.sent() == before
     assert counts(again)["held"] == 1 and len(rows(shop.subject, "image_update_refused")) == 1
+
+
+async def bind_to_another_registry(shop: Shop, reference: str) -> None:
+    """Bind the reference to a set at another address, so the binding fails a pull's checks."""
+    elsewhere = await register(shop.rig, "elsewhere", address=OTHER_ADDRESS)
+    await bind_image(shop.rig.db, elsewhere, ENV_A, reference)
 
 
 async def test_a_credential_the_redeploy_itself_refuses_becomes_a_held_refusal(
@@ -218,9 +224,10 @@ async def test_a_credential_the_redeploy_itself_refuses_becomes_a_held_refusal(
 ) -> None:
     shop = swarm_shop
     shop.move()
+    await bind_to_another_registry(shop, OTHER_REFERENCE)
 
     async def unbound(self: Any, *arguments: Any, **keywords: Any) -> Any:
-        raise StackRejected({OTHER_REFERENCE: "x"}, "credential_choice_required")
+        raise StackRejected({OTHER_REFERENCE: "x"}, "credential_unavailable")
 
     monkeypatch.setattr(SwarmStackPlanner, "_pins", unbound)
     _, job = await shop.subject.rule(STACK, UPDATE)
@@ -229,7 +236,7 @@ async def test_a_credential_the_redeploy_itself_refuses_becomes_a_held_refusal(
     again = await shop.subject.run(job)
 
     [row] = rows(shop.subject, "image_update_refused")
-    assert first.outcome == "failure" and row["detail"]["reason"] == "not_bound"
+    assert first.outcome == "failure" and row["detail"]["reason"] == "credential_unavailable"
     assert counts(again)["held"] == 1
 
 
@@ -238,12 +245,13 @@ async def test_each_reference_the_redeploy_refuses_keeps_its_own_reason_in_the_r
 ) -> None:
     shop = swarm_shop
     shop.move()
+    await bind_to_another_registry(shop, OTHER_REFERENCE)
 
     async def refuse(self: Any, *arguments: Any, **keywords: Any) -> Any:
         raise StackCredentialsRefused(
             {REFERENCE: "x", OTHER_REFERENCE: "y"},
-            "credential_missing",
-            {REFERENCE: "credential_missing", OTHER_REFERENCE: "credential_unavailable"},
+            "credential_mismatch",
+            {REFERENCE: "credential_mismatch", OTHER_REFERENCE: "credential_unavailable"},
         )
 
     monkeypatch.setattr(SwarmStackPlanner, "_pins", refuse)
@@ -254,7 +262,7 @@ async def test_each_reference_the_redeploy_refuses_keeps_its_own_reason_in_the_r
 
     [row] = rows(shop.subject, "image_update_refused")
     signature = row["detail"]["refused"]
-    assert f"{REFERENCE}=credential_missing" in signature
+    assert f"{REFERENCE}=credential_mismatch" in signature
     assert f"{OTHER_REFERENCE}=credential_unavailable" in signature
     assert counts(again)["held"] == 1 and len(rows(shop.subject, "image_update_refused")) == 1
 
@@ -294,6 +302,18 @@ async def test_a_refusal_whose_signature_was_cut_or_cannot_be_read_stays_held(
     result = await shop.subject.run(job)
 
     assert counts(result)["held"] == 1 and shop.sent() == before
+
+
+async def test_a_stored_refusal_naming_a_retired_reason_holds_nothing(swarm_shop: Shop) -> None:
+    shop = swarm_shop
+    shop.move()
+    rule_id, job = await shop.subject.rule(STACK, UPDATE)
+    await hand_refusal(shop, rule_id, f"{REFERENCE}=not_bound,{OTHER_REFERENCE}=credential_missing")
+
+    result = await shop.subject.run(job)
+
+    assert "held" not in counts(result)
+    assert len(rows(shop.subject, "stack_redeployed")) == 1
 
 
 async def test_a_refusal_is_released_once_the_set_is_granted_to_the_environment_again(

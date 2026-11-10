@@ -1,8 +1,8 @@
-"""Which credential sets can read each unbound image in use on a host, proved by manifest HEAD."""
+"""Which credential sets can read each unbound image on a host, proved by manifest HEAD."""
 
 import asyncio
 import time
-from collections.abc import Callable, Collection, Coroutine, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -43,7 +43,15 @@ MAX_CHECKS_IN_FLIGHT: Final = 5
 CHECK_SECONDS: Final = 10.0
 TOTAL_SECONDS: Final = 120.0
 
-type Outcome = Literal["binds", "ambiguous", "no_match", "no_local_digest", "pinned", "not_checked"]
+type Outcome = Literal[
+    "binds",
+    "ambiguous",
+    "anonymous_only",
+    "no_match",
+    "no_local_digest",
+    "pinned",
+    "not_checked",
+]
 type CheckStatus = Literal["match", "mismatch", "failed", "not_checked"]
 
 
@@ -74,11 +82,12 @@ class CandidateCheck:
 
 @dataclass(frozen=True, slots=True)
 class ReferenceOutcome:
-    """What the scan found for one unbound reference in use.
+    """What the scan found for one unbound reference.
 
     `local_digests` are the `RepoDigests` of the local image whose tags carry the reference.
     `candidates_capped` means more sets fit the registry than were tried, so `binds` is never
-    the outcome.
+    the outcome. `anonymous_only` means no set matched and the anonymous check did, so the image
+    needs no binding.
     """
 
     reference: str
@@ -90,13 +99,25 @@ class ReferenceOutcome:
 
     @property
     def matches(self) -> tuple[CandidateCheck, ...]:
-        """Return the candidates whose registry digest is one of the local digests."""
-        return tuple(check for check in self.tried if check.status == "match")
+        """Return the credential sets whose registry digest is one of the local digests."""
+        return tuple(
+            check
+            for check in self.tried
+            if check.status == "match" and check.choice.credential_set_id is not None
+        )
 
     @property
     def choices(self) -> tuple[CredentialChoice, ...]:
-        """Return the choices that matched; the only options an administrator may pick between."""
+        """Return the sets that matched; the only options an administrator may pick between."""
         return tuple(check.choice for check in self.matches)
+
+    @property
+    def read_anonymously(self) -> bool:
+        """Report whether the anonymous check returned one of the local digests."""
+        return any(
+            check.status == "match" and check.choice.credential_set_id is None
+            for check in self.tried
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,10 +154,10 @@ class BindingCandidateScanner:
     """Finds, without writing or pulling, the credential sets an unbound image could be bound to.
 
     Candidates are the sets granted to the environment at the reference's registry address (ten
-    at most), then anonymous where one of them is of a provider that admits it. A set with
-    authentication off that connects as an anonymous read does is not tried as a second
-    candidate; it enables the anonymous one. Each gets one manifest HEAD and matches when the
-    digest returned is among the local `RepoDigests`.
+    at most). Anonymous is tried only when no set matched, and only where one of the granted
+    sets is of a provider that admits it; a set with authentication off that connects as an
+    anonymous read does is not a candidate of its own, it enables the anonymous check. Each gets
+    one manifest HEAD and matches when the digest returned is among the local `RepoDigests`.
     """
 
     def __init__(
@@ -193,7 +214,7 @@ class BindingCandidateScanner:
                 "references": len(outcomes),
                 **{
                     name: sum(1 for o in outcomes if o.outcome == name)
-                    for name in ("binds", "ambiguous", "no_match", "not_checked")
+                    for name in ("binds", "ambiguous", "anonymous_only", "no_match", "not_checked")
                 },
             },
         )
@@ -204,42 +225,22 @@ class BindingCandidateScanner:
         """Return how many references one scan checks."""
         return self._limits.references
 
-    async def check_anonymously(
+    async def check_references(
         self,
         principal: Principal,
         environment_id: int,
         references: Sequence[tuple[ImageReference, tuple[str, ...]]],
-        addresses: Collection[str],
     ) -> tuple[ReferenceOutcome, ...]:
-        """Send one anonymous manifest HEAD for each reference at a permitted address.
+        """Check the given references, each with the local digests it must match.
 
-        Administrators only. A reference at an address outside `addresses` is dropped and never
-        contacted. References past the cap, and those the time budget does not reach, come back
-        `not_checked`. Raises RuntimeError inside a write transaction. No credential set is read.
+        Administrators only. References past the cap, and those the time budget does not reach,
+        come back `not_checked`. Raises RuntimeError inside a write transaction.
         """
         if self._bindings.in_transaction:
             raise RuntimeError("registry checks run outside a write transaction")
         await self._authoriser.require_environment(principal, environment_id)
         require_administrator(principal)
-        limits = self._limits
-        permitted = [item for item in references if item[0].registry_address in addresses]
-        selected, left = permitted[: limits.references], permitted[limits.references :]
-        run = _Run(
-            principal,
-            environment_id,
-            asyncio.Semaphore(limits.in_flight),
-            self._monotonic() + limits.total_seconds,
-            limits,
-        )
-        anonymous = _Registry((), True, False)
-        checked = await _all(
-            [self._reference(run, reference, digests, anonymous) for reference, digests in selected]
-        )
-        skipped = [
-            ReferenceOutcome(reference.key, reference.familiar, digests, "not_checked")
-            for reference, digests in left
-        ]
-        return (*checked, *skipped)
+        return await self._check(principal, environment_id, references)
 
     async def _outcomes(
         self,
@@ -262,12 +263,18 @@ class BindingCandidateScanner:
                 settled[key] = ReferenceOutcome(key, reference.familiar, digests, "no_local_digest")
             else:
                 checkable.append((reference, digests))
+        checked = await self._check(principal, environment_id, checkable)
+        settled.update((outcome.reference, outcome) for outcome in checked)
+        return tuple(settled[key] for key in sorted(settled))
+
+    async def _check(
+        self,
+        principal: Principal,
+        environment_id: int,
+        checkable: Sequence[tuple[ImageReference, tuple[str, ...]]],
+    ) -> tuple[ReferenceOutcome, ...]:
         limits = self._limits
         selected, left = checkable[: limits.references], checkable[limits.references :]
-        for reference, digests in left:
-            settled[reference.key] = ReferenceOutcome(
-                reference.key, reference.familiar, digests, "not_checked"
-            )
         run = _Run(
             principal,
             environment_id,
@@ -284,8 +291,11 @@ class BindingCandidateScanner:
                 for reference, digests in selected
             ]
         )
-        settled.update((outcome.reference, outcome) for outcome in checked)
-        return tuple(settled[key] for key in sorted(settled))
+        skipped = [
+            ReferenceOutcome(reference.key, reference.familiar, digests, "not_checked")
+            for reference, digests in left
+        ]
+        return (*checked, *skipped)
 
     async def _registries(
         self, principal: Principal, environment_id: int, addresses: set[str]
@@ -314,12 +324,15 @@ class BindingCandidateScanner:
     ) -> ReferenceOutcome:
         if registry.too_many:
             return ReferenceOutcome(reference.key, reference.familiar, digests, "not_checked")
-        tries: list[OfferedCredentialSet | None] = [*registry.sets]
-        if registry.anonymous:
-            tries.append(None)
         tried = tuple(
-            await _all([self._candidate(run, reference, digests, offered) for offered in tries])
+            await _all(
+                [self._candidate(run, reference, digests, offered) for offered in registry.sets]
+            )
         )
+        if registry.anonymous and not any(
+            check.status in ("match", "not_checked") for check in tried
+        ):
+            tried = (*tried, await self._candidate(run, reference, digests, None))
         return ReferenceOutcome(
             reference.key,
             reference.familiar,
@@ -413,10 +426,11 @@ def service_references(services: Sequence[SwarmService]) -> frozenset[str]:
 def _outcome_of(tried: Sequence[CandidateCheck], *, capped: bool) -> Outcome:
     if any(check.status == "not_checked" for check in tried):
         return "not_checked"
-    matched = sum(1 for check in tried if check.status == "match")
-    if matched == 0:
-        return "no_match"
-    return "binds" if matched == 1 and not capped else "ambiguous"
+    matched = [check for check in tried if check.status == "match"]
+    by_set = sum(1 for check in matched if check.choice.credential_set_id is not None)
+    if by_set == 0:
+        return "anonymous_only" if matched else "no_match"
+    return "binds" if by_set == 1 and not capped else "ambiguous"
 
 
 async def _all[T](coroutines: Sequence[Coroutine[Any, Any, T]]) -> list[T]:

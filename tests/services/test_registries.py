@@ -495,7 +495,7 @@ async def test_the_delete_confirmation_names_every_affected_image_by_environment
     ]
     assert (impact.affected_total, impact.affected_hidden, impact.per_environment) == (3, 0, ())
     assert "stay" in impact.bindings_note
-    assert "stop" in impact.bindings_note
+    assert "anonymously" in impact.bindings_note
 
 
 async def test_a_confirmation_over_500_images_lists_500_and_counts_the_rest_per_environment(

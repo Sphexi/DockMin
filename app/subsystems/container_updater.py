@@ -59,8 +59,6 @@ from app.services.object_inspector import (
 )
 from app.services.object_locks import ObjectBusy, ObjectKey
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
-    CredentialChoiceRequired,
     CredentialSetMismatch,
 )
 from app.services.registry_resolution import CredentialSetUnavailable
@@ -137,17 +135,16 @@ REFRESHED: Final = "refreshed"
 DEFERRED: Final = "deferred"
 PERMANENT_REFUSALS: Final = frozenset({"restricted_option", "not_recreatable", "invalid"})
 CHECK_REFUSALS: Final = {
-    "credential_missing": "credential_missing",
+    "authentication_required": "authentication_required",
     "credential_mismatch": "credential_mismatch",
     "credential_not_available": "credential_unavailable",
 }
+UNCHECKABLE: Final = frozenset({"no_local_digest"})
+# Stored refusal rows can still name these; they hold nothing because neither is refused any more.
+RETIRED_REFUSALS: Final = frozenset({"not_bound", "credential_missing"})
 
 COMPOSE_REFUSED_FOR_GOOD: Final = frozenset({"restricted", "refused_construct", "invalid"})
-CREDENTIAL_REJECTIONS: Final = {
-    "credential_choice_required": "not_bound",
-    "credential_missing": "credential_missing",
-    "credential_unavailable": "credential_unavailable",
-}
+CREDENTIAL_REJECTIONS: Final = {"credential_unavailable": "credential_unavailable"}
 
 type Verdict = Literal["update_available", "local_newer"]
 type PlanReason = Verdict | Literal["redeploy"]
@@ -183,7 +180,7 @@ class UpdaterParameters(RuleParameters):
 
 
 class _Refusal(ProductError):
-    """An image's bound credentials cannot be used, so its update stops; never retried elsewhere."""
+    """An image cannot be pulled with the credentials it has, so its update stops; never retried."""
 
     reason: ClassVar[str]
     message: ClassVar[str]
@@ -192,18 +189,11 @@ class _Refusal(ProductError):
         super().__init__(self.message)
 
 
-class CredentialMissing(_Refusal):
-    """The credential set the image is bound to was deleted."""
+class AuthenticationRequired(_Refusal):
+    """The registry requires credentials and the image is bound to none."""
 
-    reason = "credential_missing"
-    message = "The credential set bound to the image was deleted."
-
-
-class NotBound(_Refusal):
-    """The image is bound to no credential set."""
-
-    reason = "not_bound"
-    message = "The image is not bound to a credential set."
+    reason = "authentication_required"
+    message = "The registry requires authentication. Bind the image to a credential set."
 
 
 class CredentialMismatch(_Refusal):
@@ -230,8 +220,7 @@ class Deferred(ProductError):
 
 
 REFUSALS: Final[dict[str, type[_Refusal]]] = {
-    cls.reason: cls
-    for cls in (CredentialMissing, NotBound, CredentialMismatch, CredentialUnavailable)
+    cls.reason: cls for cls in (AuthenticationRequired, CredentialMismatch, CredentialUnavailable)
 }
 
 
@@ -390,10 +379,15 @@ async def record_rolled_back(
 
 
 def _refusal_reason(status: UpdateStatus) -> str | None:
-    if status.state == "not_bound":
-        return "not_bound"
     if status.state == "unknown":
         return CHECK_REFUSALS.get(status.reason or "")
+    return None
+
+
+def check_failure(status: UpdateStatus) -> str | None:
+    """Return why a check reached no verdict, or None when it did or could not be made."""
+    if status.state == "unknown" and status.reason not in UNCHECKABLE:
+        return status.reason
     return None
 
 
@@ -416,10 +410,6 @@ def credential_refusals(rejected: StackRejected) -> tuple[tuple[str, str], ...]:
 
 
 def _pull_refusal(error: Exception) -> _Refusal | None:
-    if isinstance(error, BindingCredentialMissing):
-        return CredentialMissing()
-    if isinstance(error, CredentialChoiceRequired):
-        return NotBound()
     if isinstance(error, CredentialSetMismatch):
         return CredentialMismatch()
     if isinstance(error, CredentialSetUnavailable):
@@ -764,6 +754,7 @@ class _Pass:
             "local_newer",
             "up_to_date",
             "unknown",
+            "anonymous_fallback",
             "pulled",
             "rolled_back",
             "rollback_failed",
@@ -989,10 +980,12 @@ class _Pass:
 
     async def _decide_container(self, item: _Seen, status: UpdateStatus) -> None:
         tally, counts = self.tally, self.counts
+        if status.anonymous_fallback:
+            counts["anonymous_fallback"] += 1
         refusal = _refusal_reason(status)
         if refusal is not None:
             if not self.planning_update:
-                counts["unknown"] += 1
+                tally.count("failed", reason=refusal)
                 return
             refusals = ((item.reference, refusal),)
             if await self._refusal_held("container", item.container_id, refusals):
@@ -1008,6 +1001,10 @@ class _Pass:
                     refusals=refusals,
                 )
             )
+            return
+        failure = check_failure(status)
+        if failure is not None:
+            tally.count("failed", reason=failure)
             return
         verdict = _verdict_of(status, item.image_id)
         if verdict is None:
@@ -1093,14 +1090,18 @@ class _Pass:
         pulls: dict[str, _Pull] = {}
         local: set[str] = set()
         refusals: dict[str, str] = {}
+        failures: dict[str, str] = {}
         for item in seen:
             status = statuses[item.reference]
+            if status.anonymous_fallback:
+                counts["anonymous_fallback"] += 1
             refusal = _refusal_reason(status)
-            if refusal is not None:
-                if self.planning_update:
-                    refusals[item.reference] = refusal
-                else:
-                    counts["unknown"] += 1
+            if refusal is not None and self.planning_update:
+                refusals[item.reference] = refusal
+                continue
+            failure = refusal or check_failure(status)
+            if failure is not None:
+                failures.setdefault(item.reference, failure)
                 continue
             verdict = _verdict_of(status, item.image_id)
             if verdict is None:
@@ -1120,6 +1121,8 @@ class _Pass:
                 )
             else:
                 local.add(item.reference)
+        for failure in failures.values():
+            tally.count("failed", reason=failure)
         if not self.planning_update:
             return
         owed = tuple(sorted(refusals.items()))

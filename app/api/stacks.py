@@ -52,9 +52,7 @@ from app.services.stack_views import (
 MAX_BODY_BYTES: Final = 256 * 1024
 MAX_REFERENCE: Final = 512
 SAFE_METHODS: Final = frozenset({"GET", "HEAD", "OPTIONS"})
-CHOICE_REASONS: Final = frozenset(
-    {"credential_choice_required", "credential_missing", "credential_unavailable"}
-)
+CHOICE_REASONS: Final = frozenset({"credential_choice_required", "credential_unavailable"})
 CONFLICT_REASONS: Final = frozenset(
     {"container_name_in_use", "port_in_use", "not_running", "file_in_use", "file_missing"}
 )

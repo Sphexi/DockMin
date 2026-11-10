@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% from "images/_anonymous_binding_job.html" import job_panel with context %}
+{% from "images/_bulk_binding_job.html" import job_panel with context %}
 {% from "partials/page_header.html" import page_header %}
 {% block title %}Bind unbound images on {{ environment.name }} - dockmin{% endblock %}
-{% set crumb_page = "Bind unbound images anonymously" %}
+{% set crumb_page = "Bind unbound images" %}
 
 {% block head_extra %}
 {% if job.running %}
@@ -10,7 +10,7 @@
 {% endif %}
 {% endblock %}
 {% block content %}
-{% call page_header("Bind unbound images anonymously", environment.name) %}
+{% call page_header("Bind unbound images", environment.name) %}
 <a class="btn" href="{{ images_href }}">Back to the images</a>
 {% endcall %}
 

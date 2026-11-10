@@ -1040,11 +1040,11 @@ The label keys `com.docker.compose.project` and `com.docker.stack.namespace` are
 | Where | The Image section of the form, once an image is named; the review section `Credential set for the pull`, when the image will be pulled; the confirmation of a [recreate](#recreate) |
 | Form | With JavaScript, changing the image field fetches the picker for it without a page load (`POST /environments/{id}/containers/new/choices`). The pull policy `Never pull` replaces it with `The image is not pulled, so no credential set is used.` Without JavaScript the review shows it |
 | Choices | `Anonymous (no credentials)` and every credential set whose address equals the image's registry address and that the user may use ([Registries](Administration-Registries#the-credential-picker)). A registry with no such set shows `Anonymous (no credentials)` as text, with no control |
-| Preselected | The bound set, or `Anonymous` for an anonymous binding; with no binding, the set marked default for the registry address, else `Anonymous`; nothing for a `credential_missing` binding. The form and the review follow the picker. The recreate confirmation preselects as set out in [Images](Usage-Images#which-set-a-pull-uses) |
+| Preselected | The bound set; with no binding or a `credential_missing` binding, the set marked default for the registry address, else `Anonymous`. The form and the review follow the picker. The recreate confirmation preselects as set out in [Images](Usage-Images#which-set-a-pull-uses) |
 | Decision | The choice submitted is the explicit choice of [Images](Usage-Images#which-set-a-pull-uses). Nothing else is tried: a failed pull is reported and no other set is used |
-| Rebinding | An administrator who picks a value other than the binding changes it. A standard user facing an existing binding sees only the bound option and cannot change it |
+| Rebinding | An administrator who picks a set other than the bound one changes it, and one who picks `Anonymous` removes the binding. A standard user facing a binding that names a set sees only the bound option and cannot change it |
 | Used | Only when a pull happens: the policy is `always`, or `missing` and the image is absent |
-| Binding | The reference is bound to the set used. The binding is written in the transaction that settles the container's access control, with the reference held against other actions from the choice to the binding |
+| Binding | The reference is bound to the set used; a pull with `Anonymous` writes none. The binding is written in the transaction that settles the container's access control, with the reference held against other actions from the choice to the binding |
 | Carried | `Back to edit` keeps the choice |
 | Link | `pull the image on its own page` pulls with a progress page; the create then finds the image present |
 
@@ -1054,7 +1054,6 @@ The label keys `com.docker.compose.project` and `com.docker.stack.namespace` are
 | Chosen set is for another registry | 400 | `That credential set is for a different registry.` | Beside the choice |
 | A value that is not `anonymous` or a set id | 400 | `Choose one of the listed credential sets.` | Beside the choice |
 | Standard user would change an existing binding | 403 | `Only an administrator can change which credential set this image uses.` | Beside the choice |
-| Binding is `credential_missing` | 409 | `The credential set this image was pulled with has been deleted. Choose another set.` | Above the review |
 | Chosen set not available | 409 | `That registry credential set is not available here.` | Above the review |
 
 A refusal re-renders the review with every value kept. A bound set that is no longer granted to the user, or whose secret cannot be read, is found when the pull starts and fails the create with the reasons below.
@@ -2309,7 +2308,6 @@ A refusal on access leaves no row: a container the user may not see, a container
 | `image_missing` | Pull policy `never` and the image is absent |
 | `pull_failed` | The pull failed |
 | `credential_choice_required` | Several sets fit and none was chosen, or the chosen set is for another registry |
-| `credential_missing` | The image's binding lost its credential set |
 | `credential_unavailable` | The set is not available to the user or the environment, or its secret cannot be read |
 | `name_in_use` | A container with the name exists |
 | `engine_rejected` | Docker refused the configuration |
@@ -2569,7 +2567,6 @@ Command, entrypoint, environment variables and isolation facts are not part of a
 | 409 | A blocker: `{"error": {"status": 409, "message": text, "blockers": [code, ...]}}` with the codes of [Blockers](#blockers) |
 | 409 | The container is busy (`holder`, as in [Responses](#responses)), or cannot be recreated in its current state |
 | 409 | `reason` `credential_choice_required`: several sets fit and none was chosen. The body adds `candidates`, an array of `{"id": N, "name": text}`. Repeat the request with `credential_choice` |
-| 409 | `reason` `credential_missing`: the image's binding lost its credential set. Administrators choose another set or `anonymous` |
 | 409 | `reason` `credential_unavailable`: the set is not available to the token's user or the environment, its secret cannot be read, or it is for another registry |
 | 422 | The body is invalid |
 | 502 | The pull failed, Docker refused, or the recreate failed and the original was restored or could not be |

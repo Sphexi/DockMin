@@ -48,7 +48,6 @@ from app.services.image_views import (
 from app.services.object_inspector import ContainerTooLarge, EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import LockHolder, ObjectBusy
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoiceRequired,
     CredentialSetMismatch,
 )
@@ -239,7 +238,6 @@ def test_progress_detail_is_non_negative_whatever_the_engine_sent() -> None:
             id="busy",
         ),
         pytest.param(CredentialSetUnavailable("missing"), "credential_unavailable", None, id="u"),
-        pytest.param(BindingCredentialMissing(), "credential_missing", None, id="missing"),
         pytest.param(CredentialChoiceRequired(()), "credential_choice_required", None, id="ask"),
         pytest.param(CredentialSetMismatch(), "credential_mismatch", None, id="mismatch"),
         pytest.param(RebindRefused(), "forbidden", None, id="rebind"),
@@ -575,7 +573,9 @@ async def test_a_third_transfer_for_one_user_is_refused_while_two_run(image_rig:
         start_pull_job(image_rig.app, STANDARD, ENV_A, plans[2])
 
 
-async def test_a_push_job_pushes_the_image_and_binds_the_reference(image_rig: ImageRig) -> None:
+async def test_a_push_job_pushes_the_image_and_binds_nothing_without_a_set(
+    image_rig: ImageRig,
+) -> None:
     target = "registry.example.com/myorg/app:1"
     image_rig.host.add_image(target, full_id(PUSHED))
     plan = await image_rig.images.actions.prepare_push(ADMIN, ENV_A, image_id(PUSHED), target, None)
@@ -586,8 +586,8 @@ async def test_a_push_job_pushes_the_image_and_binds_the_reference(image_rig: Im
     assert view.state == "succeeded"
     assert view.kind == "push"
     assert view.outcome is not None
-    assert (view.outcome.image_id, view.outcome.binding) == (image_id(PUSHED), "created")
-    assert len(await binding_rows(image_rig.db)) == 1
+    assert (view.outcome.image_id, view.outcome.binding) == (image_id(PUSHED), "skipped")
+    assert await binding_rows(image_rig.db) == []
 
 
 async def test_starting_a_job_without_the_runtimes_is_refused(image_rig: ImageRig) -> None:
@@ -743,7 +743,7 @@ async def test_a_container_job_reports_the_container_and_the_flags_of_its_result
     assert view.progress.stages == ("create",)
 
 
-REVIEW_KINDS: tuple[JobKind, ...] = ("onboarding_review", "anonymous_binding_review")
+REVIEW_KINDS: tuple[JobKind, ...] = ("onboarding_review", "bulk_binding_review")
 
 
 @pytest.mark.parametrize("kind", REVIEW_KINDS)

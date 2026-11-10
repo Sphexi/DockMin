@@ -7,7 +7,7 @@ from typing import Literal, Protocol
 
 from pydantic import SecretStr
 
-from app.auth.errors import ProductError, ValidationFailed
+from app.auth.errors import ValidationFailed
 from app.auth.principal import Principal
 from app.db.repositories.registry_access import OfferedCredentialSet
 
@@ -17,9 +17,6 @@ type SeenState = Literal["unbound", "bound", "credential_missing"]
 CHOICE_FIELD = "credential_choice"
 ANONYMOUS_CHOICE = "anonymous"
 CHOICE_REQUIRED = "Choose which credential set to pull with."
-CREDENTIAL_MISSING = (
-    "The credential set this image was pulled with has been deleted. Choose another set."
-)
 SET_MISMATCH = "That credential set is for a different registry."
 CANDIDATES_TOO_MANY = "Too many credential sets fit this registry to choose between."
 
@@ -73,13 +70,6 @@ class CandidateListTooLarge(ValidationFailed):
 
     def __init__(self) -> None:
         super().__init__({CHOICE_FIELD: CANDIDATES_TOO_MANY})
-
-
-class BindingCredentialMissing(ProductError):
-    """The set the image is bound to was deleted; a choice is required to repair the binding."""
-
-    def __init__(self) -> None:
-        super().__init__(CREDENTIAL_MISSING)
 
 
 class PullCredentialResolver(Protocol):

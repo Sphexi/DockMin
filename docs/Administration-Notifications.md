@@ -176,7 +176,7 @@ An event type is a row of a table in dockmin. It names the activity actions it m
 
 | Key | Label | Actions matched | Result | Actor subsystem | Raised when |
 |---|---|---|---|---|---|
-| `automation_run_failed` | Automation run failed | `automation_run_failed` | `failure` | Any | A run of an automation ends `failure`. Not for a dry run ([Automation](Operations-Automation#activity-events)) |
+| `automation_run_failed` | Automation run failed | `automation_run_failed`, `automation_run_partial` | `failure` | Any | A run of an automation ends `failure` or `partial`. Not for a dry run ([Automation](Operations-Automation#activity-events)) |
 | `automation_disabled` | Automation disabled after repeated failures | `scheduled_job_disabled` | Any | Any | A job is disabled after its failure threshold ([Jobs](Administration-Jobs#failures)) |
 | `update_applied` | Update applied | `container_recreated`, `stack_redeployed`, `service_updated` | `success` | `container-updater` | The updater recreates a container, redeploys a stack or updates a Swarm service |
 | `update_rolled_back` | Update rolled back | `container_update_rolled_back`, `service_rolled_back` | Any | `container-updater` | The updater restores a container or rolls a Swarm service back |

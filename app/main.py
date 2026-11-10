@@ -118,12 +118,12 @@ from app.subsystems.webhook_receiver import WebhookReceiver
 from app.version import build_revision, product_version
 from app.web import (
     activity_routes,
-    anonymous_binding_routes,
     auth_routes,
     automation_quick_add_routes,
     automation_routes,
     automation_webhook_routes,
     backup_routes,
+    bulk_binding_routes,
     container_create_routes,
     container_export_routes,
     container_import_routes,
@@ -861,7 +861,7 @@ def build_app(options: AppOptions) -> FastAPI:
     app.include_router(container_stream_routes.socket_router)
     app.include_router(container_terminal_routes.router)
     app.include_router(container_routes.router)
-    app.include_router(anonymous_binding_routes.router)
+    app.include_router(bulk_binding_routes.router)
     app.include_router(image_stream_routes.router)
     app.include_router(image_routes.router)
     app.include_router(stack_stream_routes.router)

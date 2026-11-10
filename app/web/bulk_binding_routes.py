@@ -1,4 +1,4 @@
-"""Bind unbound images anonymously: the review job, the review, and the confirmed apply."""
+"""Bind unbound images to credential sets: the review job, the review, and the confirmed applies."""
 
 import re
 from typing import Annotated, Any, Final
@@ -10,15 +10,11 @@ from pydantic import StringConstraints
 from app.auth.dependencies import CurrentUser, require_user
 from app.auth.errors import PermissionDenied, ResourceNotFound, ValidationFailed
 from app.auth.principal import Principal
-from app.services.anonymous_binding_assembly import AnonymousBinding, start_anonymous_binding_review
-from app.services.anonymous_binding_plan import AnonymousBindingReview
-from app.services.anonymous_binding_store import AnonymousBindingReviewStore
-from app.services.anonymous_bindings import (
-    AnonymousBindingChanged,
-    AnonymousReviewBusy,
-    AnonymousReviewExpired,
-)
 from app.services.assembly import Environments
+from app.services.bulk_binding_assembly import BulkBinding, start_bulk_binding_review
+from app.services.bulk_binding_plan import CHANGED_MESSAGE, BulkBindingReview
+from app.services.bulk_binding_store import BulkBindingReviewStore
+from app.services.bulk_bindings import BulkReviewBusy, BulkReviewExpired
 from app.services.image_jobs import ImageJobRegistry, JobView, TooManyJobs
 from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.onboarding_store import TOKEN
@@ -33,7 +29,6 @@ from app.web.object_pages import (
     route,
     unavailable_page,
 )
-from app.web.results import show_result
 from app.web.templating import is_htmx_request
 
 router = APIRouter(
@@ -42,12 +37,18 @@ router = APIRouter(
     dependencies=[Depends(require_user)],
 )
 
-HEADING: Final = "Bind unbound images anonymously"
-JOB_TEMPLATE: Final = "images/anonymous_binding_job.html"
-PANEL_TEMPLATE: Final = "images/_anonymous_binding_job.html"
+HEADING: Final = "Bind unbound images"
+JOB_TEMPLATE: Final = "images/bulk_binding_job.html"
+PANEL_TEMPLATE: Final = "images/_bulk_binding_job.html"
+REVIEW_TEMPLATE: Final = "images/bulk_binding_review.html"
 DIGEST_MAX: Final = 64
 ADDRESS_MAX: Final = 262
+CHOICE_MAX: Final = 700
 MAX_REGISTRIES: Final = 50
+MAX_CHOICES: Final = 200
+NO_SET: Final = "none"
+BAD_CHOICE: Final = "A credential set choice is malformed."
+DUPLICATE_CHOICE: Final = "An image was chosen twice."
 UNAVAILABLE: Final = (EnvironmentUnavailable, ObjectTooLarge)
 EXPIRED: Final = Failure(
     409,
@@ -57,11 +58,13 @@ EXPIRED: Final = Failure(
 APPLYING: Final = Failure(
     409,
     "Already being applied",
-    "This review is already being applied. Its result is shown to the request that started it.",
+    "This review is already being applied. Its result is shown on the review when it finishes.",
 )
 _TOKEN: Final = re.compile(TOKEN)
 
 Registry = Annotated[str, StringConstraints(max_length=ADDRESS_MAX)]
+PlanDigest = Annotated[str, StringConstraints(max_length=DIGEST_MAX)]
+Choice = Annotated[str, StringConstraints(max_length=CHOICE_MAX)]
 
 
 def _canonical_token(token: str) -> str:
@@ -84,11 +87,11 @@ def _images_href(request: Request, environment_id: int) -> str:
 
 
 def _review_href(request: Request, environment_id: int, token: str) -> str:
-    return route(request, "anonymous_binding_review", environment_id=environment_id, token=token)
+    return route(request, "bulk_binding_review", environment_id=environment_id, token=token)
 
 
 def _job_href(request: Request, environment_id: int, job_id: str) -> str:
-    return route(request, "anonymous_binding_job", environment_id=environment_id, job_id=job_id)
+    return route(request, "bulk_binding_job", environment_id=environment_id, job_id=job_id)
 
 
 def _failed(
@@ -111,7 +114,25 @@ def _failed(
     )
 
 
-@router.post("", response_class=HTMLResponse, name="anonymous_binding_start")
+def _read_choices(values: list[str]) -> dict[str, int | None]:
+    """Read `<reference> <set id>` pairs, `none` for an image left unbound."""
+    found: dict[str, int | None] = {}
+    for value in values:
+        reference, separator, chosen = value.partition(" ")
+        if not separator or not reference:
+            raise ValidationFailed({"choices": BAD_CHOICE})
+        if reference in found:
+            raise ValidationFailed({"choices": DUPLICATE_CHOICE})
+        if chosen == NO_SET:
+            found[reference] = None
+        elif chosen.isascii() and chosen.isdigit() and len(chosen) <= len(str(2**63)):
+            found[reference] = int(chosen)
+        else:
+            raise ValidationFailed({"choices": BAD_CHOICE})
+    return found
+
+
+@router.post("", response_class=HTMLResponse, name="bulk_binding_start")
 async def start_review(
     request: Request, environments: Environments, actor: CurrentUser, environment_id: PathId
 ) -> Response:
@@ -130,7 +151,7 @@ async def start_review(
             environment_name=environment.name,
         )
     try:
-        job_id = start_anonymous_binding_review(request.app, actor, environment_id)
+        job_id = start_bulk_binding_review(request.app, actor, environment_id)
     except TooManyJobs as refused:
         return _failed(
             request,
@@ -147,7 +168,7 @@ def _own_job(
     jobs: ImageJobRegistry = request.app.state.engine.image_jobs
     job = jobs.view(job_id, actor)
     if (
-        job.kind != "anonymous_binding_review"
+        job.kind != "bulk_binding_review"
         or job.environment_id != environment_id
         or job.owner_user_id != actor.user_id
     ):
@@ -155,7 +176,7 @@ def _own_job(
     return jobs, job
 
 
-@router.get("/jobs/{job_id}", response_class=HTMLResponse, name="anonymous_binding_job")
+@router.get("/jobs/{job_id}", response_class=HTMLResponse, name="bulk_binding_job")
 async def job_page(
     request: Request,
     environments: Environments,
@@ -176,7 +197,7 @@ async def job_page(
         "job_href": _job_href(request, environment_id, job_id),
         "cancel_href": route(
             request,
-            "anonymous_binding_job_cancel",
+            "bulk_binding_job_cancel",
             environment_id=environment_id,
             job_id=job_id,
         ),
@@ -190,9 +211,7 @@ async def job_page(
     )
 
 
-@router.post(
-    "/jobs/{job_id}/cancel", response_class=HTMLResponse, name="anonymous_binding_job_cancel"
-)
+@router.post("/jobs/{job_id}/cancel", response_class=HTMLResponse, name="bulk_binding_job_cancel")
 async def cancel_job(
     request: Request,
     environments: Environments,
@@ -210,12 +229,12 @@ async def cancel_job(
 
 def _held(
     request: Request, actor: Principal, environment_id: int, token: str
-) -> AnonymousBindingReview | None:
-    store: AnonymousBindingReviewStore = request.app.state.engine.anonymous_binding_reviews
+) -> BulkBindingReview | None:
+    store: BulkBindingReviewStore = request.app.state.engine.bulk_binding_reviews
     return store.get(token, actor.user_id, environment_id)
 
 
-@router.get("/reviews/{token}", response_class=HTMLResponse, name="anonymous_binding_review")
+@router.get("/reviews/{token}", response_class=HTMLResponse, name="bulk_binding_review")
 async def review_page(
     request: Request,
     environments: Environments,
@@ -223,55 +242,62 @@ async def review_page(
     environment_id: PathId,
     token: ReviewToken,
 ) -> Response:
-    """Show the references each registry's anonymous HEAD matched, one confirmation per registry."""
+    """Show what each registry's credential sets can read, with the latest apply's result."""
     _administrators_only(actor)
     environment = (await environments.environments.get(actor, environment_id)).summary
     review = _held(request, actor, environment_id, token)
     if review is None:
         return _failed(request, environment_id, EXPIRED, environment_name=environment.name)
+    store: BulkBindingReviewStore = request.app.state.engine.bulk_binding_reviews
     return page_response(
         request,
-        "images/anonymous_binding_review.html",
+        REVIEW_TEMPLATE,
         {
             "environment": environment,
             "review": review,
-            "plans": {group.address: review.digest([group.address]) for group in review.groups},
+            "summary": store.summary(token, actor.user_id, environment_id),
+            "changed_message": CHANGED_MESSAGE,
             "apply_href": route(
-                request, "anonymous_binding_apply", environment_id=environment_id, token=token
+                request, "bulk_binding_apply", environment_id=environment_id, token=token
             ),
             "images_href": _images_href(request, environment_id),
         },
     )
 
 
-@router.post("/reviews/{token}/apply", response_class=HTMLResponse, name="anonymous_binding_apply")
+@router.post("/reviews/{token}/apply", response_class=HTMLResponse, name="bulk_binding_apply")
 async def apply(
     request: Request,
-    bulk: AnonymousBinding,
+    bulk: BulkBinding,
     environments: Environments,
     actor: CurrentUser,
     environment_id: PathId,
     token: ReviewToken,
     registry: Annotated[list[Registry], Form(max_length=MAX_REGISTRIES)] = [],  # noqa: B006
-    expected_plan: Annotated[str, Form(max_length=DIGEST_MAX)] = "",
+    expected_plan: Annotated[list[PlanDigest], Form(max_length=MAX_REGISTRIES)] = [],  # noqa: B006
+    choice: Annotated[list[Choice], Form(max_length=MAX_CHOICES)] = [],  # noqa: B006
+    only: Annotated[str, Form(max_length=ADDRESS_MAX)] = "",
 ) -> Response:
-    """Bind the matched references of the confirmed registries, each as its own audited write."""
+    """Bind what the confirmed registries offered, each image as its own audited write.
+
+    `only` names the one registry a per-registry button applies; without it every posted
+    registry is applied.
+    """
     _administrators_only(actor)
     environment = (await environments.environments.get(actor, environment_id)).summary
     back = _review_href(request, environment_id, token)
+    registries, plans = list(registry), list(expected_plan)
+    if only and len(registries) == len(plans):
+        pairs = [(a, p) for a, p in zip(registries, plans, strict=True) if a == only]
+        registries, plans = [a for a, _ in pairs], [p for _, p in pairs]
     try:
-        result = await bulk.service.apply(actor, environment_id, token, registry, expected_plan)
-    except AnonymousReviewExpired:
-        return _failed(request, environment_id, EXPIRED, environment_name=environment.name)
-    except AnonymousReviewBusy:
-        return _failed(request, environment_id, APPLYING, environment_name=environment.name)
-    except AnonymousBindingChanged as changed:
-        return _failed(
-            request,
-            environment_id,
-            Failure(409, "The host changed", "; ".join(changed.fields.values())),
-            environment_name=environment.name,
+        await bulk.service.apply(
+            actor, environment_id, token, registries, plans, _read_choices(choice)
         )
+    except BulkReviewExpired:
+        return _failed(request, environment_id, EXPIRED, environment_name=environment.name)
+    except BulkReviewBusy:
+        return _failed(request, environment_id, APPLYING, environment_name=environment.name)
     except ValidationFailed as invalid:
         return _failed(
             request,
@@ -292,12 +318,4 @@ async def apply(
         )
     except PermissionDenied:
         raise ResourceNotFound("not found") from None
-    return show_result(
-        request,
-        "images/anonymous_binding_result.html",
-        {
-            "environment": environment,
-            "result": result,
-            "images_href": _images_href(request, environment_id),
-        },
-    )
+    return redirect(request, back)

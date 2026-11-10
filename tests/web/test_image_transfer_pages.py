@@ -9,7 +9,7 @@ from httpx import AsyncClient, Response
 from app.registry_client.manifests import ManifestCheckKind
 from tests.auth_support import csrf_form
 from tests.docker_engine.container_engine import ContainerEngine
-from tests.image_support import binding_rows, digest, full_id, image_id
+from tests.image_support import binding_rows, digest, full_id, image_id, mark_missing
 from tests.web.environment_support import World
 from tests.web.image_support import (
     NGINX,
@@ -140,7 +140,6 @@ async def test_the_update_check_compares_bound_references_and_never_says_up_to_d
         )
     for reference in (TARGET, other_reference, unreachable):
         await bind(world, bound, reference)
-    await bind(world, None, open_reference)
     manifests.answers[TARGET] = LOCAL_DIGEST
     manifests.answers[unreachable] = ManifestCheckKind.TCP
     references = (TARGET, other_reference, unreachable, "never-pulled:1")
@@ -180,31 +179,62 @@ async def test_the_update_check_compares_bound_references_and_never_says_up_to_d
     )
 
     text = text_of(fragment)
-    assert set(hidden_values(listing, "reference")) == {
-        TARGET,
-        other_reference,
-        unreachable,
-        open_reference,
-    }
+    assert {TARGET, other_reference, unreachable, open_reference} <= set(
+        hidden_values(listing, "reference")
+    )
     assert hidden_values(detail, "reference") == [TARGET]
     assert hidden_values(detail, "back") == [image_id(PUSHED)]
-    assert hidden_values(plain, "reference") == [] and hidden_values(other, "reference") == []
-    assert "Only bound tags can be checked." in text_of(other)
+    assert hidden_values(plain, "reference") == ["docker.io/library/spare:1"]
+    assert hidden_values(other, "reference") == [
+        "docker.io/library/nginx:1",
+        "docker.io/library/nginx:latest",
+    ]
     assert before == 0
     assert fragment.status_code == OK
     assert "<html" not in fragment.text and 'id="update-results"' in fragment.text
     assert re.search(rf"{re.escape(TARGET)} Up to date", text)
     assert re.search(r"team/other:1 Update available", text)
     assert re.search(r"team/down:1 Unknown This server could not connect to the registry\.", text)
-    assert re.search(r"never-pulled:1 Not bound", text)
+    assert re.search(r"never-pulled:1 Unknown This host holds no registry digest", text)
     assert "Checked from this server, not from the Docker host" in text
     assert "<html" in page.text and "Update check" in text_of(page)
-    assert "No credential set for this registry is granted to this environment" in text_of(
-        unconfigured
-    )
+    assert re.search(rf"{re.escape(open_reference)} Update available", text_of(unconfigured))
     assert "You hold no grant on the credential set this image is bound to." in text_of(no_grant)
-    assert {call[1].key for call in manifests.calls} == {TARGET, other_reference, unreachable}
+    assert {call[1].key for call in manifests.calls} == {
+        TARGET,
+        other_reference,
+        unreachable,
+        open_reference,
+    }
     assert {count: r.status_code for count, r in invalid.items()} == {0: 400, 26: 400}
     assert all("Check between 1 and 25 references at once." in text_of(r) for r in invalid.values())
     assert by_get.status_code in (METHOD_NOT_ALLOWED, NOT_FOUND)
     assert hidden.status_code == NOT_FOUND
+
+
+@pytest.mark.parametrize(
+    ("reason", "note"),
+    [
+        ("deleted", "the bound set was deleted, so updates use anonymous access"),
+        ("address_changed", "the registry address changed, so updates use anonymous access"),
+    ],
+)
+async def test_an_anonymous_check_names_why_the_binding_no_longer_names_a_set(
+    admin_client: AsyncClient,
+    world: World,
+    pushable: ContainerEngine,
+    manifests: ScriptedManifests,
+    reason: str,
+    note: str,
+) -> None:
+    bound = await make_set(admin_client, world, "alpha")
+    await bind(world, bound, TARGET)
+    async with world.app.state.database.session() as db:
+        await mark_missing(db, bound)
+        await db.execute("UPDATE image_credential_binding SET missing_reason = ?", (reason,))
+
+    page = await admin_client.post(
+        f"{images_path(world)}/updates", data=csrf_form(admin_client, reference=TARGET)
+    )
+
+    assert f"Checked anonymously; {note}." in text_of(page)

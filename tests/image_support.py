@@ -15,6 +15,7 @@ from app.registry_client.references import ImageReference
 from tests.access_support import ENV_A
 from tests.registry_support import (
     ADDRESS,
+    OTHER_ADDRESS,
     SECRET,
     RegistryRig,
     grant_environment,
@@ -125,6 +126,11 @@ async def mark_missing(db: Session, set_id: int) -> None:
         "credential_missing_at = '2026-01-02T03:04:05Z' WHERE registry_credential_id = ?",
         (set_id, set_id),
     )
+
+
+async def move_sets_elsewhere(db: Session) -> None:
+    """Give every set another registry address, so the bindings naming one no longer fit."""
+    await db.execute("UPDATE registry_credential SET url = ?", (OTHER_ADDRESS,))
 
 
 class ScriptedManifests:

@@ -4,8 +4,9 @@ from typing import Any
 
 import pytest
 
+from app.registry_client.manifests import ManifestCheckKind
 from app.services.access import ResourceKey
-from app.services.activity import UserActor
+from app.services.activity import ActivityRecorder, SubsystemActor, UserActor
 from app.services.image_updates import ImageUpdateService
 from app.services.object_locks import LockHolder, ObjectKey
 from app.services.resource_controls import ControlSpec
@@ -13,7 +14,14 @@ from app.services.stack_deploy import file_digest
 from app.subsystems.container_updater import _Pass, _Pulled
 from tests.access_support import ADMIN, ENV_A, STANDARD, digest_of
 from tests.automation_support import counts
-from tests.image_support import REFERENCE, digest, full_id, mark_missing
+from tests.image_support import (
+    OTHER_REFERENCE,
+    REFERENCE,
+    digest,
+    full_id,
+    mark_missing,
+    move_sets_elsewhere,
+)
 from tests.registry_support import ADDRESS
 from tests.services.conftest import ImageRig  # noqa: F401
 from tests.updater_support import (
@@ -137,19 +145,97 @@ async def test_a_stack_with_no_running_container_is_skipped_not_running(shop: Wo
 async def test_a_stack_refusal_is_written_once_under_the_stack_name_and_then_held(
     shop: World,
 ) -> None:
-    await mark_missing(shop.db, await set_id_of(shop))
+    await move_sets_elsewhere(shop.db)
     _, job = await shop.rule(stack_selector())
 
     first = await shop.run(job)
     shop.advance(10)
     held = await shop.run(job)
 
-    assert first.reason == "credential_missing"
+    assert first.reason == "credential_mismatch"
     [row] = shop.rows("image_update_refused")
     assert row["target_id"] == SHOP
     assert counts(held)["held"] == 1
     assert len(shop.rows("image_update_refused")) == 1
     assert shop.verbs() == []
+
+
+async def test_a_stack_whose_bound_set_was_deleted_is_redeployed_after_an_anonymous_check(
+    shop: World,
+) -> None:
+    await mark_missing(shop.db, await set_id_of(shop))
+    _, job = await shop.rule(stack_selector())
+
+    result = await shop.run(job)
+
+    detail = counts(result)
+    assert result.outcome == "success"
+    assert (detail["updated"], detail["anonymous_fallback"]) == (1, 2)
+    assert shop.rows("image_update_refused") == []
+    assert len(shop.rows("stack_redeployed")) == 1
+
+
+async def test_a_stack_whose_image_needs_authentication_is_refused_once_and_then_held(
+    shop: World,
+) -> None:
+    await shop.db.execute("DELETE FROM image_credential_binding")
+    shop.manifests.default = ManifestCheckKind.AUTHENTICATION
+    _, job = await shop.rule(stack_selector())
+
+    first = await shop.run(job)
+    shop.advance(10)
+    held = await shop.run(job)
+
+    assert (first.outcome, first.reason) == ("failure", "authentication_required")
+    [row] = shop.rows("image_update_refused")
+    assert (row["target_id"], row["detail"]["reason"]) == (SHOP, "authentication_required")
+    assert (held.outcome, counts(held)["held"]) == ("success", 1)
+    assert len(shop.rows("image_update_refused")) == 1
+    assert shop.rows("stack_redeployed") == [] and shop.verbs() == []
+
+
+async def test_a_member_reference_whose_check_failed_does_not_hold_back_the_other_services(
+    shop: World,
+) -> None:
+    shop.host.add_image(OTHER_REFERENCE, full_id(3), digests=(f"{ADDRESS}/app@{digest(3)}",))
+    shop.host.boxes[member(shop, 2)].image = OTHER_REFERENCE
+    shop.manifests.answers[OTHER_REFERENCE] = ManifestCheckKind.TIMEOUT
+    _, job = await shop.rule(stack_selector())
+
+    result = await shop.run(job)
+
+    detail = counts(result)
+    assert (result.outcome, result.reason) == ("partial", "timeout")
+    assert (detail["failed"], detail["updated"]) == (1, 1)
+    assert shop.verbs().count("pull") == 1
+    [redeployed] = shop.rows("stack_redeployed")
+    assert redeployed["result"] == "success"
+
+
+async def test_a_stored_refusal_naming_a_retired_reason_does_not_hold_a_stack(
+    shop: World,
+) -> None:
+    rule_id, job = await shop.rule(stack_selector())
+    await ActivityRecorder(shop.db, shop.rig.runtime.clock).record_failure(
+        SubsystemActor(UPDATER, rule_id, None, "Heal shop"),
+        action="image_update_refused",
+        target_type="stack",
+        target_id=SHOP,
+        environment_id=ENV_A,
+        reason="credential_missing",
+        detail={
+            "name": f"stack {SHOP}",
+            "reference": REFERENCE,
+            "refused": f"{REFERENCE}=not_bound",
+        },
+        message="x",
+    )
+
+    result = await shop.run(job)
+
+    assert (result.outcome, counts(result)["updated"]) == ("success", 1)
+    assert "held" not in counts(result)
+    assert len(shop.rows("stack_redeployed")) == 1
 
 
 async def test_a_local_image_newer_than_the_members_redeploys_without_a_pull(shop: World) -> None:

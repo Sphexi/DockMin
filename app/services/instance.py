@@ -16,7 +16,6 @@ from app.auth.principal import Principal
 from app.db.engine import DatabaseError, Session, retry_busy
 from app.db.repositories.activity_event import ActivityEventRepository
 from app.db.repositories.environment import ConnectionKind
-from app.db.repositories.image_binding import ImageBindingRepository
 from app.db.repositories.setting import SettingRepository
 from app.docker_engine.errors import EnvironmentUnreachable, RequestOutcomeUnknown
 from app.logging import get_logger
@@ -309,7 +308,6 @@ class UpdateSupport:
     health_timeout_seconds: int
     bindings: ImageBindingService
     resolver: RegistryCredentialResolver
-    granted: ImageBindingRepository
     manifests: ManifestClient
     checks: UpdateCheckState
     settings: SettingRepository
@@ -707,12 +705,6 @@ class InstanceService:
         support = self._update_support()
         address = reference.registry_address
         if choice.credential_set_id is None:
-            if not await support.granted.has_granted_set_at(environment_id, address):
-                raise UpdateRefused(
-                    "registry_not_configured",
-                    f"No credential set for {address} is granted to this environment. Add one "
-                    "under Registries and grant it to the environment, then check again.",
-                )
             return _public_target(address), None
         try:
             resolved = await support.resolver.resolve_login(

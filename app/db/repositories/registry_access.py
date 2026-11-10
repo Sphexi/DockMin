@@ -2,6 +2,7 @@
 
 import re
 import sqlite3
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import cast
 
@@ -197,27 +198,26 @@ class RegistryAccessRepository(Repository[OfferedCredentialSet]):
         )
         return [str(row["url"]) for row in rows]
 
-    async def anonymous_entries(self, environment_id: int) -> list[OfferedCredentialSet]:
-        """List the granted entries with authentication off, by address then name."""
-        rows = await self._session.fetch_limited(
-            f"{_OFFERED} WHERE rea.environment_id = ? AND rc.authentication_enabled = 0 "
-            "ORDER BY rc.url, rc.name, rc.id LIMIT ?",
-            (environment_id, MAX_OFFERED_SETS),
-            limit=MAX_OFFERED_SETS,
-        )
-        return [self._map_row(row) for row in rows]
+    async def separate_sets(
+        self, environment_id: int, addresses: Collection[str]
+    ) -> list[OfferedCredentialSet]:
+        """List the granted sets at the addresses that connect other than as an anonymous read does.
 
-    async def authenticated_set_counts(self, environment_id: int) -> dict[str, int]:
-        """Count, by address, the granted sets that have authentication on."""
-        rows = await self._session.fetch_limited(
-            "SELECT rc.url AS url, count(*) AS total FROM registry_credential rc "
-            "JOIN registry_environment_access rea ON rea.registry_credential_id = rc.id "
-            "WHERE rea.environment_id = ? AND rc.authentication_enabled = 1 "
-            "GROUP BY rc.url LIMIT ?",
-            (environment_id, MAX_OFFERED_SETS),
-            limit=MAX_OFFERED_SETS,
-        )
-        return {str(row["url"]): int(row["total"]) for row in rows}
+        Each address is read on its own, so the per-query cap applies to one address and cannot
+        hide another. Sorted by address, name and id.
+        """
+        found: list[OfferedCredentialSet] = []
+        for address in sorted(set(addresses)):
+            rows = await self._session.fetch_limited(
+                f"{_OFFERED} WHERE rea.environment_id = ? AND rc.url = ? "
+                "AND (rc.authentication_enabled = 1 OR rc.verify_tls = 0 "
+                "OR rc.ca_bundle IS NOT NULL) "
+                "ORDER BY rc.name, rc.id LIMIT ?",
+                (environment_id, address, MAX_OFFERED_SETS),
+                limit=MAX_OFFERED_SETS,
+            )
+            found.extend(self._map_row(row) for row in rows)
+        return found
 
     async def remove_environment(self, credential_id: int, environment_id: int) -> bool:
         """Withdraw an environment's grant; False if there was none."""

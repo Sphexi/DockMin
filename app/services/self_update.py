@@ -122,7 +122,6 @@ type UpdateRefusal = Literal[
     "stale_review",
     "digest_changed",
     "target_invalid",
-    "registry_not_configured",
     "credential_unavailable",
     "registry_failed",
 ]
@@ -190,9 +189,6 @@ UPDATE_REFUSALS: Final[Mapping[UpdateRefusal, str]] = {
     "stale_review": "dockmin changed since you reviewed it. Review the update again.",
     "digest_changed": "The registry's image changed since you reviewed it. Check again.",
     "target_invalid": "Choose one of the offered tags.",
-    "registry_not_configured": (
-        "No credential set for the registry is granted to the environment dockmin runs in."
-    ),
     "credential_unavailable": "That registry credential set is not available here.",
     "registry_failed": "The registry could not be read.",
 }

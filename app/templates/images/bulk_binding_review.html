@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% from "images/_bulk_binding_summary.html" import summary_block %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Bind unbound images on {{ environment.name }} - dockmin{% endblock %}
+{% set crumb_page = "Bind unbound images" %}
+{% block content %}
+{% set left_out_reasons = {
+  "pinned": "Pinned by digest.",
+  "no_local_digest": "The image has no recorded registry digest.",
+  "no_credential_set": "No credential set at this address; updates use anonymous access.",
+} %}
+{% call page_header("Bind unbound images", environment.name) %}
+<a class="btn" href="{{ images_href }}">Back to the images</a>
+{% endcall %}
+
+{% if summary %}
+{{ summary_block(summary, changed_message) }}
+{% endif %}
+
+{% if review.not_checked_total %}
+<div class="panel panel--notice" role="note">
+  <p>{{ review.not_checked_total }} not checked; start another review to check the next ones.</p>
+</div>
+{% endif %}
+
+{% if review.offering %}
+<p>Each image offered below is unbound, and a credential set granted to this environment returned the digest the host holds. Confirming a registry binds its images to the sets shown, so their updates use those sets. Nothing is pulled and nothing on the host changes. Each registry is confirmed on its own.</p>
+<form class="form" method="post" action="{{ apply_href }}" data-submit-once>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for group in review.offering %}
+  <input type="hidden" name="registry" value="{{ group.address }}">
+  <input type="hidden" name="expected_plan" value="{{ group.digest }}">
+  {% endfor %}
+  {% if review.offering|length > 1 %}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary">Apply all bindings</button>
+  </div>
+  {% endif %}
+{% else %}
+<div class="panel" role="status">
+  <p>{% if summary %}No image is left to bind.{% else %}No unbound image can be bound to a credential set.{% endif %} An image with no credential set at its address updates with anonymous access.</p>
+  <p class="row-actions"><a class="btn btn--primary" href="{{ images_href }}">Back to the images</a></p>
+</div>
+{% endif %}
+
+{% for group in review.groups %}
+{% set gi = loop.index %}
+<section class="section" aria-labelledby="registry-{{ gi }}-heading">
+  <h2 id="registry-{{ gi }}-heading" class="mono">{{ group.address }}</h2>
+  <p class="field__help">Credential sets granted here: {% for entry in group.sets %}{{ entry.name }}{{ ", " if not loop.last }}{% endfor %}.</p>
+  {% if group.bindable %}
+  {% set picks = group.bindable|selectattr("pick")|list %}
+  <div class="data-table__scroll" role="region" aria-label="Images at {{ group.address }}" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Images that can be bound to a credential set</caption>
+      <thead>
+        <tr><th scope="col">Reference</th><th scope="col">Credential set</th><th scope="col">Digest</th></tr>
+      </thead>
+      <tbody>
+        {% for item in group.bindable %}
+        <tr>
+          <th scope="row" class="cell-wrap mono">{{ item.display }}</th>
+          <td>
+            {% if item.pick %}
+            <label class="visually-hidden" for="choice-{{ gi }}-{{ loop.index }}">Credential set for {{ item.display }}</label>
+            <select class="field__input" id="choice-{{ gi }}-{{ loop.index }}" name="choice">
+              <option value="{{ item.reference }} none" selected>Leave unbound</option>
+              {% for option in item.options %}
+              <option value="{{ item.reference }} {{ option.set_id }}">{{ option.name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            {{ item.options[0].name }}
+            {% endif %}
+          </td>
+          <td class="mono cell-wrap">
+            {% if item.pick %}
+            {% for option in item.options %}<span class="cell-note">{{ option.name }}: {{ option.digest }}</span>{% endfor %}
+            {% else %}
+            {{ item.options[0].digest }}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if picks %}
+  <p class="field__help">An image that more than one set can read stays unbound unless you choose a set for it.</p>
+  {% endif %}
+  <div class="form__actions">
+    <button type="submit" class="btn btn--primary" name="only" value="{{ group.address }}">
+      {%- if picks -%}
+      Bind the chosen images at {{ group.address }}
+      {%- else -%}
+      Bind these {{ group.bindable|length }} {{ "image" if group.bindable|length == 1 else "images" }} at {{ group.address }}
+      {%- endif -%}
+    </button>
+  </div>
+  {% else %}
+  <p>No image at this address can be bound.</p>
+  {% endif %}
+  {% if group.others %}
+  <h3>Not offered ({{ group.others_total }})</h3>
+  {% if group.others_total > group.others|length %}
+  <p class="field__help">The first {{ group.others|length }} are listed.</p>
+  {% endif %}
+  <div class="data-table__scroll" role="region" aria-label="Images at {{ group.address }} that are not offered" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Images that are not offered for binding</caption>
+      <thead>
+        <tr><th scope="col">Reference</th><th scope="col">Outcome</th></tr>
+      </thead>
+      <tbody>
+        {% for item in group.others %}
+        <tr>
+          <th scope="row" class="cell-wrap mono">{{ item.display }}</th>
+          <td>
+            {{ item.message }}
+            {% for detail in item.details %}
+            <span class="cell-note">{{ detail }}</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endfor %}
+{% if review.offering %}
+</form>
+{% endif %}
+
+{% if review.left_out %}
+<section class="section" aria-labelledby="left-out-heading">
+  <h2 id="left-out-heading">Not checked ({{ review.left_out_total }})</h2>
+  {% if review.left_out_total > review.left_out|length %}
+  <p class="field__help">The first {{ review.left_out|length }} are listed.</p>
+  {% endif %}
+  <div class="data-table__scroll" role="region" aria-label="Images not checked" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Unbound images that were not checked</caption>
+      <thead>
+        <tr><th scope="col">Reference</th><th scope="col">Why</th></tr>
+      </thead>
+      <tbody>
+        {% for item in review.left_out %}
+        <tr>
+          <th scope="row" class="cell-wrap mono">{{ item.display }}</th>
+          <td>{{ left_out_reasons[item.reason] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

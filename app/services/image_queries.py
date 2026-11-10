@@ -160,7 +160,7 @@ DANGLING_FILTERS: Final = ("yes", "no")
 USAGE_FILTERS: Final = ("used", "unused")
 
 
-BINDING_FILTERS: Final = ("bound", "anonymous", "credential_missing", "unbound")
+BINDING_FILTERS: Final = ("bound", "credential_missing", "unbound")
 
 
 UPDATE_FILTERS: Final = ("available",)
@@ -271,6 +271,8 @@ def _compile(filters: ImageFilters) -> _Criteria:
     if usage is not None and usage not in USAGE_FILTERS:
         fields["usage"] = "Choose used or unused."
     binding = _clean(filters.binding)
+    if binding == "anonymous":
+        binding = "unbound"
     if binding is not None and binding not in BINDING_FILTERS:
         fields["binding"] = "Choose one of the listed binding states."
     update = _clean(filters.update)

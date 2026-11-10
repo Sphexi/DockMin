@@ -8,11 +8,7 @@ from pydantic import ValidationError
 
 from app.auth.errors import ValidationFailed
 from app.services.image_updates import UpdateStatus
-from app.services.pull_credentials import (
-    BindingCredentialMissing,
-    CredentialChoiceRequired,
-    CredentialSetMismatch,
-)
+from app.services.pull_credentials import CredentialChoiceRequired, CredentialSetMismatch
 from app.services.registry_resolution import CredentialSetUnavailable
 from app.subsystems.acting_run import NAMES_LISTING_LIMIT, listing
 from app.subsystems.container_health_checker import ContainerHealthChecker
@@ -24,6 +20,7 @@ from app.subsystems.container_updater import (
     _pull_refusal,
     _refusal_reason,
     _verdict_of,
+    check_failure,
     refusal_signature,
 )
 from app.subsystems.selectors import (
@@ -75,7 +72,6 @@ def status(
         (status("up_to_date", local_image_id=None), RUNNING, None),
         (status("unknown", "timeout", local_image_id=LOCAL), RUNNING, None),
         (status("pinned", local_image_id=LOCAL), RUNNING, None),
-        (status("not_bound", local_image_id=LOCAL), RUNNING, None),
     ],
     ids=[
         "newer-on-the-registry",
@@ -86,7 +82,6 @@ def status(
         "no-local-image",
         "unknown-is-never-an-update",
         "pinned",
-        "not-bound",
     ],
 )
 def test_a_verdict_comes_from_the_state_and_the_image_ids(
@@ -98,25 +93,42 @@ def test_a_verdict_comes_from_the_state_and_the_image_ids(
 @pytest.mark.parametrize(
     ("update", "refusal"),
     [
-        (status("not_bound"), "not_bound"),
-        (status("unknown", "credential_missing"), "credential_missing"),
+        (status("unknown", "authentication_required"), "authentication_required"),
         (status("unknown", "credential_mismatch"), "credential_mismatch"),
         (status("unknown", "credential_not_available"), "credential_unavailable"),
         (status("unknown", "timeout"), None),
-        (status("unknown", "registry_not_configured"), None),
         (status("up_to_date"), None),
         (status("update_available"), None),
     ],
 )
-def test_only_a_credential_problem_is_a_refusal(update: UpdateStatus, refusal: str | None) -> None:
+def test_only_a_standing_credential_problem_is_a_refusal(
+    update: UpdateStatus, refusal: str | None
+) -> None:
     assert _refusal_reason(update) == refusal
+
+
+@pytest.mark.parametrize(
+    ("update", "failure"),
+    [
+        (status("unknown", "timeout"), "timeout"),
+        (status("unknown", "authentication_required"), "authentication_required"),
+        (status("unknown", "busy"), "busy"),
+        (status("unknown", "no_digest"), "no_digest"),
+        (status("unknown", "no_local_digest"), None),
+        (status("pinned"), None),
+        (status("up_to_date"), None),
+        (status("update_available"), None),
+    ],
+)
+def test_a_check_with_no_verdict_is_a_failure_unless_it_could_not_be_made(
+    update: UpdateStatus, failure: str | None
+) -> None:
+    assert check_failure(update) == failure
 
 
 @pytest.mark.parametrize(
     ("error", "reason"),
     [
-        (BindingCredentialMissing(), "credential_missing"),
-        (CredentialChoiceRequired(()), "not_bound"),
         (CredentialSetMismatch(), "credential_mismatch"),
         (CredentialSetUnavailable("not_granted_user"), "credential_unavailable"),
     ],
@@ -130,15 +142,16 @@ def test_a_credential_error_at_pull_time_maps_to_the_refusal_of_the_same_name(
     assert REFUSALS[reason] is type(refusal)
 
 
-@pytest.mark.parametrize("error", [RuntimeError("x"), ValueError("y"), TimeoutError()])
+@pytest.mark.parametrize(
+    "error", [RuntimeError("x"), ValueError("y"), TimeoutError(), CredentialChoiceRequired(())]
+)
 def test_any_other_error_at_pull_time_is_not_a_refusal(error: Exception) -> None:
     assert _pull_refusal(error) is None
 
 
 def test_every_refusal_carries_a_fixed_message_without_registry_text() -> None:
     assert set(REFUSALS) == {
-        "credential_missing",
-        "not_bound",
+        "authentication_required",
         "credential_mismatch",
         "credential_unavailable",
     }
@@ -147,15 +160,19 @@ def test_every_refusal_carries_a_fixed_message_without_registry_text() -> None:
 
 
 def test_the_refusal_signature_is_the_same_for_the_same_refusals_in_any_order() -> None:
-    forward = refusal_signature([("a:1", "not_bound"), ("b:1", "credential_missing")])
-    backward = refusal_signature([("b:1", "credential_missing"), ("a:1", "not_bound")])
+    forward = refusal_signature([("a:1", "credential_mismatch"), ("b:1", "credential_unavailable")])
+    backward = refusal_signature(
+        [("b:1", "credential_unavailable"), ("a:1", "credential_mismatch")]
+    )
 
-    assert forward == backward == "a:1=not_bound,b:1=credential_missing"
-    assert refusal_signature([("a:1", "credential_missing")]) != forward
+    assert forward == backward == "a:1=credential_mismatch,b:1=credential_unavailable"
+    assert refusal_signature([("a:1", "credential_unavailable")]) != forward
 
 
 def test_a_very_long_refusal_signature_is_cut_to_the_limit() -> None:
-    long = refusal_signature([(f"registry.example.com/app{n}:1", "not_bound") for n in range(100)])
+    long = refusal_signature(
+        [(f"registry.example.com/app{n}:1", "credential_mismatch") for n in range(100)]
+    )
 
     assert len(long) == SIGNATURE_LIMIT
 

@@ -265,18 +265,18 @@ An anonymous set records that pulls from the address need no login. The registry
 
 ## Anonymous entries
 
-An entry with authentication off makes its address configured on every environment it is granted to.
+An entry with authentication off is not required for any address. Unbound images are checked and updated anonymously at the registry their reference names, with or without an entry.
 
-| Where the address counts as configured | Effect |
+| Where an entry with authentication off counts | Effect |
 |---|---|
-| Binding an image anonymously | An unbound image at the address can be bound anonymously ([Images](Usage-Images#bind-unbound-images-anonymously)) |
-| Update checks | A check of an anonymous binding at the address sends a manifest `HEAD`. With no set at the address granted to the environment, the check reads `Unknown`, reason `registry_not_configured` |
+| Update checks and automatic updates | None. The address needs no entry |
 | Adoption review | The review checks unbound images at the address ([Environments](Usage-Environments#adopt-everything-on-this-host)) |
+| Pull picker and pull with no choice | An entry that reads as anonymous is handled as in the table below |
 
 | Item | Behaviour |
 |---|---|
-| Binding made through the entry | Recorded as `Anonymous`, not as the entry. The entry only makes the address configured |
-| Entry deleted | Bindings that were made anonymously stay anonymous. Their update checks read `Unknown`, reason `registry_not_configured`, once no set at the address is granted to the environment |
+| Binding | An entry is never recorded as a binding. A pull with `Anonymous` writes no binding |
+| Entry deleted | No effect on images. Checks and updates of unbound images do not depend on it |
 | Standard user | Needs no grant on the entry. Anonymous needs none |
 | Stored | No user name and no secret |
 
@@ -287,12 +287,12 @@ An entry reads as anonymous when authentication is off, certificate verification
 | Reads as anonymous | Enables the one anonymous candidate. It is not counted as a second match | Not listed beside `Anonymous (no credentials)`, unless an existing binding names it. That binding keeps it listed and preselected | Anonymous, unless another set fits ([Images](Usage-Images#which-set-a-pull-uses)) |
 | Authentication off with a CA bundle or with verification off | Tried as itself | Listed, with `no authentication` | Tried as itself, as any set at the address |
 
-| Instance with | Pull with no explicit choice | Before |
-|---|---|---|
-| An entry that reads as anonymous beside one credential set at the address | Uses that set | Asked for a choice |
-| An entry that reads as anonymous, no set with authentication on | Binds anonymously | Bound to the entry |
+| Instance with | Pull with no explicit choice |
+|---|---|
+| An entry that reads as anonymous beside one credential set at the address | Uses that set and binds it |
+| An entry that reads as anonymous, no set with authentication on | Pulls anonymously and writes no binding |
 
-The bulk review at an address whose only credential-free entries have a CA bundle or verification off lists its references as `entry_tls_settings` and offers none ([Images](Usage-Images#bind-unbound-images-anonymously)).
+`Bind unbound images` does not count an entry that reads as anonymous as a credential set. A reference at an address where no other set is granted is not checked and reads `No credential set at this address; updates use anonymous access.` An entry with authentication off and a CA bundle or verification off is a credential set there ([Images](Usage-Images#which-references-are-checked)).
 
 ## Entries a new instance starts with
 
@@ -312,7 +312,7 @@ A new instance holds two entries with authentication off.
 | Name, TLS settings | Editable |
 | Grant | Each environment created afterwards, the local socket environment of first-run setup included, is granted every entry that still has the mark and authentication off. Recorded as `registry_grants` in `environment_created` ([Activity](Usage-Environments#recorded-actions)). Environments that exist already are not granted the entries |
 | Withdraw a grant | Per environment, as for any set ([Remove a grant](#remove-a-grant)) |
-| Contacted | Never at start, at setup, when an environment is created or when a page loads. Only by an administrator's pull, an administrator-run check ([Images](Usage-Images#bind-unbound-images-anonymously), [Environments](Usage-Environments#adopt-everything-on-this-host)) and the update checks that already contact configured registries ([Registry connections](#registry-connections)) |
+| Contacted | Never at start, at setup, when an environment is created or when a page loads. Only by an administrator's pull, an administrator-run check ([Images](Usage-Images#bind-unbound-images), [Environments](Usage-Environments#adopt-everything-on-this-host)) and the update checks that already contact configured registries ([Registry connections](#registry-connections)) |
 | Docker Hub limits | Unauthenticated manifest `HEAD` requests do not count against Docker Hub's pull limit. A refusal with `429` reads `rate_limited` and is not retried |
 
 ## Secret handling
@@ -352,7 +352,7 @@ The secret must be entered again when an edit changes any of these:
 
 | Edit that changes the registry address | Effect |
 |---|---|
-| Images bound to the set | Each becomes `credential_missing`, `Registry address changed`, and keeps the name of the set. Automatic updates for those images stop until each is pulled again with a set for the new address ([Images](Usage-Images#when-a-set-is-deleted-or-its-address-changes)) |
+| Images bound to the set | Each becomes `credential_missing`, `Registry address changed`, and keeps the name of the set. Checks and automatic updates of those images use anonymous access until each is pulled again with a set for the new address ([Images](Usage-Images#when-a-set-is-deleted-or-its-address-changes)) |
 | Default for the address | The set's default flag is cleared |
 | Form | A notice states how many images are bound and that they will move |
 | A change of provider that changes the address | The same |
@@ -632,6 +632,7 @@ Result: the page reads `Environment removed.` or `Access removed.` Removing one 
 - Offered sets are listed by name, at most 200 for one registry address. An offer carries the name, provider, address, whether authentication is on, whether certificates are verified and the secret kind. It carries no user name and no secret.
 - A standard user who cannot see the environment is answered as if it did not exist.
 - Grants are checked again each time a set's login is resolved, not only when the set is offered. A set that is missing, not granted to the environment, or not granted to the user all answer `That registry credential set is not available here.` A set at another address than the image's answers `That credential set is for a different registry.`
+- Removing an environment grant changes no image binding. A bound set that is no longer granted to the environment refuses with `credential_unavailable`; only a deleted set or a changed address (`credential_missing`) falls back to anonymous access ([Images](Usage-Images#when-a-set-is-deleted-or-its-address-changes)).
 - Deleting an environment, a user or a team removes its grants on registry sets.
 - A set is offered for a pull, a push, a container create or a recreate only when its address equals the registry address of the image reference ([Images](Usage-Images#which-set-a-pull-uses)).
 - Which offered set a pull uses is decided by the image's binding ([Images](Usage-Images#credential-bindings)). Container create and recreate follow the same rules ([Containers](Usage-Containers#pull)).
@@ -645,17 +646,15 @@ A pull form offers `Anonymous (no credentials)` or one credential set, under the
 | Options | `Anonymous (no credentials)`, then every set offered for the reference's registry address, by name, at most 200. Each set shows its provider, its address, `no authentication` when it has none, and `Default for this registry.` An entry that [reads as anonymous](#anonymous-entries) is left out unless the reference is bound to it |
 | No set offered | `Anonymous (no credentials)` as text with `No credential set is available for this registry.`, and no control |
 | Submitted value | `anonymous` or a set id. A set that is not offered to the user for the reference is refused ([Access](#access)) |
-| Binding | The pull binds the reference to the value chosen ([Images](Usage-Images#credential-bindings)). Choosing a value other than the current binding rebinds it |
+| Binding | A pull with a set binds the reference to it ([Images](Usage-Images#credential-bindings)). A pull with `Anonymous` binds nothing. An administrator choosing a set other than the current binding rebinds it, and choosing `Anonymous` removes the binding |
 | Standard user, reference already bound | The option is fixed to the binding and its name is shown. The form says `Only an administrator can change which credential set this image uses.` The binding cannot be changed from the picker |
 
 | Binding of the reference | Preselected |
 |---|---|
 | Bound to a set the user may use | That set |
-| Bound as anonymous | `Anonymous` |
 | Bound to a set the user may not use | Nothing. A standard user sees `This image is bound to a credential set you cannot use.` and no control |
-| `credential_missing` | Nothing. An administrator chooses a set or `Anonymous`. A standard user sees `The credential set this image was pulled with has been deleted.` and no control |
-| None, and a set is the [default for the address](#default-for-an-address) | That set |
-| None, and no default | `Anonymous` |
+| None or `credential_missing`, and a set is the [default for the address](#default-for-an-address) | That set |
+| None or `credential_missing`, and no default | `Anonymous` |
 
 | Page | Where the picker appears |
 |---|---|
@@ -677,7 +676,7 @@ A pull form offers `Anonymous (no credentials)` or one credential set, under the
 | Clear | `Clear the default` |
 | Shown | `Default` badge on the list beside the name. `Default for this address` on the set's page. `Default for this registry.` beside the set in the picker and on the push and recreate forms |
 | Effect | Preselects the set in the picker, and on the push and recreate forms, for an image reference at the address that has no binding |
-| Not used for | Deciding a pull. A bound image uses its bound set, and automatic updates use only the bound set |
+| Not used for | Deciding a pull. A bound image uses its bound set, and automatic updates use the bound set, or anonymous access when the image has none |
 | Notices | `Marked as the default for its registry address.`, `No longer the default for its registry address.` |
 | Unchanged | Nothing is written and no activity entry is recorded |
 | Address edited | The flag is cleared |
@@ -712,8 +711,8 @@ Result: the page `Registry deleted` states that the credential set and its grant
 | Outcome | Behaviour |
 |---|---|
 | Deleted | The set, its environment grants and its user and team grants |
-| Images bound to the set | Not deleted. Each binding becomes `credential_missing`, `Credential set deleted`, in the same transaction, and keeps the name of the deleted set. One activity row is written for each |
-| Automatic updates for those images | Stop until each image is pulled again with another set, or anonymously, by an administrator ([Images](Usage-Images#when-a-set-is-deleted-or-its-address-changes)) |
+| Images bound to the set | Not deleted. Each binding becomes `credential_missing`, `Bound set deleted`, in the same transaction, and keeps the name of the deleted set. One activity row is written for each |
+| Checks and automatic updates for those images | Use anonymous access until each image is pulled again with another set ([Images](Usage-Images#when-a-set-is-deleted-or-its-address-changes)) |
 | Pulled images, running containers | Not touched |
 | Activity history | Kept |
 | Identifier | Never reissued |
@@ -748,14 +747,14 @@ Target type: `registry_credential`; target id: the set's id.
 
 ## Registry connections
 
-The dockmin server connects to registries directly, over HTTPS. It makes these connections when an administrator runs a registry connection test, when a token for an Amazon ECR set is needed, when an [image update check](Usage-Images#update-check) runs, when an administrator runs a [bulk anonymous binding review](Usage-Images#bind-unbound-images-anonymously) or an [adoption review](Usage-Environments#adopt-everything-on-this-host), and when an administrator checks for a dockmin update ([Instance](Administration-Instance)).
+The dockmin server connects to registries directly, over HTTPS. It makes these connections when an administrator runs a registry connection test, when a token for an Amazon ECR set is needed, when an [image update check](Usage-Images#update-check) runs, when an administrator runs a [Bind unbound images](Usage-Images#bind-unbound-images) review or an [adoption review](Usage-Environments#adopt-everything-on-this-host), and when an administrator checks for a dockmin update ([Instance](Administration-Instance)).
 
 | Purpose | Destination | Port |
 |---|---|---|
 | Connection test | The set's registry address | The address's port; 443 when none |
 | Connection test | The token service named in the registry's `WWW-Authenticate` challenge. Must be `https`; may be another host | The URL's port; 443 when none |
 | ECR token exchange | `api.ecr.<region>.amazonaws.com` (`api.ecr.<region>.amazonaws.com.cn` in `cn-` regions) | 443 |
-| Update check: manifest `HEAD` | The registry address of the bound credential set, or, for an anonymous binding, of the image reference. `docker.io` is contacted at `registry-1.docker.io` | The address's port; 443 when none |
+| Update check: manifest `HEAD` | The registry address of the bound credential set, or, for an image with no binding or a `credential_missing` binding, of the image reference. `docker.io` is contacted at `registry-1.docker.io` | The address's port; 443 when none |
 | Update check: token | The `https` token service named in the registry's `WWW-Authenticate` challenge. May be another host | The URL's port; 443 when none |
 | dockmin update check: manifest `HEAD` and tag list `GET` | The registry of dockmin's own image reference | The address's port; 443 when none |
 
@@ -764,8 +763,8 @@ The dockmin server connects to registries directly, over HTTPS. It makes these c
 | Direct egress | Allow outbound TCP from the dockmin server to the destinations above. A proxy is not used |
 | Egress policy | Compose provides none. The default bridge network allows all outbound traffic; a restriction is applied at the host's firewall |
 | Internal addresses | Refused unless permitted ([Address policy](Reference-Security#address-policy)) |
-| Update check requests | On a user's request and on each run of a `container-updater` automation ([Automation](Operations-Automation#detection)). `HEAD /v2/<repository>/manifests/<tag>` to a registry address that has a credential set granted to the environment, entries with authentication off included, and `GET` to its token service when the registry asks for a token. No image data is fetched. Nothing is sent when no check is requested and no automation runs |
-| Bulk anonymous binding and adoption reviews | On an administrator's request only. `HEAD` requests, no login, at most 200 references, 5 at a time ([Images](Usage-Images#bind-unbound-images-anonymously)) |
+| Update check requests | On a user's request and on each run of a `container-updater` automation ([Automation](Operations-Automation#detection)). `HEAD /v2/<repository>/manifests/<tag>` to the registry address of the bound set or, for an image with no binding, of the image reference, with no registry entry required, and `GET` to its token service when the registry asks for a token. No image data is fetched. Nothing is sent when no check is requested and no automation runs |
+| Bind unbound images and adoption reviews | On an administrator's request only. `HEAD` requests, one for each granted credential set, and an anonymous `HEAD` only when no set matched; at most 200 references, 5 requests at a time ([Images](Usage-Images#bind-unbound-images)) |
 | Pulls and pushes | The Docker host connects to the registry, not dockmin. The host needs outbound access to the registry. dockmin sends the credential set's login to the host with the request |
 | Proxy variables | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and their lower-case forms are not read |
 | Operating system roots | The image dockmin runs from must contain root certificates. Looked up in the TLS library's default file or directory, then `/etc/ssl/certs/ca-certificates.crt`, then `/etc/pki/tls/certs/ca-bundle.crt` |

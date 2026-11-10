@@ -149,7 +149,6 @@ async def test_one_path_deploys_to_a_local_socket_and_a_remote_tls_environment(
 
 
 PULLED_DIGEST = digest(7)
-HUB_KEY = "docker.io/library/nginx:1"
 MIXED_STACK = f"""
 services:
   web:
@@ -235,8 +234,8 @@ async def test_pulls_follow_the_policy_bind_the_credential_set_and_refresh_sub_r
     assert third.pulled == ("nginx:1", REFERENCE)
     assert pulls_made(rig) == 3
     assert redeployed["pull_requested"] is True
-    assert redeployed["binding"] == "created,kept"
-    assert sorted(b["image_reference"] for b in await binding_rows(rig.db)) == [HUB_KEY, REFERENCE]
+    assert redeployed["binding"] == "skipped,kept"
+    assert [b["image_reference"] for b in await binding_rows(rig.db)] == [REFERENCE]
 
     with pytest.raises(StackRejected) as refused:
         await rig.fresh().queries.validate(
@@ -308,11 +307,11 @@ async def test_credential_choices_resolve_before_anything_runs_and_each_refusal_
     with pytest.raises(StackRejected) as missing:
         await rig.fresh().actions.redeploy(ADMIN, ENV_A, "shop", pull=True)
 
-    assert missing.value.reason == "credential_missing"
+    assert missing.value.reason == "credential_choice_required"
     assert list(missing.value.fields) == [REFERENCE]
     assert pulls_made(rig) == 1
     [refused] = [r for r in await rig.rows("stack_redeployed") if r["result"] == "failure"]
-    assert refused["detail"]["reason"] == "credential_missing"
+    assert refused["detail"]["reason"] == "credential_choice_required"
 
 
 async def test_an_administrators_explicit_choice_in_a_redeploy_rebinds_the_image(

@@ -17,10 +17,18 @@ from app.services.image_bindings import BindingPullCredentials, SetCandidates
 from app.services.image_queries import automation_plan
 from app.services.images import ImageActionService
 from app.services.object_locks import ObjectKey
-from app.services.pull_credentials import BindingCredentialMissing, CredentialChoiceRequired
 from tests.access_support import ADMIN, ENV_A
 from tests.automation_support import authority_context, event_rows
-from tests.image_support import REFERENCE, REFERENCE_KEY, digest, full_id, mark_missing, register
+from tests.image_support import (
+    OTHER_REFERENCE,
+    REFERENCE,
+    REFERENCE_KEY,
+    binding_rows,
+    digest,
+    full_id,
+    mark_missing,
+    register,
+)
 from tests.registry_support import ADDRESS, bind_image
 from tests.services.conftest import ImageRig
 
@@ -167,7 +175,7 @@ async def test_a_pull_for_a_rule_uses_only_the_bound_set_with_no_user_and_no_cho
     assert row["detail"]["credential_set_id"] == bound
 
 
-async def test_a_credential_missing_binding_stops_the_pull_before_any_set_is_read(
+async def test_a_rule_pulls_anonymously_when_the_reference_is_unbound_or_its_set_was_deleted(
     image_rig: ImageRig,
 ) -> None:
     bound = await register(image_rig, "bound")
@@ -177,26 +185,14 @@ async def test_a_credential_missing_binding_stops_the_pull_before_any_set_is_rea
     service, credentials, resolver = pulling(image_rig)
     acting, _ = await authority_for(image_rig)
 
-    with pytest.raises(BindingCredentialMissing):
-        await service.pull(acting, ENV_A, automation_plan(ENV_A, REFERENCE), on_behalf_of=CONTAINER)
+    for reference in (REFERENCE, OTHER_REFERENCE):
+        await service.pull(acting, ENV_A, automation_plan(ENV_A, reference), on_behalf_of=CONTAINER)
 
-    assert len(credentials.calls) == 1 and SpyCandidates.reads == 0
-    assert resolver.pulls == [] and resolver.logins == []
-    assert pull_calls(image_rig) == NO_CALLS
-
-
-async def test_an_unbound_reference_asks_for_a_choice_a_rule_cannot_make_and_pulls_nothing(
-    image_rig: ImageRig,
-) -> None:
-    await register(image_rig, "only")
-    service, _, _ = pulling(image_rig)
-    acting, _ = await authority_for(image_rig)
-
-    with pytest.raises(CredentialChoiceRequired):
-        await service.pull(acting, ENV_A, automation_plan(ENV_A, REFERENCE), on_behalf_of=CONTAINER)
-
+    assert [call[1] for call in credentials.calls] == [REFERENCE, OTHER_REFERENCE]
     assert SpyCandidates.reads == 0
-    assert pull_calls(image_rig) == NO_CALLS
+    assert resolver.pulls == [] and resolver.logins == []
+    assert [call.headers.get("x-registry-auth") for call in pull_calls(image_rig)] == [None, None]
+    assert [row["state"] for row in await binding_rows(image_rig.db)] == ["credential_missing"]
 
 
 async def test_a_rule_must_name_what_it_acts_for_and_a_user_must_not(image_rig: ImageRig) -> None:

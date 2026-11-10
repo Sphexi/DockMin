@@ -447,7 +447,7 @@ async def test_the_delete_confirmation_lists_the_bound_images_and_deleting_marks
     assert stale.status_code == UNPROCESSABLE
     assert "Changed since it was reviewed" in stale.text
     assert (deleted.status_code, location(deleted).startswith(RESULT_PATH)) == (SEE_OTHER, True)
-    assert "Credential set deleted" in visible_text(result.text)
+    assert "Bound set deleted" in visible_text(result.text)
     assert dict(state or {}) == {"state": "credential_missing"}
 
 

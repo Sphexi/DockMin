@@ -4,7 +4,7 @@ import asyncio
 import re
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Final, Literal
@@ -19,10 +19,8 @@ from app.db.repositories.image_update_status import (
     StoredUpdateStatus,
 )
 from app.logging import get_logger
-from app.registry_client.addresses import DOCKER_HUB_ADDRESS
-from app.registry_client.manifests import ManifestCheckFailed, ManifestClient
+from app.registry_client.manifests import ManifestCheckFailed, ManifestCheckKind, ManifestClient
 from app.registry_client.probe import RegistryLogin, RegistryTarget
-from app.registry_client.providers import ProviderKind, parse_extras
 from app.registry_client.references import (
     ImageReference,
     ReferenceInvalid,
@@ -30,7 +28,7 @@ from app.registry_client.references import (
     parse_reference,
 )
 from app.services.authorisation import Authoriser
-from app.services.image_bindings import bare_image_id, canonical_keys
+from app.services.image_bindings import bare_image_id, canonical_keys, public_target
 from app.services.image_listing import read_images
 from app.services.object_inspector import HostClients
 from app.services.registry_resolution import CredentialSetUnavailable, RegistryCredentialResolver
@@ -47,6 +45,7 @@ STATUS_RETENTION: Final = timedelta(days=30)
 MAX_CACHED_RESULTS: Final = 2048
 IMAGE_ID_REASON: Final = "image_id_reference"
 INVALID_REASON: Final = "invalid_reference"
+AUTHENTICATION_REQUIRED: Final = "authentication_required"
 _NOT_STORED: Final = frozenset({BUSY_REASON, INVALID_REASON, IMAGE_ID_REASON})
 _CALLER_SCOPED: Final = frozenset({"credential_not_available", "credential_mismatch"})
 _IMAGE_ID_REFERENCE: Final = re.compile(r"(?:sha256:)?[0-9a-f]{12,64}")
@@ -68,12 +67,15 @@ class UpdateStatus:
     """Whether a reference has an update on its registry.
 
     `reference` is the canonical key and `display` the form people write. `reason` explains an
-    unknown: no_local_digest, no_digest, credential_missing, credential_not_available,
-    credential_mismatch, registry_not_configured, invalid_reference, image_id_reference (the text
-    names an image id, not a registry reference), busy (no check slot came free in time), or a
-    registry failure (dns, tcp, tls, certificate, authentication, not_found, rate_limited,
-    protocol, timeout). `local_image_id` is the bare 64-hex id of the local image carrying the
-    tag, None when no image does, and for a reference checked against a deployed digest.
+    unknown: no_local_digest, no_digest, credential_not_available, credential_mismatch,
+    invalid_reference, image_id_reference (the text names an image id, not a registry
+    reference), busy (no check slot came free in time), authentication_required (the registry
+    refused an anonymous check), or a registry failure (dns, tcp, tls, certificate,
+    authentication, not_found, rate_limited, protocol, timeout). `local_image_id` is the bare
+    64-hex id of the local image carrying the tag, None when no image does, and for a reference
+    checked against a deployed digest. `anonymous_fallback` is true when the reference's bound
+    set is gone and the check ran anonymously instead; `missing_reason` then says whether the set
+    was deleted or the registry address changed.
     """
 
     reference: str
@@ -84,6 +86,8 @@ class UpdateStatus:
     remote_digest: str | None
     checked_at: datetime
     local_image_id: str | None = None
+    anonymous_fallback: bool = False
+    missing_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,23 +192,12 @@ class UpdateCheckState:
             task.exception()
 
 
-def _public_target(address: str) -> RegistryTarget:
-    provider: ProviderKind = "dockerhub" if address == DOCKER_HUB_ADDRESS else "custom"
-    return RegistryTarget(
-        provider=provider,
-        address=address,
-        verify_tls=True,
-        ca_bundle=None,
-        extras=parse_extras(provider, {}),
-    )
-
-
 class ImageUpdateService:
     """Reports whether bound references have newer images on their registry, and stores the result.
 
     It changes nothing on the host. The check runs from this server, so a registry reachable only
-    from the Docker host reads as unknown. It connects only to a bound set's own address, or to
-    an address some credential set granted to the environment names.
+    from the Docker host reads as unknown. A bound reference is checked with its set; any other,
+    including one whose set was deleted, is checked anonymously at its own registry.
     """
 
     def __init__(
@@ -388,17 +381,14 @@ class ImageUpdateService:
 
         if reference.pinned:
             return made("pinned")
-        binding = stored.get(reference.key)
-        if binding is None:
-            return made("not_bound")
-        if binding.state == "credential_missing":
-            return made("unknown", "credential_missing")
         if not digests:
             return made("unknown", "no_local_digest")
+        binding = stored.get(reference.key)
+        fallback = binding is not None and binding.state == "credential_missing"
         target: RegistryTarget
         login: RegistryLogin | None
-        set_id = binding.registry_credential_id
-        if set_id is not None:
+        set_id = binding.registry_credential_id if binding is not None else None
+        if binding is not None and set_id is not None:
             if binding.credential_url != reference.registry_address:
                 return made("unknown", "credential_mismatch")
             if authorise_set is not None:
@@ -421,16 +411,19 @@ class ImageUpdateService:
                 )
             target, login = resolved.target, resolved.login
         else:
-            if not await self._bindings.has_granted_set_at(
-                environment_id, reference.registry_address
-            ):
-                return made("unknown", "registry_not_configured")
-            target, login = _public_target(reference.registry_address), None
+            target, login = public_target(reference.registry_address), None
         key: _Key = (environment_id, reference.key, set_id, tuple(sorted(digests)))
         verdict = await self._state.verdict(
             key, partial(self._compare, target, reference, login, digests)
         )
-        return made(verdict.state, verdict.reason, verdict.remote_digest)
+        refusal = verdict.reason
+        if set_id is None and refusal == ManifestCheckKind.AUTHENTICATION.value:
+            refusal = AUTHENTICATION_REQUIRED
+        return replace(
+            made(verdict.state, refusal, verdict.remote_digest),
+            anonymous_fallback=fallback,
+            missing_reason=binding.missing_reason if fallback and binding is not None else None,
+        )
 
     async def _compare(
         self,

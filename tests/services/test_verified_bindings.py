@@ -171,8 +171,9 @@ async def test_a_reference_pulled_outside_dockmin_binds_to_the_one_set_whose_dig
         "alpha": ("match", None),
         "bravo": ("mismatch", None),
         "charlie": ("failed", "timeout"),
-        None: ("failed", "authentication"),
     }
+    assert manifests.addresses() == {ADDRESS}
+    assert [login for _, _, login in manifests.calls if login is None] == []
     assert await binding_rows(image_rig.db) == []
 
 
@@ -311,9 +312,9 @@ async def test_the_time_budget_leaves_the_remaining_references_not_checked(
         ADMIN, ENV_A
     )
 
-    assert [o.outcome for o in scan.outcomes] == ["binds", "not_checked", "not_checked"]
+    assert [o.outcome for o in scan.outcomes] == ["binds", "binds", "not_checked"]
     assert len(manifests.calls) == 2
-    assert all(check.status == "not_checked" for check in scan.outcomes[1].tried)
+    assert all(check.status == "not_checked" for check in scan.outcomes[2].tried)
 
 
 async def test_references_past_the_cap_are_not_checked_and_never_contacted(
@@ -395,19 +396,19 @@ async def test_bind_verified_writes_one_audited_binding_without_touching_the_hos
     assert image_rig.host.requests == []
 
 
-async def test_bind_verified_records_an_anonymous_choice_where_a_set_is_configured(
+async def test_bind_verified_refuses_an_anonymous_choice_and_writes_no_binding(
     image_rig: ImageRig,
 ) -> None:
     await register(image_rig, "alpha")
     writer = writer_over(image_rig)
 
-    await writer.bind_verified(ADMIN, ENV_A, REFERENCE, CredentialChoice(None), digest=LOCAL)
+    with pytest.raises(ValidationFailed) as refused:
+        await writer.bind_verified(ADMIN, ENV_A, REFERENCE, CredentialChoice(None), digest=LOCAL)
 
-    [row] = await binding_rows(image_rig.db)
     [event] = await rows_for(image_rig.db, "image_bound")
-    assert row["registry_credential_id"] is None
-    assert event["detail"]["anonymous"] is True
-    assert event["detail"]["credential_set_id"] is None
+    assert "credential_choice" in refused.value.fields
+    assert await binding_rows(image_rig.db) == []
+    assert (event["result"], event["detail"]["reason"]) == ("failure", "anonymous_choice")
 
 
 async def test_bind_verified_skips_a_reference_bound_meanwhile_and_writes_no_row(
@@ -465,7 +466,7 @@ async def open_entry(image_rig: ImageRig, name: str = "open", **overrides: Any) 
     return created.id
 
 
-async def test_an_entry_with_no_authentication_alone_makes_the_image_bind_anonymously(
+async def test_an_entry_with_no_authentication_alone_leaves_the_image_needing_no_binding(
     image_rig: ImageRig,
 ) -> None:
     await open_entry(image_rig)
@@ -475,13 +476,13 @@ async def test_an_entry_with_no_authentication_alone_makes_the_image_bind_anonym
     scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
 
     found = outcome_of(scan)
-    assert found.outcome == "binds"
-    assert found.choices == (CredentialChoice(None),)
+    assert found.outcome == "anonymous_only"
+    assert (found.choices, found.matches, found.read_anonymously) == ((), (), True)
     assert statuses(found) == {None: ("match", None)}
     assert len(manifests.calls) == 1
 
 
-async def test_the_default_docker_hub_entry_makes_a_public_hub_image_bind_anonymously(
+async def test_the_default_docker_hub_entry_leaves_a_public_hub_image_needing_no_binding(
     image_rig: ImageRig,
 ) -> None:
     hub, _ = await seed_default_entries(image_rig.db)
@@ -492,11 +493,11 @@ async def test_the_default_docker_hub_entry_makes_a_public_hub_image_bind_anonym
     scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
 
     found = outcome_of(scan, HUB_REFERENCE)
-    assert (found.outcome, found.choices) == ("binds", (CredentialChoice(None),))
+    assert (found.outcome, found.choices) == ("anonymous_only", ())
     assert manifests.addresses() == {"docker.io"}
 
 
-async def test_a_credential_set_that_also_reads_the_image_beside_an_open_entry_is_ambiguous(
+async def test_anonymous_is_not_sent_when_a_credential_set_beside_an_open_entry_matched(
     image_rig: ImageRig,
 ) -> None:
     alpha = await register(image_rig, "alpha")
@@ -507,9 +508,9 @@ async def test_a_credential_set_that_also_reads_the_image_beside_an_open_entry_i
     scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
 
     found = outcome_of(scan)
-    assert found.outcome == "ambiguous"
-    assert found.choices == (CredentialChoice(alpha), CredentialChoice(None))
-    assert len(manifests.calls) == 2
+    assert found.outcome == "binds"
+    assert found.choices == (CredentialChoice(alpha),)
+    assert [login is None for _, _, login in manifests.calls] == [False]
 
 
 @pytest.mark.parametrize(
@@ -520,13 +521,13 @@ async def test_a_credential_set_that_also_reads_the_image_beside_an_open_entry_i
 async def test_an_entry_that_connects_differently_from_an_anonymous_read_is_tried_as_itself(
     image_rig: ImageRig, overrides: dict[str, Any]
 ) -> None:
-    await open_entry(image_rig, "private", **overrides)
+    private = await open_entry(image_rig, "private", **overrides)
     in_use(image_rig)
     manifests = ByLogin({ANONYMOUS: LOCAL})
 
     scan = await scanner_over(image_rig, manifests).scan(ADMIN, ENV_A)
 
     found = outcome_of(scan)
-    assert {check.name for check in found.tried} == {"private", None}
-    targets = {(t.verify_tls, t.ca_bundle) for t, _, _ in manifests.calls}
-    assert len(targets) == 2
+    assert (found.outcome, found.choices) == ("binds", (CredentialChoice(private),))
+    [(target, _, _)] = manifests.calls
+    assert (target.verify_tls, target.ca_bundle) != (True, None)

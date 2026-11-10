@@ -39,6 +39,7 @@ STARTING_KEYS = frozenset(
     ("action", "result", "subsystem", "keys"),
     [
         ("automation_run_failed", "failure", "stack-restarter", ["automation_run_failed"]),
+        ("automation_run_partial", "failure", "stack-restarter", ["automation_run_failed"]),
         ("scheduled_job_disabled", "success", "stack-restarter", ["automation_disabled"]),
         ("container_recreated", "success", UPDATER, ["update_applied"]),
         ("stack_redeployed", "success", UPDATER, ["update_applied"]),

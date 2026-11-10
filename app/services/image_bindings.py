@@ -40,7 +40,6 @@ from app.services.image_listing import read_host_listing
 from app.services.object_inspector import HostClients
 from app.services.pull_credentials import (
     ANONYMOUS_CHOICE,
-    BindingCredentialMissing,
     CandidateListTooLarge,
     CredentialChoice,
     CredentialChoiceRequired,
@@ -61,20 +60,20 @@ REBIND_REFUSED: Final = "Only an administrator can change which credential set t
 REAP_UNVERIFIED: Final = "Some containers could not be checked, so no binding was removed."
 REBIND_PINNED: Final = "A reference pinned by digest is rebound by pulling it."
 REBIND_UNBOUND: Final = "Pull the image to bind it."
-REBIND_REGISTRY_NOT_CONFIGURED: Final = (
-    "No credential set for this registry is granted to this environment, "
-    "so dockmin does not connect to it."
+BIND_ANONYMOUS_REFUSED: Final = (
+    "Choose a credential set; an image pulled anonymously needs no binding."
 )
 REBIND_CHANGED: Final = "The binding changed since you reviewed it. Review it again."
 VERIFIED_DIGEST_INVALID: Final = "The digest must be sha256: followed by 64 hexadecimal digits."
 BINDING_EXISTS: Final = "binding_exists"
+ANONYMOUS_CHOICE_REASON: Final = "anonymous_choice"
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _IMAGE_ID = re.compile(r"[0-9a-f]{64}")
 _ID_AS_IMAGE = re.compile(r"(?:sha256:)?[0-9a-f]{12,64}")
 
-type BindingState = Literal["bound", "anonymous", "credential_missing", "unbound"]
-type RecordOutcome = Literal["created", "rebound", "kept", "skipped"]
+type BindingState = Literal["bound", "credential_missing", "unbound"]
+type RecordOutcome = Literal["created", "rebound", "removed", "kept", "skipped"]
 type VerifiedBind = Literal["bound", "skipped"]
 
 
@@ -96,9 +95,9 @@ class BindingChangedSinceReview(ProductError):
 class BindingView:
     """The binding of one reference as shown.
 
-    `state` is unbound when no row exists, anonymous for a deliberate anonymous pull. `set_name`
-    is the set's name where the viewer may see it and "a credential set" where not; it is None
-    when no set is involved. `missing_reason` is deleted or address_changed for credential_missing.
+    `state` is unbound when no row exists. `set_name` is the set's name where the viewer may see
+    it and "a credential set" where not; it is None when no set is involved. `missing_reason` is
+    deleted or address_changed for credential_missing.
     """
 
     reference: str
@@ -114,7 +113,7 @@ class CredentialOffer:
     """What a pull form shows for one reference: the sets that fit it and what to preselect.
 
     `preselected` is None when the viewer has to choose. `may_rebind` is true for
-    administrators, the only role that may change an existing binding.
+    administrators, the only role that may change which set a binding names.
     """
 
     reference: ImageReference
@@ -126,7 +125,7 @@ class CredentialOffer:
     @property
     def locked(self) -> bool:
         """Report whether the viewer is held to the existing binding and may not change it."""
-        return not self.may_rebind and self.binding.state != "unbound"
+        return not self.may_rebind and self.binding.state == "bound"
 
     @property
     def preselected_value(self) -> str | None:
@@ -314,8 +313,6 @@ def binding_view(
             stored.observed_digest,
             stored.missing_reason,
         )
-    if stored.registry_credential_id is None:
-        return BindingView(reference, "anonymous", None, None, stored.observed_digest)
     return BindingView(
         reference,
         "bound",
@@ -405,9 +402,10 @@ class BindingPullCredentials:
     ) -> PullDecision:
         """Apply the precedence without reading a secret.
 
-        Raises CredentialChoiceRequired, BindingCredentialMissing, CredentialSetMismatch,
+        An unbound reference, and one whose binding lost its set, pulls anonymously for the
+        automation path. Raises CredentialChoiceRequired, CredentialSetMismatch,
         CredentialSetUnavailable, CandidateListTooLarge, or RebindRefused when a standard user
-        would change the binding of a reference that already has one.
+        would change which set a binding names.
         """
         parsed = parse_pull_reference(reference)
         binding = await self._bindings.get(environment_id, parsed.key)
@@ -415,9 +413,7 @@ class BindingPullCredentials:
         if choice is not None:
             await self._check_choice(environment_id, parsed, binding, choice, principal)
             return PullDecision(parsed, choice, "choice", seen)
-        if binding is not None:
-            if binding.state == "credential_missing":
-                raise BindingCredentialMissing()
+        if binding is not None and binding.state == "bound":
             if (
                 binding.credential_url is not None
                 and binding.credential_url != parsed.registry_address
@@ -427,7 +423,7 @@ class BindingPullCredentials:
                 parsed, CredentialChoice(binding.registry_credential_id), "binding", seen
             )
         if principal is None:
-            raise CredentialChoiceRequired(())
+            return PullDecision(parsed, CredentialChoice(None), "no_match", seen)
         fitting = tuple(
             candidate
             for candidate in await self._candidates.at(
@@ -497,9 +493,10 @@ class BindingPullCredentials:
         choice: CredentialChoice,
         principal: Principal | None,
     ) -> None:
-        changes = binding is not None and (
-            binding.state == "credential_missing"
-            or binding.registry_credential_id != choice.credential_set_id
+        changes = (
+            binding is not None
+            and binding.state == "bound"
+            and binding.registry_credential_id != choice.credential_set_id
         )
         if changes and principal is not None and not principal.is_administrator:
             raise RebindRefused()
@@ -543,9 +540,10 @@ class ImageBindingService:
     ) -> CredentialOffer:
         """Describe the choice a pull of the reference needs; creators only.
 
-        Preselects the bound set, or anonymous, when the reference is bound and the viewer may use
-        it; otherwise the default set for the registry, the only fitting set, or anonymous when
-        none fits. With several fitting sets and no default nothing is preselected.
+        Preselects the bound set when the reference is bound and the viewer may use it, and
+        nothing when they may not; otherwise the default set for the registry, the only fitting
+        set, or anonymous when none fits. With several fitting sets and no default nothing is
+        preselected.
         """
         await self._authoriser.require_create(principal, environment_id)
         return await self._describe(
@@ -557,9 +555,9 @@ class ImageBindingService:
     ) -> CredentialOffer:
         """Describe the credential picker a pull form shows for the reference.
 
-        Preselects the bound set, or anonymous for an anonymous binding; with no binding the
-        default set for the registry, else anonymous; nothing for a deleted set. The caller
-        pulls through its own checks, so this needs only sight of the environment.
+        Preselects the bound set when the viewer may use it, and nothing when they may not;
+        without a bound set, the default set for the registry, else anonymous. The caller pulls
+        through its own checks, so this needs only sight of the environment.
         """
         await self._authoriser.require_environment(principal, environment_id)
         return await self._describe(
@@ -683,10 +681,13 @@ class ImageBindingService:
         """Bind a reference to the set a pull or push used, inside the caller's transaction.
 
         Returns created for a first binding, rebound when the set changed or a credential_missing
-        row was repaired, kept when only the digest was refreshed or the existing binding stands,
-        and skipped when the set no longer exists or a credential_missing row stays unrepaired. An
-        existing binding is changed only by an administrator's explicit choice made against the
-        row that is still stored. A created or rebound binding writes a related activity row.
+        row was repaired, removed when an administrator chose anonymous against a set binding,
+        kept when only the digest was refreshed or the existing binding stands, and skipped when
+        the set no longer exists, a credential_missing row stays unrepaired, or an anonymous pull
+        had no binding to change. A set binding is changed only by an administrator's explicit
+        choice made against the row that is still stored; a credential_missing row is repaired by
+        any pull that chose or was offered a set. A created, rebound or removed binding writes a
+        related activity row.
         """
         observed = digest if digest is not None and _DIGEST.fullmatch(digest) else None
         set_id = credentials.credential_set_id
@@ -695,9 +696,13 @@ class ImageBindingService:
             return "skipped"
         now = self._clock()
         stored = await self._bindings.get(environment_id, reference.key)
+        if set_id is None:
+            return await self._record_anonymous(
+                actor, environment_id, reference, credentials, stored
+            )
         detail: dict[str, str | int | bool | None] = {
             "credential_set_id": set_id,
-            "anonymous": set_id is None,
+            "anonymous": False,
         }
         if stored is None:
             await self._bindings.insert(
@@ -731,13 +736,46 @@ class ImageBindingService:
         await self._related(actor, "image_rebound", environment_id, reference.key, detail)
         return "rebound"
 
+    async def _record_anonymous(
+        self,
+        actor: Actor | Principal,
+        environment_id: int,
+        reference: ImageReference,
+        credentials: PullCredentials,
+        stored: StoredBinding | None,
+    ) -> RecordOutcome:
+        if stored is None or stored.state == "credential_missing":
+            return "skipped"
+        if not _may_rebind(actor, credentials, stored):
+            logger.warning(
+                "image_binding_rebind_declined",
+                extra={"environment_id": environment_id, "binding_id": stored.id},
+            )
+            return "kept"
+        if not await self._bindings.delete_if_same(
+            stored.id, environment_id=environment_id, image_reference=reference.key
+        ):
+            return "skipped"
+        await self._related(
+            actor,
+            "image_binding_removed",
+            environment_id,
+            reference.key,
+            {
+                "credential_set_id": stored.registry_credential_id,
+                "state": stored.state,
+                "reason": ANONYMOUS_CHOICE_REASON,
+            },
+        )
+        return "removed"
+
     async def rebind_review(
         self, principal: Principal, environment_id: int, reference_text: str
     ) -> RebindReview:
-        """Describe the rebind choice for a bound or anonymous reference; administrators only.
+        """Describe the rebind choice for a bound or credential_missing reference.
 
-        Raises ValidationFailed for a reference pinned by digest and for one with no binding.
-        `seen` is what the form posts back as `expected`.
+        Administrators only. Raises ValidationFailed for a reference pinned by digest and for one
+        with no binding. `seen` is what the form posts back as `expected`.
         """
         await self._authoriser.require_environment(principal, environment_id)
         require_administrator(principal)
@@ -762,13 +800,13 @@ class ImageBindingService:
         choice: CredentialChoice,
         expected: SeenBinding,
     ) -> None:
-        """Point a binding at another set, or at none, after a manifest HEAD succeeds with it.
+        """Point a binding at another set after a manifest HEAD succeeds with it, or remove it.
 
-        Administrators only. The set is verified outside any transaction; the binding is then
-        rebound only if it still matches `expected`. The stored observed digest is kept.
-        Raises ValidationFailed for a pinned or unbound reference, an anonymous choice where no
-        set at the registry is granted to the environment, and a registry that refuses the
-        choice; CredentialSetUnavailable for a set the environment cannot use; and
+        Administrators only. An anonymous choice removes the binding and verifies nothing. A set
+        is verified outside any transaction; the binding is then rebound, or removed, only if it
+        still matches `expected`. The stored observed digest is kept. Raises ValidationFailed
+        for a pinned or unbound reference and a registry that refuses the choice;
+        CredentialSetUnavailable for a set the environment cannot use; and
         BindingChangedSinceReview when the binding is not the one reviewed.
         """
         audit = current_audit()
@@ -788,16 +826,24 @@ class ImageBindingService:
             previous_credential_set_id=previous,
             previous_state=stored.state,
         )
-        if stored.state == "bound" and previous == set_id:
-            audit.unchanged()
-            return
-        digest = await self._verify(actor, environment_id, parsed, set_id)
-        audit.detail["registry_digest"] = digest
+        if set_id is not None:
+            if stored.state == "bound" and previous == set_id:
+                audit.unchanged()
+                return
+            audit.detail["registry_digest"] = await self._verify(
+                actor, environment_id, parsed, set_id
+            )
         async with self._db.transaction():
             current = await self._bindings.get(environment_id, parsed.key)
             if current is None or _seen_of(current) != expected:
                 audit.reason = "binding_changed"
                 raise BindingChangedSinceReview()
+            if set_id is None:
+                await self._bindings.delete_if_same(
+                    current.id, environment_id=environment_id, image_reference=parsed.key
+                )
+                audit.detail["removed"] = True
+                return
             await self._bindings.rebind(
                 current.id,
                 credential_id=set_id,
@@ -825,10 +871,9 @@ class ImageBindingService:
         """Bind an unbound reference to a set whose registry digest matched the local image.
 
         Administrators only. Nothing is pulled and the host is not contacted. `bulk` marks a
-        binding written from a reviewed list of many. Returns skipped,
-        and writes no row, when the reference already has a binding. Raises ValidationFailed for
-        a pinned reference, a malformed digest, or an anonymous choice where no set at the
-        registry is granted to the environment; CredentialSetUnavailable for a set the
+        binding written from a reviewed list of many. Returns skipped, and writes no row, when
+        the reference already has a binding. Raises ValidationFailed for a pinned reference, a
+        malformed digest, or an anonymous choice; CredentialSetUnavailable for a set the
         environment cannot use; CredentialSetMismatch for a set at another registry.
         """
         audit = current_audit()
@@ -850,23 +895,21 @@ class ImageBindingService:
         if bulk:
             audit.detail["bulk"] = True
         if set_id is None:
-            if not await self._bindings.has_granted_set_at(environment_id, parsed.registry_address):
-                audit.reason = "registry_not_configured"
-                raise ValidationFailed({"credential_choice": REBIND_REGISTRY_NOT_CONFIGURED})
-        else:
-            offered = await self._candidates.get(actor, environment_id, set_id)
-            if offered is None:
-                audit.reason = "missing"
-                raise CredentialSetUnavailable("missing")
-            if offered.url != parsed.registry_address:
-                audit.reason = "credential_mismatch"
-                raise CredentialSetMismatch()
+            audit.reason = "anonymous_choice"
+            raise ValidationFailed({"credential_choice": BIND_ANONYMOUS_REFUSED})
+        offered = await self._candidates.get(actor, environment_id, set_id)
+        if offered is None:
+            audit.reason = "missing"
+            raise CredentialSetUnavailable("missing")
+        if offered.url != parsed.registry_address:
+            audit.reason = "credential_mismatch"
+            raise CredentialSetMismatch()
         async with self._db.transaction():
             if await self._bindings.get(environment_id, parsed.key) is not None:
                 audit.reason = BINDING_EXISTS
                 audit.unchanged()
                 return "skipped"
-            if set_id is not None and not await self._bindings.credential_exists(set_id):
+            if not await self._bindings.credential_exists(set_id):
                 audit.reason = "missing"
                 raise CredentialSetUnavailable("missing")
             await self._bindings.insert(
@@ -891,34 +934,23 @@ class ImageBindingService:
         actor: Principal,
         environment_id: int,
         reference: ImageReference,
-        set_id: int | None,
+        set_id: int,
     ) -> str:
         audit = current_audit()
         if self._resolver is None or self._manifests is None:
             raise RuntimeError("rebinding needs a credential resolver and a manifest client")
-        target: RegistryTarget
-        login = None
-        if set_id is not None:
-            try:
-                resolved = await self._resolver.resolve_login(
-                    set_id,
-                    environment_id=environment_id,
-                    principal=actor,
-                    registry_address=reference.registry_address,
-                )
-            except CredentialSetUnavailable as error:
-                audit.reason = error.reason
-                raise
-            target, login = resolved.target, resolved.login
-        else:
-            if not await self._bindings.has_granted_set_at(
-                environment_id, reference.registry_address
-            ):
-                audit.reason = "registry_not_configured"
-                raise ValidationFailed({"credential_choice": REBIND_REGISTRY_NOT_CONFIGURED})
-            target = public_target(reference.registry_address)
         try:
-            return await self._manifests.head_digest(target, reference, login)
+            resolved = await self._resolver.resolve_login(
+                set_id,
+                environment_id=environment_id,
+                principal=actor,
+                registry_address=reference.registry_address,
+            )
+        except CredentialSetUnavailable as error:
+            audit.reason = error.reason
+            raise
+        try:
+            return await self._manifests.head_digest(resolved.target, reference, resolved.login)
         except ManifestCheckFailed as failure:
             audit.reason = failure.kind.value
             raise ValidationFailed({"credential_choice": failure.message}) from None
@@ -1043,14 +1075,17 @@ def _may_rebind(
     actor: Actor | Principal, credentials: PullCredentials, stored: StoredBinding
 ) -> bool:
     seen = credentials.seen
+    if (
+        seen is None
+        or seen.binding_id != stored.id
+        or seen.state != stored.state
+        or seen.set_id != _set_of(stored)
+    ):
+        return False
+    if stored.state == "credential_missing":
+        return credentials.source in ("choice", "only_match")
     return (
-        isinstance(actor, Principal)
-        and actor.is_administrator
-        and credentials.source == "choice"
-        and seen is not None
-        and seen.binding_id == stored.id
-        and seen.state == stored.state
-        and seen.set_id == _set_of(stored)
+        isinstance(actor, Principal) and actor.is_administrator and credentials.source == "choice"
     )
 
 
@@ -1070,11 +1105,7 @@ def _preselection(
     *,
     anonymous_default: bool,
 ) -> CredentialChoice | None:
-    if stored is not None:
-        if stored.state == "credential_missing":
-            return None
-        if stored.registry_credential_id is None:
-            return CredentialChoice(None)
+    if stored is not None and stored.state == "bound":
         return (
             CredentialChoice(stored.registry_credential_id)
             if stored.registry_credential_id in ids

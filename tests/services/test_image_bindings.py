@@ -24,7 +24,6 @@ from app.services.image_bindings import (
     parse_pull_reference,
 )
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CandidateListTooLarge,
     CredentialChoice,
     CredentialChoiceRequired,
@@ -129,15 +128,80 @@ async def test_an_unbound_reference_with_two_sets_asks_and_the_default_does_not_
     assert "credential_choice" in asked.value.fields
 
 
-async def test_automation_never_chooses_by_host_for_an_unbound_reference(
-    image_rig: ImageRig, resolve: Resolve
+type Setup = Callable[[ImageRig, list[int]], Awaitable[None]]
+type Outcome = tuple[str, int | None] | type[Exception]
+
+
+async def _no_binding(rig: ImageRig, sets: list[int]) -> None:
+    return None
+
+
+async def _bound_to_first(rig: ImageRig, sets: list[int]) -> None:
+    await bind_image(rig.db, sets[0], ENV_A)
+
+
+async def _missing_first(rig: ImageRig, sets: list[int]) -> None:
+    await bind_image(rig.db, sets[0], ENV_A)
+    await mark_missing(rig.db, sets[0])
+
+
+async def _no_sets(rig: ImageRig) -> list[int]:
+    return []
+
+
+async def _one_set(rig: ImageRig) -> list[int]:
+    return [await register(rig, "first", users=(STANDARD_ID,))]
+
+
+async def _two_sets(rig: ImageRig) -> list[int]:
+    return [
+        await register(rig, "first", users=(STANDARD_ID,)),
+        await register(rig, "second", users=(STANDARD_ID,)),
+    ]
+
+
+DECISIONS = [
+    pytest.param("automation", _no_binding, _no_sets, ("no_match", None), id="auto-unbound-none"),
+    pytest.param("automation", _no_binding, _one_set, ("no_match", None), id="auto-unbound-one"),
+    pytest.param("automation", _no_binding, _two_sets, ("no_match", None), id="auto-unbound-two"),
+    pytest.param("automation", _bound_to_first, _one_set, ("binding", 0), id="auto-bound-one"),
+    pytest.param("automation", _bound_to_first, _two_sets, ("binding", 0), id="auto-bound-two"),
+    pytest.param("automation", _missing_first, _one_set, ("no_match", None), id="auto-missing-one"),
+    pytest.param(
+        "automation", _missing_first, _two_sets, ("no_match", None), id="auto-missing-two"
+    ),
+    pytest.param("user", _no_binding, _no_sets, ("no_match", None), id="user-unbound-none"),
+    pytest.param("user", _no_binding, _one_set, ("only_match", 0), id="user-unbound-one"),
+    pytest.param("user", _no_binding, _two_sets, CredentialChoiceRequired, id="user-unbound-two"),
+    pytest.param("user", _bound_to_first, _two_sets, ("binding", 0), id="user-bound-two"),
+    pytest.param("user", _missing_first, _one_set, ("only_match", 0), id="user-missing-one"),
+    pytest.param(
+        "user", _missing_first, _two_sets, CredentialChoiceRequired, id="user-missing-two"
+    ),
+]
+
+
+@pytest.mark.parametrize(("who", "bind", "sets", "expected"), DECISIONS)
+async def test_the_pull_decision_for_each_caller_binding_and_number_of_fitting_sets(
+    image_rig: ImageRig,
+    credentials: BindingPullCredentials,
+    who: str,
+    bind: Setup,
+    sets: Callable[[ImageRig], Awaitable[list[int]]],
+    expected: Outcome,
 ) -> None:
-    await register(image_rig, "only")
+    ids = await sets(image_rig)
+    await bind(image_rig, ids)
+    principal = None if who == "automation" else ADMIN
 
-    with pytest.raises(CredentialChoiceRequired) as asked:
-        await resolve(NO_ONE)
-
-    assert asked.value.candidates == ()
+    if isinstance(expected, tuple):
+        decision = await credentials.decide(ENV_A, REFERENCE, principal=principal)
+        source, index = expected
+        assert decision.source == source
+        assert decision.choice.credential_set_id == (None if index is None else ids[index])
+    else:
+        with pytest.raises(expected):
+            await credentials.decide(ENV_A, REFERENCE, principal=principal)
 
 
 async def test_an_unbound_reference_with_one_fitting_set_uses_that_set(
@@ -279,33 +343,6 @@ async def test_a_bound_set_the_user_lost_their_grant_on_is_refused_without_falli
     assert refused.value.reason == "not_granted_user"
 
 
-async def test_an_anonymous_binding_resolves_to_no_credentials_even_when_a_set_fits(
-    image_rig: ImageRig, resolve: Resolve
-) -> None:
-    await register(image_rig, "fits")
-    await bind_image(image_rig.db, None, ENV_A)
-
-    resolved = await resolve(ADMIN)
-
-    assert (resolved.credential_set_id, resolved.registry_auth, resolved.source) == (
-        None,
-        None,
-        "binding",
-    )
-
-
-async def test_a_credential_missing_binding_refuses_without_a_choice(
-    image_rig: ImageRig, resolve: Resolve
-) -> None:
-    gone = await register(image_rig, "gone")
-    await register(image_rig, "replacement")
-    await bind_image(image_rig.db, gone, ENV_A)
-    await mark_missing(image_rig.db, gone)
-
-    with pytest.raises(BindingCredentialMissing):
-        await resolve(ADMIN)
-
-
 async def test_an_administrator_repairs_a_credential_missing_binding_by_choosing_a_set(
     image_rig: ImageRig, resolve: Resolve, credentials: BindingPullCredentials
 ) -> None:
@@ -322,22 +359,17 @@ async def test_an_administrator_repairs_a_credential_missing_binding_by_choosing
     assert resolved.seen == SeenBinding("credential_missing", stored.id, gone)
 
 
-@pytest.mark.parametrize("choose", ["another-set", "anonymous", "the-missing-set"])
-async def test_a_standard_user_cannot_repair_a_credential_missing_binding(
-    image_rig: ImageRig, resolve: Resolve, choose: str
+async def test_a_standard_user_may_choose_a_set_for_a_credential_missing_binding(
+    image_rig: ImageRig, resolve: Resolve
 ) -> None:
     gone = await register(image_rig, "gone", users=(STANDARD_ID,))
     other = await register(image_rig, "other", users=(STANDARD_ID,))
     await bind_image(image_rig.db, gone, ENV_A)
     await mark_missing(image_rig.db, gone)
-    choices = {
-        "another-set": CredentialChoice(other),
-        "anonymous": CredentialChoice(None),
-        "the-missing-set": CredentialChoice(gone),
-    }
 
-    with pytest.raises(RebindRefused):
-        await resolve(STANDARD, choice=choices[choose])
+    resolved = await resolve(STANDARD, choice=CredentialChoice(other))
+
+    assert (resolved.credential_set_id, resolved.source) == (other, "choice")
 
 
 @pytest.mark.parametrize("choose", ["another-set", "anonymous"])
@@ -499,14 +531,64 @@ async def test_a_first_pull_creates_the_binding_and_a_related_row(image_rig: Ima
     assert related["detail"] == {"credential_set_id": created, "anonymous": False}
 
 
-async def test_a_first_anonymous_pull_creates_a_binding_with_no_set(image_rig: ImageRig) -> None:
+async def test_a_first_anonymous_pull_writes_no_binding_and_no_row(image_rig: ImageRig) -> None:
     outcome = await record(image_rig, ADMIN, PullCredentials(None, None, "no_match"), None)
 
+    assert outcome == "skipped"
+    assert await binding_rows(image_rig.db) == []
+    assert await rows_for(image_rig.db, "image_bound") == []
+
+
+ANONYMOUS_CASES = [
+    pytest.param(True, "choice", True, "removed", id="administrator-choice"),
+    pytest.param(True, "choice", False, "kept", id="seen-is-stale"),
+    pytest.param(True, "no_match", True, "kept", id="source-not-choice"),
+    pytest.param(False, "choice", True, "kept", id="standard-user"),
+]
+
+
+@pytest.mark.parametrize(("as_admin", "source", "seen_matches", "expected"), ANONYMOUS_CASES)
+async def test_an_anonymous_pull_removes_a_set_binding_only_for_an_administrators_choice(
+    image_rig: ImageRig, as_admin: bool, source: str, seen_matches: bool, expected: str
+) -> None:
+    original = await register(image_rig, "original", users=(STANDARD_ID,))
+    await bind_image(image_rig.db, original, ENV_A)
+    stored = await stored_binding(image_rig.db, ENV_A, REFERENCE_KEY)
+    assert stored is not None
+    seen = SeenBinding("bound", stored.id if seen_matches else stored.id + 1, original)
+    attempt = PullCredentials(None, None, source, seen)  # type: ignore[arg-type]
+
+    outcome = await record(image_rig, ADMIN if as_admin else STANDARD, attempt, None)
+
+    rows = await binding_rows(image_rig.db)
+    removed = await rows_for(image_rig.db, "image_binding_removed")
+    assert outcome == expected
+    assert len(rows) == (0 if expected == "removed" else 1)
+    if expected == "removed":
+        [related] = removed
+        assert related["detail"] == {
+            "credential_set_id": original,
+            "state": "bound",
+            "reason": "anonymous_choice",
+        }
+    else:
+        assert removed == []
+
+
+async def test_an_anonymous_pull_leaves_a_credential_missing_record_in_place(
+    image_rig: ImageRig,
+) -> None:
+    gone = await register(image_rig, "gone")
+    await bind_image(image_rig.db, gone, ENV_A)
+    await mark_missing(image_rig.db, gone)
+    stored = await stored_binding(image_rig.db, ENV_A, REFERENCE_KEY)
+    assert stored is not None
+    seen = SeenBinding("credential_missing", stored.id, gone)
+
+    outcome = await record(image_rig, ADMIN, PullCredentials(None, None, "choice", seen), None)
+
     [row] = await binding_rows(image_rig.db)
-    [related] = await rows_for(image_rig.db, "image_bound")
-    assert outcome == "created"
-    assert (row["registry_credential_id"], row["state"]) == (None, "bound")
-    assert related["detail"] == {"credential_set_id": None, "anonymous": True}
+    assert (outcome, row["state"]) == ("skipped", "credential_missing")
 
 
 async def test_a_pull_with_the_bound_set_keeps_the_binding_and_refreshes_the_digest(
@@ -574,7 +656,30 @@ async def test_a_credential_missing_binding_returns_to_bound_when_an_administrat
     assert related["detail"]["previous_credential_set_id"] == gone
 
 
-async def test_a_credential_missing_binding_stays_when_a_standard_user_pulls(
+async def test_a_credential_missing_binding_is_repaired_by_a_standard_users_pull_with_a_set(
+    image_rig: ImageRig,
+) -> None:
+    gone = await register(image_rig, "gone")
+    replacement = await register(image_rig, "replacement", users=(STANDARD_ID,))
+    await bind_image(image_rig.db, gone, ENV_A)
+    await mark_missing(image_rig.db, gone)
+    stored = await stored_binding(image_rig.db, ENV_A, REFERENCE_KEY)
+    assert stored is not None
+    seen = SeenBinding("credential_missing", stored.id, gone)
+
+    outcome = await record(
+        image_rig, STANDARD, PullCredentials(replacement, None, "only_match", seen), None
+    )
+
+    [row] = await binding_rows(image_rig.db)
+    assert (outcome, row["state"], row["registry_credential_id"]) == (
+        "rebound",
+        "bound",
+        replacement,
+    )
+
+
+async def test_a_credential_missing_binding_stays_when_the_decision_it_was_made_against_changed(
     image_rig: ImageRig,
 ) -> None:
     gone = await register(image_rig, "gone")
@@ -607,7 +712,9 @@ async def test_a_pull_with_a_set_that_was_deleted_meanwhile_writes_no_binding(
 async def test_an_observed_digest_that_is_not_a_sha256_digest_is_stored_as_none(
     image_rig: ImageRig, observed: str | None
 ) -> None:
-    await record(image_rig, ADMIN, PullCredentials(None, None, "no_match"), observed)
+    only = await register(image_rig, "only")
+
+    await record(image_rig, ADMIN, PullCredentials(only, None, "choice"), observed)
 
     [row] = await binding_rows(image_rig.db)
     assert row["observed_digest"] is None
@@ -653,17 +760,17 @@ async def test_the_offer_preselects_the_default_the_only_set_or_nothing(
     assert {candidate.name for candidate in offer.candidates} == set(ids)
 
 
-async def test_the_offer_preselects_nothing_for_a_credential_missing_binding(
+async def test_the_offer_treats_a_credential_missing_binding_as_unbound_for_the_preselection(
     image_rig: ImageRig,
 ) -> None:
     gone = await register(image_rig, "gone")
-    await register(image_rig, "replacement", default=True)
+    replacement = await register(image_rig, "replacement", default=True)
     await bind_image(image_rig.db, gone, ENV_A)
     await mark_missing(image_rig.db, gone)
 
     offer = await image_rig.containers.bindings.offer(ADMIN, ENV_A, REFERENCE)
 
-    assert offer.preselected is None
+    assert offer.preselected == CredentialChoice(replacement)
     assert offer.binding.state == "credential_missing"
 
 
@@ -701,31 +808,18 @@ async def test_the_picker_preselects_the_bound_set(image_rig: ImageRig) -> None:
     assert offer.binding.state == "bound"
 
 
-async def test_the_picker_preselects_anonymous_for_an_anonymous_binding(
-    image_rig: ImageRig,
-) -> None:
-    await register(image_rig, "first", default=True)
-    await bind_image(image_rig.db, None, ENV_A)
-
-    offer = await image_rig.containers.bindings.picker(ADMIN, ENV_A, REFERENCE)
-
-    assert offer.preselected_value == "anonymous"
-    assert offer.binding.state == "anonymous"
-
-
-async def test_the_picker_preselects_nothing_for_a_credential_missing_binding(
+async def test_the_picker_preselects_anonymous_for_a_credential_missing_binding_with_no_default(
     image_rig: ImageRig,
 ) -> None:
     gone = await register(image_rig, "gone")
-    await register(image_rig, "replacement", default=True)
     await bind_image(image_rig.db, gone, ENV_A)
     await mark_missing(image_rig.db, gone)
 
     offer = await image_rig.containers.bindings.picker(ADMIN, ENV_A, REFERENCE)
 
-    assert offer.preselected is None
-    assert offer.preselected_value is None
+    assert offer.preselected_value == "anonymous"
     assert offer.binding.state == "credential_missing"
+    assert offer.locked is False
 
 
 async def test_the_picker_locks_a_standard_user_to_an_existing_binding_and_not_an_unbound_image(
@@ -767,8 +861,7 @@ async def test_the_three_binding_cases_are_told_apart_and_names_follow_the_visib
     await bind_image(image_rig.db, hidden, ENV_A, keys["hidden"])
     await bind_image(image_rig.db, gone, ENV_A, keys["gone"])
     await mark_missing(image_rig.db, gone)
-    await bind_image(image_rig.db, None, ENV_A, f"{ADDRESS}/app:4")
-    wanted = [*keys.values(), f"{ADDRESS}/app:4", f"{ADDRESS}/app:5"]
+    wanted = [*keys.values(), f"{ADDRESS}/app:5"]
     service = image_rig.images.bindings
 
     by_admin = await service.views(ADMIN, ENV_A, wanted)
@@ -778,14 +871,12 @@ async def test_the_three_binding_cases_are_told_apart_and_names_follow_the_visib
         ("bound", "visible"),
         ("bound", "hidden"),
         ("credential_missing", "gone"),
-        ("anonymous", None),
         ("unbound", None),
     ]
     assert [(v.state, v.set_name) for v in by_standard.values()] == [
         ("bound", "visible"),
         ("bound", UNSHOWN_SET),
         ("credential_missing", UNSHOWN_SET),
-        ("anonymous", None),
         ("unbound", None),
     ]
     assert by_admin[keys["gone"]].missing_reason == "deleted"
@@ -1073,14 +1164,6 @@ def stored(**fields: object) -> StoredBinding:
         pytest.param(stored(), True, "bound", "alpha", 5, id="bound-and-visible"),
         pytest.param(stored(), False, "bound", UNSHOWN_SET, 5, id="bound-and-hidden"),
         pytest.param(
-            stored(registry_credential_id=None, credential_name=None, credential_url=None),
-            False,
-            "anonymous",
-            None,
-            None,
-            id="anonymous",
-        ),
-        pytest.param(
             stored(
                 state="credential_missing",
                 registry_credential_id=None,
@@ -1142,7 +1225,6 @@ async def test_a_bound_set_passes_the_usability_check_with_the_same_decision_and
 @pytest.mark.parametrize(
     ("prepare", "error"),
     [
-        ("missing", BindingCredentialMissing),
         ("ungranted", CredentialSetUnavailable),
         ("other_address", CredentialSetUnavailable),
     ],
@@ -1156,7 +1238,6 @@ async def test_a_binding_that_could_not_pull_fails_the_usability_check_as_the_pu
     set_id = await register(image_rig, "bound")
     await bind_image(image_rig.db, set_id, ENV_A)
     changes: dict[str, Callable[[], Awaitable[object]]] = {
-        "missing": lambda: mark_missing(image_rig.db, set_id),
         "ungranted": lambda: image_rig.db.execute(
             "DELETE FROM registry_environment_access WHERE registry_credential_id = ?", (set_id,)
         ),

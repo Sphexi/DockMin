@@ -67,7 +67,7 @@
     </ul>
     {% endif %}
     {% if rejection %}
-    {% if rejection.reason in ("credential_choice_required", "credential_missing", "credential_unavailable") %}
+    {% if rejection.reason in ("credential_choice_required", "credential_unavailable") %}
     <p>Choose a credential set for each image in the Credentials section, then submit again.</p>
     {% endif %}
     {% if rejection.problems %}

@@ -159,7 +159,8 @@ async def test_standard_users_cannot_change_a_bound_set_and_only_an_administrato
     assert (create.status_code, recreate.status_code) == (FORBIDDEN, FORBIDDEN)
     assert "Only an administrator can change which credential set" in text_of(create)
     assert "Only an administrator can change which credential set" in text_of(recreate)
-    assert no_choice.status_code == CONFLICT and "has been deleted" in text_of(no_choice)
+    assert no_choice.status_code == BAD_REQUEST
+    assert "Choose which credential set to pull with." in text_of(no_choice)
     assert repaired.status_code == SEE_OTHER
     assert bindings[REGISTRY_IMAGE]["registry_credential_id"] == bound
     assert bindings["docker.io/library/nginx:1"]["registry_credential_id"] == hub_bound

@@ -17,7 +17,6 @@ from app.auth.services import AuthRuntime
 from app.config import Settings, get_settings
 from app.db.engine import Session, get_session
 from app.db.repositories.activity_event import ActivityEventRepository
-from app.db.repositories.image_binding import ImageBindingRepository
 from app.db.repositories.setting import SettingRepository
 from app.self_identity import source_of
 from app.services.activity import ActivityRecorder
@@ -132,7 +131,6 @@ async def get_instance_service(
         health_timeout_seconds=settings.update_health_timeout_seconds,
         bindings=images.bindings,
         resolver=build_registry_resolver(db, runtime, registries),
-        granted=ImageBindingRepository(db),
         manifests=registries.manifests,
         checks=registries.update_checks,
         settings=SettingRepository(db, runtime.clock),

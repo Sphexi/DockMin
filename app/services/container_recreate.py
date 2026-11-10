@@ -90,7 +90,6 @@ from app.services.image_bindings import observe_image
 from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoice,
     CredentialChoiceRequired,
     CredentialSetMismatch,
@@ -523,9 +522,6 @@ class ContainerRecreateService(ProvisioningBase):
             raise
         except (CredentialChoiceRequired, CredentialSetMismatch):
             audit.reason = "credential_choice_required"
-            raise
-        except BindingCredentialMissing:
-            audit.reason = "credential_missing"
             raise
         except CredentialSetUnavailable:
             audit.reason = "credential_unavailable"

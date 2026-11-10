@@ -107,7 +107,6 @@ async def test_the_list_shows_every_image_with_dangling_ones_last_and_each_refer
 ) -> None:
     anywhere = await register(stocked, "anywhere", address="ghcr.io")
     await bind_image(stocked.db, anywhere, ENV_A, "ghcr.io/o/app:2")
-    await bind_image(stocked.db, None, ENV_A, "docker.io/library/nginx:1")
 
     page = await stocked.images.queries.page(ADMIN, ENV_A)
 
@@ -116,7 +115,7 @@ async def test_the_list_shows_every_image_with_dangling_ones_last_and_each_refer
     assert [row.id for row in page.page.items] == FIRST_PAGE_ORDER
     assert page.total == 4
     assert [(r.text, r.binding.state) for r in nginx.references] == [
-        ("nginx:1", "anonymous"),
+        ("nginx:1", "unbound"),
         ("nginx:latest", "unbound"),
     ]
     assert [(r.text, r.binding.state, r.binding.set_name) for r in ghcr.references] == [
@@ -153,7 +152,9 @@ async def test_a_digest_only_image_is_dangling_and_shows_its_digest_reference(
         pytest.param(ImageFilters(usage="used"), [NGINX], id="used"),
         pytest.param(ImageFilters(usage="unused"), [GHCR, DANGLING, DIGEST_ONLY], id="unused"),
         pytest.param(ImageFilters(binding="unbound"), [NGINX, DIGEST_ONLY], id="unbound"),
-        pytest.param(ImageFilters(binding="anonymous"), [NGINX], id="anonymous"),
+        pytest.param(
+            ImageFilters(binding="anonymous"), [NGINX, DIGEST_ONLY], id="anonymous-reads-as-unbound"
+        ),
         pytest.param(ImageFilters(binding="bound"), [GHCR], id="bound"),
         pytest.param(ImageFilters(binding="credential_missing"), [], id="credential-missing"),
         pytest.param(
@@ -166,7 +167,6 @@ async def test_each_filter_narrows_the_list_the_same_way_for_the_page_and_the_to
 ) -> None:
     anywhere = await register(stocked, "anywhere", address="ghcr.io")
     await bind_image(stocked.db, anywhere, ENV_A, "ghcr.io/o/app:2")
-    await bind_image(stocked.db, None, ENV_A, "docker.io/library/nginx:1")
 
     page = await stocked.images.queries.page(ADMIN, ENV_A, filters)
 

@@ -17,7 +17,7 @@
 
 {% if editing and state.bound_images %}
 <div class="panel panel--notice" role="note">
-  <p>{{ state.bound_images }} {{ "image is" if state.bound_images == 1 else "images are" }} bound to this credential set. Changing the registry address moves {{ "it" if state.bound_images == 1 else "them" }} to "Registry address changed", and automatic updates for {{ "it" if state.bound_images == 1 else "them" }} stop until each is pulled again with a credential set for the new address. The default for the address is cleared as well.</p>
+  <p>{{ state.bound_images }} {{ "image is" if state.bound_images == 1 else "images are" }} bound to this credential set. Changing the registry address moves {{ "it" if state.bound_images == 1 else "them" }} to "Registry address changed", and {{ "it is" if state.bound_images == 1 else "they are" }} checked and updated anonymously until each is pulled again with a credential set for the new address. The default for the address is cleared as well.</p>
 </div>
 {% endif %}
 

@@ -17,21 +17,19 @@
 } %}
 {% set update_notes = {
   "pinned": "The reference names a digest, so it does not change.",
-  "not_bound": "Not checked. Pull the image to bind it to a credential set.",
 } %}
 {% set unknown_reasons = {
   "no_local_digest": "This host holds no registry digest for the image; it was built or tagged locally.",
   "no_digest": "The registry did not report a digest.",
-  "credential_missing": "The credential set this image was pulled with has been deleted.",
   "credential_not_available": "You hold no grant on the credential set this image is bound to.",
   "credential_mismatch": "The bound credential set is for a different registry.",
-  "registry_not_configured": "No credential set for this registry is granted to this environment, so dockmin does not connect to it.",
   "invalid_reference": "The reference is not valid.",
   "dns": "The registry name could not be resolved from this server.",
   "tcp": "This server could not connect to the registry.",
   "tls": "The TLS handshake with the registry failed.",
   "certificate": "The registry's certificate was not accepted.",
   "authentication": "The registry refused the credentials.",
+  "authentication_required": "The registry requires authentication. Bind the image to a credential set.",
   "not_found": "The registry has no such repository or tag.",
   "rate_limited": "The registry is limiting requests.",
   "protocol": "The registry's reply was not understood.",
@@ -40,29 +38,27 @@
 {% set binding_notes = {
   "created": "A binding was created for this reference.",
   "rebound": "The binding for this reference now names the credential set used.",
+  "removed": "The binding for this reference was removed.",
   "kept": "The existing binding was kept.",
 } %}
 
 {% macro binding_text(view) -%}
 {%- if view.state == "bound" -%}Bound to {{ view.set_name }}
-{%- elif view.state == "anonymous" -%}Bound as an anonymous pull
-{%- elif view.state == "credential_missing" -%}{{ "Registry address changed" if view.missing_reason == "address_changed" else "Credential set deleted" }}{% if view.set_name %} (was {{ view.set_name }}){% endif %}
-{%- else -%}Not bound yet
+{%- elif view.state == "credential_missing" -%}{{ "Registry address changed" if view.missing_reason == "address_changed" else "Bound set deleted" }}{% if view.set_name %} (was {{ view.set_name }}){% endif %}; updates use anonymous access
+{%- else -%}Not bound
 {%- endif -%}
 {%- endmacro %}
 
 {% macro binding_state(view, environment_id, pinned=false) %}
 {% if view.state == "bound" %}
 {{ badge("Bound to " ~ view.set_name, "ok") }}
-{% elif view.state == "anonymous" %}
-{{ badge("Anonymous pull", "neutral") }}
 {% elif view.state == "credential_missing" %}
-{{ badge("Registry address changed" if view.missing_reason == "address_changed" else "Credential set deleted", "warn") }}
-{% if view.set_name %}<span class="cell-note">was {{ view.set_name }}</span>{% endif %}
+{{ badge("Registry address changed" if view.missing_reason == "address_changed" else "Bound set deleted", "warn") }}
+<span class="cell-note">{% if view.set_name %}was {{ view.set_name }}; {% endif %}updates use anonymous access</span>
 {% else %}
 {{ badge("Not bound", "neutral") }}
 {% endif %}
-{% if principal.is_administrator and view.state in ("bound", "anonymous", "credential_missing") %}
+{% if principal.is_administrator and view.state in ("bound", "credential_missing") %}
 {% set target = "environment_image_pull" if pinned else "environment_image_rebind" %}
 {% if view.state == "credential_missing" %}
 <a class="btn btn--compact" href="{{ route_path(target, environment_id=environment_id) }}?{{ {'reference': view.reference}|urlencode }}" aria-label="Repair the binding of {{ view.reference }}">Repair</a>
@@ -139,6 +135,9 @@
       <span class="cell-note">{{ unknown_reasons.get(status.reason, "The check did not complete.") }}</span>
       {% elif status.state in update_notes %}
       <span class="cell-note">{{ update_notes[status.state] }}</span>
+      {% endif %}
+      {% if status.anonymous_fallback %}
+      <span class="cell-note">Checked anonymously; {{ "the registry address changed" if status.missing_reason == "address_changed" else "the bound set was deleted" }}, so updates use anonymous access.</span>
       {% endif %}
     </li>
     {% endfor %}
@@ -237,10 +236,10 @@
 
 {% macro credential_fieldset(offer, selected, error, catalogue, required=false) %}
 {% set binding = offer.binding %}
-{% set locked = (not offer.may_rebind) and binding.state != "unbound" %}
+{% set locked = (not offer.may_rebind) and binding.state == "bound" %}
 {% if locked and offer.preselected is none %}
 <div class="panel panel--notice" role="note">
-  <p>{% if binding.state == "credential_missing" %}The credential set this image was pulled with has been deleted. {% else %}This image is bound to a credential set you cannot use. {% endif %}Only an administrator can change which credential set this image uses.</p>
+  <p>This image is bound to a credential set you cannot use. Only an administrator can change which credential set this image uses.</p>
 </div>
 {% elif locked or not offer.candidates %}
 {% set bound_name = namespace(text="Anonymous (no credentials)") %}
@@ -250,7 +249,7 @@
     <span class="field__label">Credential set</span>
     <p class="field__help">
       {%- if locked %}Only an administrator can change which credential set this image uses.
-      {%- elif binding.state == "credential_missing" %}The credential set this image was pulled with has been deleted, and no other set is available for this registry. The image is pulled anonymously.
+      {%- elif binding.state == "credential_missing" %}The credential set this image was bound to was deleted, and no other set is available for this registry. The image is pulled anonymously.
       {%- else %}No credential set is available for this registry.{% endif %}</p>
   </div>
   <p>{{ bound_name.text }}</p>
@@ -263,11 +262,11 @@
 <fieldset class="choice-group"{% if error %} data-invalid{% endif %}>
   <legend>Credential set</legend>
   {% if binding.state == "credential_missing" %}
-  <p class="field__help">The credential set this image was pulled with has been deleted. Choose another set, or an anonymous pull, to repair the binding.</p>
-  {% elif binding.state != "unbound" %}
-  <p class="field__help">Choosing a different option changes the binding for every user of this image.</p>
+  <p class="field__help">{% if binding.missing_reason == "address_changed" %}The registry address of the credential set this image was bound to changed{% else %}The credential set this image was bound to was deleted{% endif %}, so updates use anonymous access. Choose a set to bind the image to it.</p>
+  {% elif binding.state == "bound" %}
+  <p class="field__help">Choosing a different set changes the binding for every user of this image. Choosing Anonymous removes the binding.</p>
   {% else %}
-  <p class="field__help">The set that pulls the image is bound to it, so updates use the same set.</p>
+  <p class="field__help">The set that pulls the image is bound to it, so updates use the same set. An anonymous pull binds nothing.</p>
   {% endif %}
   {% if error %}
   <p class="field__error" role="alert">{{ error }}</p>
@@ -276,7 +275,7 @@
     <input class="choice__input" type="radio" id="choice-anonymous" name="credential_choice" value="anonymous"
            {%- if selected == "anonymous" %} checked{% endif %}{% if not selected %} required{% endif %} aria-describedby="choice-anonymous-help">
     <label class="choice__label" for="choice-anonymous">Anonymous (no credentials)</label>
-    <p class="choice__help" id="choice-anonymous-help">Pull without signing in. Private images and rate-limited registries may refuse it.</p>
+    <p class="choice__help" id="choice-anonymous-help">{% if binding.state == "bound" %}Remove the binding. The image is then pulled and updated without signing in.{% else %}Pull without signing in. Private images and rate-limited registries may refuse it.{% endif %}</p>
   </div>
   {% for candidate in offer.candidates %}
   <div class="choice">
@@ -302,7 +301,7 @@
   <p class="field__help">Name an image above and choose Continue to see which credential sets can pull it.</p>
   {% else %}
   {% set binding = offer.binding %}
-  {% set blocked = (not offer.may_rebind) and binding.state != "unbound" and offer.preselected is none %}
+  {% set blocked = (not offer.may_rebind) and binding.state == "bound" and offer.preselected is none %}
   <form class="form form--wide" method="post" action="{{ post_href }}" data-submit-once>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="reference" value="{{ offer.reference.familiar }}">

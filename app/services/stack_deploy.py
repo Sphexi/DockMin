@@ -48,7 +48,6 @@ from app.services.object_inspector import (
 )
 from app.services.object_locks import ObjectKey
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CandidateListTooLarge,
     CredentialChoice,
     CredentialChoiceRequired,
@@ -998,9 +997,6 @@ class StackValidator:
                     await actor.authorise_credential_set(credentials.credential_set_id)
             except (CredentialChoiceRequired, CredentialSetMismatch) as error:
                 problems[reference] = str(error)
-            except BindingCredentialMissing as error:
-                problems[reference] = str(error)
-                reason = stronger_reason(reason, "credential_missing")
             except CredentialSetUnavailable as error:
                 problems[reference] = str(error)
                 reason = stronger_reason(reason, "credential_unavailable")

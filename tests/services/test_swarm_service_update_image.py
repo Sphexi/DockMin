@@ -257,7 +257,7 @@ async def test_arguments_an_automation_run_may_not_pass_are_refused_before_the_s
     swarm: SwarmRig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     built = await prepare(swarm, monkeypatch)
-    not_binding = PullCredentials(built.set_id, SecretStr(AUTH), "no_match")
+    not_binding = PullCredentials(built.set_id, SecretStr(AUTH), "choice")
 
     with pytest.raises(ValueError):
         await built.update(credentials=not_binding)
@@ -986,7 +986,7 @@ async def test_a_refresh_with_credentials_that_are_not_the_bindings_is_refused(
     built = await prepare(swarm, monkeypatch)
 
     with pytest.raises(ValueError):
-        await refresh(built, credentials=PullCredentials(built.set_id, None, "no_match"))
+        await refresh(built, credentials=PullCredentials(built.set_id, None, "choice"))
 
     assert built.sent() == []
 

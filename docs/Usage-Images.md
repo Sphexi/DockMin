@@ -33,16 +33,16 @@ All paths are under `/environments/{id}/images`.
 | Prune selection and confirmation | `/prune?mode={mode}` | `GET` |
 | Prune | `/prune` | `POST` |
 | Orphaned bindings | `/bindings/reap` | `GET` (list), `POST` (reap) |
-| Change credential set | `/bindings/rebind?reference={reference}` | `GET` (page), `POST` (verify and rebind) |
+| Change credential set | `/bindings/rebind?reference={reference}` | `GET` (page), `POST` (verify and change, or remove) |
 | Update check | `/updates` | `POST` |
-| Start a bulk anonymous binding review | `/anonymous-binding` | `POST`, `303` to the job page |
-| Bulk review progress | `/anonymous-binding/jobs/{job_id}` | `GET` |
-| Cancel a bulk review | `/anonymous-binding/jobs/{job_id}/cancel` | `POST`, `303` to the job page |
-| Bulk review | `/anonymous-binding/reviews/{token}` | `GET` |
-| Apply a bulk review | `/anonymous-binding/reviews/{token}/apply` | `POST`, `303` to `/results/{token}` ([Result pages](Contributing-Frontend-Conventions#result-pages)) |
+| Start a bind unbound images review ([Bind unbound images](#bind-unbound-images)) | `/anonymous-binding` | `POST`, `303` to the job page |
+| Review progress | `/anonymous-binding/jobs/{job_id}` | `GET`; an htmx request for the panel answers `HX-Redirect` to the review once it is ready |
+| Cancel a review | `/anonymous-binding/jobs/{job_id}/cancel` | `POST`, `303` to the job page |
+| Review | `/anonymous-binding/reviews/{token}` | `GET` |
+| Apply | `/anonymous-binding/reviews/{token}/apply` | `POST`, `303` to the review, which shows the summary of the apply |
 
 - `{image_id}` is the full 64-character lower-case hexadecimal id. Any other form answers `404` for every role, before any call to the host.
-- `{job_id}` is 22 characters from `A-Za-z0-9_-`. Any other form answers `404`. `{token}` of a bulk review follows the same rule.
+- `{job_id}` is 22 characters from `A-Za-z0-9_-`. Any other form answers `404`. `{token}` of a review follows the same rule.
 - `{tab}` is `overview` (default), `configuration` or `history`. Any other value answers `404`.
 - `{mode}` is `dangling` or `unused`. Any other value answers `400`: `Choose dangling or unused.`
 - `/remove` takes 1 to 25 distinct `image` values. Outside that, the confirmation answers `400`.
@@ -61,7 +61,7 @@ Viewing needs sight of the environment ([Environments](Usage-Environments#access
 | Tag, untag, remove, bulk remove, force, prune, reap bindings | Yes | Refused (`403`) |
 | Change a binding without a pull ([Rebind without a pull](#rebind-without-a-pull)) | Yes | `404`, as for an unknown path. The `Repair` and `Change credential set` links are not shown |
 | Bind unbound images without a pull ([Bindings without a pull](#bindings-without-a-pull)) | Yes | `404` |
-| Bind unbound images anonymously ([Bind unbound images anonymously](#bind-unbound-images-anonymously)) | Yes | `404` on every route, and no row is written |
+| Bind unbound images ([Bind unbound images](#bind-unbound-images)) | Yes | `404` on every route, and no row is written |
 
 | Withheld from standard users | Shown to administrators |
 |---|---|
@@ -142,7 +142,7 @@ Messages quote no input.
 | Total | `{size} for all images on this host.` after the count ([Total size](#total-size)) |
 | Reference shown | The tags; the digests when the image has no tag. At most 100 per image, then `and N more` |
 | Used by | Names of up to 10 containers the viewer may see, linked; `and N others` for the rest |
-| Buttons | `Pull image` for users who may pull; `Prune images`, `Remove selected...` and, while the stored status is `reachable`, `Bind unbound images anonymously` ([Bind unbound images anonymously](#bind-unbound-images-anonymously)) for administrators |
+| Buttons | `Pull image` for users who may pull; `Prune images`, `Remove selected...` and, while the stored status is `reachable`, `Bind unbound images` ([Bind unbound images](#bind-unbound-images)) for administrators |
 | Empty list | `This host has no images.` (administrators); `You cannot see any images on this host. Ask an administrator for access to more images.` (standard users). With a filter: `No matching images` and `Change the filters, or clear them to see every image.` |
 
 Every image on the host is listed. The list is not filtered by the viewer's access.
@@ -154,7 +154,7 @@ Every image on the host is listed. The list is not filtered by the viewer's acce
 | `q` (`Reference contains`) | At most 128 characters | Case-insensitive substring of a reference, or a prefix of the image id |
 | `dangling` | `yes`, `no` | Dangling: the image has no tag |
 | `usage` | `used`, `unused` | A container, running or not, uses the image |
-| `binding` | `bound`, `anonymous`, `credential_missing`, `unbound` | At least one reference shown for the image has the state |
+| `binding` | `bound`, `credential_missing`, `unbound` | At least one reference shown for the image has the state. `anonymous` is accepted and filters as `unbound` |
 | `update` (`Updates`) | `available` | At least one reference shown for the image has the stored status `Update available`, as the list shows it ([Stored status](#stored-status)): a result that is out of date does not count |
 
 An invalid filter value answers `400` and lists the problems; for `update` the problem reads `Choose available.`; for `dangling`, `Choose yes or no.` Filters survive paging.
@@ -197,10 +197,9 @@ The line above the table gives the bytes the host's images occupy.
 
 | State | Shown as | Meaning |
 |---|---|---|
-| `bound` | `Bound to {set name}` | The reference was pulled or pushed with that credential set |
-| `anonymous` | `Anonymous pull` | The reference was pulled or pushed with no credentials, by choice or because no set fitted |
-| `credential_missing` | `Credential set deleted` or `Registry address changed`, with `was {set name}` | The set was deleted, or its registry address changed. Automatic updates for the reference stop |
-| `unbound` | `Not bound` | No binding exists for the reference. An image that runs on the host can be bound without a pull ([Bindings without a pull](#bindings-without-a-pull)) |
+| `bound` | `Bound to {set name}` | The reference was pulled or pushed with that credential set, or bound to it without a pull |
+| `credential_missing` | `Bound set deleted` or `Registry address changed`, with `was {set name}; updates use anonymous access` | The set was deleted, or its registry address changed. The binding stays as a record and behaves as `unbound` |
+| `unbound` | `Not bound` | No binding exists for the reference. Update checks and automatic updates use anonymous access to the registry in the reference. An image that runs on the host can be bound without a pull ([Bindings without a pull](#bindings-without-a-pull)) |
 
 - Each reference of an image has its own state.
 - Administrators see a link beside a reference whose binding can be changed, on the list and on the image page:
@@ -208,8 +207,8 @@ The line above the table gives the bytes the host's images occupy.
   | Binding | Link | Opens |
   |---|---|---|
   | `credential_missing` | `Repair` | The [rebind page](#rebind-without-a-pull); for a reference pinned by digest, the pull form |
-  | `bound` or `anonymous`, reference not pinned by digest | `Change credential set` | The rebind page |
-  | `bound` or `anonymous`, reference pinned by digest | None | |
+  | `bound`, reference not pinned by digest | `Change credential set` | The rebind page |
+  | `bound`, reference pinned by digest | None | |
   | `unbound` | None | |
 
   Each link carries the reference.
@@ -222,7 +221,7 @@ Each reference in the image list shows the result of its last update check and w
 | State shown | When |
 |---|---|
 | `Up to date`, `Update available`, `Unknown`, `Pinned` | The stored result, with `checked {time}` |
-| `Not checked` | No result is stored, the stored state is `Not bound`, or the result is out of date |
+| `Not checked` | No result is stored, the stored state is `not_bound` (no check produces it), or the result is out of date |
 
 A stored result is out of date when the image holds other digests for the reference's repository now:
 
@@ -268,11 +267,13 @@ A binding records which credential set pulled a reference in one environment. Re
 | Item | Value |
 |---|---|
 | Key | The environment and the canonical reference |
-| Value | One credential set, or none (an anonymous pull) |
-| Written | After a pull or push ends cleanly, when a container create or recreate pulls the image, when a Swarm service create or edit changes the service's image ([Swarm services](#swarm-services)), when a Swarm stack deploy or redeploy sends an image to a service ([Swarm stacks](#swarm-stacks)), when an administrator applies `Adopt everything on this host` to a reference with no binding ([Bindings without a pull](#bindings-without-a-pull)), and when an administrator confirms a registry of a [bulk anonymous binding](#bind-unbound-images-anonymously). A failed or cancelled transfer writes none |
+| Value | One credential set |
+| Written | After a pull or push ends cleanly, when a container create or recreate pulls the image, when a Swarm service create or edit changes the service's image ([Swarm services](#swarm-services)), when a Swarm stack deploy or redeploy sends an image to a service ([Swarm stacks](#swarm-stacks)), when an administrator applies `Adopt everything on this host` to a reference with no binding ([Bindings without a pull](#bindings-without-a-pull)), and when an administrator applies [Bind unbound images](#bind-unbound-images) to a registry. A failed or cancelled transfer writes none |
 | Survives | Removal, untagging and pruning of the image; a restart. Deleted with the environment |
-| Created by | Whoever pulls or pushes a reference that has no binding. An administrator, without a pull, through [Bindings without a pull](#bindings-without-a-pull) or [Bind unbound images anonymously](#bind-unbound-images-anonymously) |
-| Changed by | Administrators only, by an explicit credential choice on a pull or push, or on the [rebind page](#rebind-without-a-pull) |
+| Created by | Whoever pulls or pushes a reference that has no binding, with a set chosen or the only set that fits. An administrator, without a pull, through [Bindings without a pull](#bindings-without-a-pull) or [Bind unbound images](#bind-unbound-images) |
+| Changed by | Administrators only, by an explicit credential choice on a pull or push, or on the [rebind page](#rebind-without-a-pull). A `credential_missing` binding is repaired by any pull that names or is offered a set |
+| Not written | A pull or push with `Anonymous`. An unbound reference pulled anonymously stays unbound |
+| Removed by | An administrator's `Anonymous` choice on a pull, a push or the rebind page; a reap ([Orphaned bindings](#orphaned-bindings)) |
 | Tag | Tagging pulls nothing and binds nothing |
 
 A pull, push, create, recreate, Swarm service change or Swarm stack deployment reports what it did to the binding:
@@ -280,9 +281,10 @@ A pull, push, create, recreate, Swarm service change or Swarm stack deployment r
 | Result | Meaning |
 |---|---|
 | `created` | The reference had no binding; one was written |
-| `rebound` | An administrator's explicit choice on a pull or push changed the set, or repaired a `credential_missing` binding |
+| `rebound` | An administrator's explicit choice on a pull or push changed the set, or a pull that named or was offered a set repaired a `credential_missing` binding |
+| `removed` | An administrator chose `Anonymous` against a binding that names a set; the binding was deleted |
 | `kept` | The existing binding already names the set used, or it differs and was not changed because the caller did not choose against the binding as it stands |
-| `skipped` | The set no longer exists, or a `credential_missing` binding was not repaired |
+| `skipped` | The set no longer exists, a `credential_missing` binding was not repaired, or an anonymous pull had no binding to remove |
 
 ### Which set a pull uses
 
@@ -290,32 +292,31 @@ The first rule that applies decides.
 
 | Order | Condition | Result |
 |---|---|---|
-| 1 | The caller made an explicit choice | That set, or no credentials for `Anonymous`. A standard user whose choice differs from an existing binding is refused (`403`) |
+| 1 | The caller made an explicit choice | That set, or no credentials for `Anonymous`. A standard user whose choice differs from a binding that names a set is refused (`403`). An administrator's `Anonymous` removes that binding |
 | 2 | The reference is bound to a set | That set. A standard user is offered only that option |
-| 2 | The reference is bound as anonymous | An anonymous pull |
-| 2 | The binding is `credential_missing` | Refused (`409`): `The credential set this image was pulled with has been deleted. Choose another set.` Only an administrator may choose |
-| 3 | No binding, no set fits the registry | An anonymous pull |
-| 3 | No binding, one set fits | That set |
-| 3 | No binding, several sets fit | Refused (`400`): `Choose which credential set to pull with.` |
+| 3 | No binding, or the binding is `credential_missing`; no set fits the registry | An anonymous pull |
+| 3 | No binding, or the binding is `credential_missing`; one set fits | That set, which is then bound |
+| 3 | No binding, or the binding is `credential_missing`; several sets fit | Refused (`400`): `Choose which credential set to pull with.` |
+| 3 | No binding, or the binding is `credential_missing`; automation (no user) | An anonymous pull |
 
 - A set fits when its address equals the reference's registry address, it is granted to the environment, and, for a standard user, it is granted to the user or one of their teams ([Registries](Administration-Registries#access)). An entry that [reads as anonymous](Administration-Registries#anonymous-entries) does not count at order 3: it neither turns an anonymous pull into a pull bound to the entry nor makes a pull ask for a choice. At most 200 sets are offered. With more, the choice is refused: `Too many credential sets fit this registry to choose between.`
 - The [credential picker](Administration-Registries#the-credential-picker) of a form sends an explicit choice, so the rule at order 1 decides for every pull a form starts. Order 3 applies to callers that send no choice, such as the JSON routes.
-- The picker leaves out an entry that reads as anonymous unless the reference is bound to it. It preselects the bound set, or `Anonymous` for an anonymous binding; for a reference with no binding, the [default set](Administration-Registries#default-for-an-address) for the address, else `Anonymous`; nothing for a `credential_missing` binding. The push form and the recreate confirmation preselect the bound set or `Anonymous`; with no binding, the default set, else the only fitting set, else `Anonymous` when none fits, and nothing when several fit.
-- A bound set is used as bound, whatever the address match. An image is never matched to a set by its registry host once it is bound.
+- The picker leaves out an entry that reads as anonymous unless the reference is bound to it. It preselects the bound set; for a reference with no binding or a `credential_missing` binding, the [default set](Administration-Registries#default-for-an-address) for the address, else `Anonymous`. The push form and the recreate confirmation preselect the bound set; with no binding or a `credential_missing` binding, the default set, else the only fitting set, else `Anonymous` when none fits, and nothing when several fit.
+- A bound set is used as bound, whatever the address match. A bound image is never matched to another set by its registry host.
 - A bound set that is no longer granted to the environment or the user, or whose secret cannot be read, ends the job as `credential_unavailable`, with the messages in [Registries](Administration-Registries#access).
 - A chosen set for another registry than the reference's answers `400`: `That credential set is for a different registry.`
-- Automation (no user) uses only the bound set and needs only its environment grant. It never chooses a set by registry host. An unbound reference, and a `credential_missing` binding, are refused.
+- Automation (no user) uses the bound set and needs only its environment grant. An unbound reference, and a `credential_missing` binding, are pulled anonymously. Automation never chooses a set by registry host.
 - The default-for-an-address flag only preselects a form.
 
 | Picker state | Text shown |
 |---|---|
-| Administrator, binding exists | `Choosing a different option changes the binding for every user of this image.` |
-| Administrator, binding is `credential_missing` | `The credential set this image was pulled with has been deleted. Choose another set, or an anonymous pull, to repair the binding.` |
-| Reference not bound | `The set that pulls the image is bound to it, so updates use the same set.` |
-| Standard user, binding exists | The bound set's name as text, with `Only an administrator can change which credential set this image uses.` |
-| Standard user, bound set not granted to them, or binding `credential_missing` | `This image is bound to a credential set you cannot use.` or `The credential set this image was pulled with has been deleted.`, followed by `Only an administrator can change which credential set this image uses.` No button |
+| Administrator, binding is `bound` | `Choosing a different set changes the binding for every user of this image. Choosing Anonymous removes the binding.` The `Anonymous` option reads `Remove the binding. The image is then pulled and updated without signing in.` |
+| Administrator, binding is `credential_missing` | `The credential set this image was bound to was deleted, so updates use anonymous access. Choose a set to bind the image to it.` |
+| Reference not bound | `The set that pulls the image is bound to it, so updates use the same set. An anonymous pull binds nothing.` |
+| Standard user, binding is `bound` | The bound set's name as text, with `Only an administrator can change which credential set this image uses.` |
+| Standard user, bound set not granted to them | `This image is bound to a credential set you cannot use.`, followed by `Only an administrator can change which credential set this image uses.` No button |
 | No credential set fits the registry | `No credential set is available for this registry.` The pull is anonymous |
-| Binding `credential_missing`, no other set at the registry | `The credential set this image was pulled with has been deleted, and no other set is available for this registry. The image is pulled anonymously.` |
+| Binding `credential_missing`, no other set at the registry | `The credential set this image was bound to was deleted, and no other set is available for this registry. The image is pulled anonymously.` |
 
 ### Swarm services
 
@@ -332,7 +333,7 @@ A Swarm service create, and an edit that changes the image, choose credentials f
 | Credential sent to Docker | A create sends a non-anonymous set. An edit that changes the image always sends a credential: the chosen set, or the empty credential for an anonymous pull, so credentials stored with the earlier image are not reused. An edit that keeps the image, scale and force update send none and Swarm reuses the stored credential. A roll back uses the credential stored with the previous configuration |
 | Stored by Swarm | Docker keeps the credential with the service and gives it to the nodes that pull. It is not returned by Docker and is not shown, stored or logged by dockmin |
 | Lifetime | dockmin refreshes a credential stored with a service only through `container-updater`, for a service bound to an Amazon ECR set ([Swarm](Usage-Swarm#credential-renewal-by-container-updater)). Deleting a set does not remove it from services |
-| Updates by `container-updater` | The reference's bound set only, resolved with no user and no choice; the nodes pull. The binding is kept and its observed digest is updated ([Automation](Operations-Automation#swarm-services)) |
+| Updates by `container-updater` | The reference's bound set, resolved with no user and no choice; anonymous for a reference with no binding or a `credential_missing` binding. The nodes pull. A binding is kept and its observed digest is updated ([Automation](Operations-Automation#swarm-services)) |
 
 ### Swarm stacks
 
@@ -352,41 +353,49 @@ A Swarm stack chooses credentials for each distinct image reference of its file 
 
 | Event | Effect on its bindings |
 |---|---|
-| Set deleted | Every binding becomes `credential_missing`, `Credential set deleted`. None is removed |
+| Set deleted | Every binding becomes `credential_missing`, `Bound set deleted`. None is removed |
 | Registry address of the set edited | Every binding becomes `credential_missing`, `Registry address changed`. The set's default flag is cleared |
 
 - The name of the lost set is kept with the binding.
-- Automatic updates for those references stop, and the update check reports `unknown` with the reason `credential_missing`.
-- Repair: an administrator uses `Repair` to choose another set, or `Anonymous`, without a pull ([Rebind without a pull](#rebind-without-a-pull)), or pulls the reference again and chooses. The binding is then `rebound`. A reference pinned by digest is repaired by pulling it. A standard user cannot repair a binding.
+- A `credential_missing` binding behaves as `unbound`. The update check and `container-updater` use anonymous access to the registry in the reference. The update check shows `Checked anonymously; the bound set was deleted.` beside the result, and the run detail of `container-updater` counts `anonymous_fallback` ([Automation](Operations-Automation#updater-run-detail)). A registry that refuses the anonymous request gives `authentication_required`.
+- Repair: any pull that names a set, or is offered the only fitting set, binds the reference to it (`rebound`). An administrator uses `Repair` to choose a set without a pull ([Rebind without a pull](#rebind-without-a-pull)). A reference pinned by digest is repaired by pulling it.
+- An administrator's `Anonymous` choice on the rebind page deletes the record.
+
+| Bound set | State | Update check and `container-updater` |
+|---|---|---|
+| Deleted, or its address changed | `credential_missing` | Anonymous access to the registry in the reference |
+| Exists at the same address, no longer granted to the environment | `bound` | Refused: `credential_not_available` in a check, `credential_unavailable` in an automation. No fallback to anonymous access |
+| Exists at the same address, secret cannot be read | `bound` | The same refusal |
+
+Withdrawing an environment grant ([Remove a grant](Administration-Registries#remove-a-grant)) changes no binding.
 
 ### Rebind without a pull
 
-`/environments/{id}/images/bindings/rebind?reference={reference}`. Administrators only. The page changes which credential set a binding names. It pulls nothing.
+`/environments/{id}/images/bindings/rebind?reference={reference}`. Administrators only. The page changes which credential set a binding names, or removes the binding. It pulls nothing.
 
 1. On the image list or image page, select `Repair` or `Change credential set` beside the reference.
 2. Choose a credential set, or `Anonymous`, in the picker.
-3. Select `Verify and rebind`. dockmin sends one manifest `HEAD` to the registry with the chosen set.
-4. The list opens with `The binding now uses the chosen credential set.` If the page shows a refusal instead, match it in the table below; the binding is unchanged.
+3. Select `Verify and change binding`. For a set, dockmin sends one manifest `HEAD` to the registry with it. `Anonymous` sends nothing.
+4. The list opens with `The binding now uses the chosen credential set.` or, for `Anonymous`, `The binding was removed.` If the page shows a refusal instead, match it in the table below; the binding is unchanged.
 
 | Item | Value |
 |---|---|
 | Page shows | The reference, its registry address, the current binding, and the credential picker ([Registries](Administration-Registries#the-credential-picker)) with the sets that fit the registry and `Anonymous` |
-| Preselected | The bound set, or `Anonymous` for an anonymous binding. Nothing for a `credential_missing` binding, and nothing when the bound set is not among the sets offered |
-| Buttons | `Verify and rebind`, `Pull the image instead` (the pull form with the reference), `Cancel` |
-| Reference | Must be bound, as `bound`, `anonymous` or `credential_missing`, and not pinned by digest. Otherwise `400` |
+| Preselected | The bound set, and nothing when it is not among the sets offered. For a `credential_missing` binding, as for a reference with no binding ([Which set a pull uses](#which-set-a-pull-uses)) |
+| Buttons | `Verify and change binding`, `Pull the image instead` (the pull form with the reference), `Cancel` |
+| Reference | Must be bound, as `bound` or `credential_missing`, and not pinned by digest. Otherwise `400` |
 | Verification | A `HEAD` of the reference's manifest, as in [Registry request](#registry-request), made with the chosen set. The binding changes only if the registry answers with a digest |
-| Anonymous choice | Verified against the registry in the reference, with verified certificates. Refused when no credential set at that registry address is granted to the environment |
+| Anonymous choice | Deletes the binding, `bound` or `credential_missing`. No registry request is made. The reference is then `unbound` |
 | Unchanged choice | Choosing the set the binding already names (state `bound`) changes nothing, makes no registry request and writes no activity row |
 | Review | The form carries the binding it was built on. If the binding is no longer that one when the request is applied, nothing changes |
 | Digest | The stored observed digest is not changed |
-| Success | Redirect (`303`) to the list with `The binding now uses the chosen credential set.` |
+| Success | Redirect (`303`) to the list with `The binding now uses the chosen credential set.`, or `The binding was removed.` for `Anonymous` |
 
 | Refusal | Status | Message |
 |---|---|---|
 | Reference pinned by digest | `400` | `A reference pinned by digest is rebound by pulling it.` |
 | Reference not bound | `400` | `Pull the image to bind it.` |
 | No set chosen | `400` | `Choose one of the listed credential sets.` |
-| `Anonymous`, and no set at the registry address granted to the environment | `400` | `No credential set for this registry is granted to this environment, so dockmin does not connect to it.` |
 | The registry refuses the choice, or cannot be reached | `400` | The product-written message of the failed check, beside the credential picker |
 | Set not available to the environment, or for another registry | `409` | The messages in [Registries](Administration-Registries#access), on the page |
 | Binding changed since the page was shown | `409` | `The binding changed since you reviewed it. Review it again.` With a `Review again` link |
@@ -411,8 +420,8 @@ An image pulled outside dockmin has no binding. `Adopt everything on this host` 
 | Rule | Value |
 |---|---|
 | Sets tried | Each credential set whose registry address equals the reference's registry address and that is granted to the environment. At most 10 are tried |
-| Anonymous | Tried after the sets, when a set at the address is of a provider that allows anonymous access. Never for Amazon ECR |
-| Entry that reads as anonymous | Not tried as a set. It enables the anonymous candidate, so an entry for a public registry and no account gives `binds` anonymously instead of `ambiguous` ([Anonymous entries](Administration-Registries#anonymous-entries)). An entry with authentication off and a CA bundle or verification off is tried as itself |
+| Anonymous | Tried only when no set matched, and when a set at the address is of a provider that allows anonymous access. Never for Amazon ECR |
+| Entry that reads as anonymous | Not tried as a set. It enables the anonymous check, so an entry for a public registry and no account gives `anonymous_only` ([Anonymous entries](Administration-Registries#anonymous-entries)). An entry with authentication off and a CA bundle or verification off is tried as itself |
 | Request | One manifest `HEAD` for each candidate, as in [Registry request](#registry-request): the same client, the OCI and Docker manifest and index media types, the set's TLS settings. A `Bearer` challenge adds the token request of that registry. No manifest is read with `GET` |
 | Contacted | Only addresses that have a credential set granted to the environment, entries with authentication off included. A reference at an address with no set is not contacted |
 | Amazon ECR | The set's token is obtained before its request, outside any database transaction |
@@ -426,8 +435,9 @@ A match shows that the set can read the image. It does not show which set pulled
 
 | Outcome | Shown as | Meaning | Binding |
 |---|---|---|---|
-| `binds` | `Binds to {set}.` or `Binds anonymously.` | Exactly one candidate matched, and at most 10 sets are at the address | Offered, ticked |
-| `ambiguous` | `More than one set can read this image. Choose one.` | Several candidates matched, or one matched and more than 10 sets are at the address, so the match could hide another | Offered, not ticked, and a select of the matching candidates with nothing preselected. Ticking without a choice is refused |
+| `binds` | `Binds to {set}.` | Exactly one set matched, and at most 10 sets are at the address | Offered, ticked |
+| `ambiguous` | `More than one set can read this image. Choose one.` | Several sets matched, or one matched and more than 10 sets are at the address, so the match could hide another | Offered, not ticked, and a select of the matching candidates with nothing preselected. Ticking without a choice is refused |
+| `anonymous_only` | `The registry answered without credentials; the image needs no binding.` | No set matched and the anonymous check did | None. The box is disabled |
 | `no_match` | `No credential set could be matched to the image on the host.` | No candidate matched, or no set is granted to the environment at the address | None |
 | `no_local_digest` | `The host holds no registry digest for it; it was built or tagged locally.` | The local image has no `RepoDigests`. No request is sent | None |
 | `pinned` | `It names a digest, so it needs no binding.` | The reference names a digest. No request is sent | None |
@@ -438,7 +448,7 @@ A reference is `not_checked` as a whole when any of its candidates was not check
 | Bound | Value |
 |---|---|
 | References checked | 200 for each review. Counted are the references that need a request: `pinned` and `no_local_digest` do not count. The rest, in reference order, are `not_checked` and no candidate is tried |
-| Sets tried for a reference | 10, then anonymous where it applies. More than 10 sets give `ambiguous` when one matched; more than 200 give `not_checked` |
+| Sets tried for a reference | 10, then anonymous only when none matched. More than 10 sets give `ambiguous` when one matched; more than 200 give `not_checked` |
 | Requests in flight | 5 |
 | One request | 10 s, or the time left of the 120 s |
 | Whole check | 120 s. A request not started by then is `not_checked` |
@@ -447,98 +457,133 @@ A reference is `not_checked` as a whole when any of its candidates was not check
 
 | Item | Value |
 |---|---|
-| Written | For each ticked image when the confirmed plan is applied. The binding names the set chosen, or none for an anonymous binding, and keeps the matching digest as its observed digest |
-| Checks at the write | The environment may use the set, the set is at the reference's registry address, an anonymous choice has a granted set at that address, the reference is not pinned and the digest is a `sha256:` digest. The host and the registry are not contacted |
+| Written | For each ticked image whose choice is a set, when the confirmed plan is applied. The binding names the set chosen and keeps the matching digest as its observed digest. An image whose choice is anonymous writes nothing and is reported `It is read without a binding.` |
+| Checks at the write | The environment may use the set, the set is at the reference's registry address, the reference is not pinned and the digest is a `sha256:` digest. The host and the registry are not contacted |
 | Binding exists | A reference that has a binding, in any state, is skipped. No row is written and the binding is not changed |
-| Refusals | `registry_not_configured`, `missing` and `credential_mismatch` (reasons of [Recorded actions](#recorded-actions)) are recorded as failures and the result page shows the product message |
+| Refusals | `missing`, `credential_mismatch` and `anonymous_choice` (reasons of [Recorded actions](#recorded-actions)) are recorded as failures and the result page shows the product message |
 | Not done | No pull, no Engine call and no change to a container |
 | Recorded | `image_bound` with `verified` `true` and `pulled` `false` ([Recorded actions](#recorded-actions)) |
 
-### Bind unbound images anonymously
+### Bind unbound images
 
-`Bind unbound images anonymously` on the image list binds images that have no binding with no credentials, after one manifest `HEAD` for each shows that the registry holds the digest the host holds. Nothing is pulled and nothing on the host changes.
+`Bind unbound images` on the image list binds images that have no binding to the credential set that can read them. One manifest `HEAD` for each granted set shows which sets return the digest the host holds. Nothing is pulled and nothing on the host changes.
 
 | Item | Value |
 |---|---|
 | Who | Administrators. A standard user receives `404` on every route and no row is written |
-| Start | `Bind unbound images anonymously` on the image list, shown while the stored status is `reachable`. Not reachable: `409`, `The environment is not reachable`: `Test the connection, then start the review again.` |
-| Flow | Review job, review page, one confirmation for each registry, result page |
+| Start | `Bind unbound images` on the image list, shown while the stored status is `reachable`. Not reachable: `409`, `The environment is not reachable`: `Test the connection, then start the review again.` |
+| Flow | Review job, review page with one form, apply back to the same review page |
 | Contacted before the start | Nothing |
-| Job | Kind `anonymous_binding_review`. It shares the limits of pull, push and container jobs: 2 running per user and 8 in the process. Over a limit: `429`, `Too many jobs are running`. A cancelled review ends with `The review was cancelled. Nothing was written.` and an unexpected failure with `The review failed.` The job page has `Refresh status` and `Cancel the review` while running and `Open the review` once it succeeded. While the review runs, the panel is fetched again every 2 seconds and the poll that finds the review ready opens it (`HX-Redirect`). Without JavaScript the page reloads every 5 seconds. Visible to the administrator who started it |
-| Held review | In memory, for 30 minutes, for the user and the environment that started it. 2 for each user and 16 in all; the oldest is dropped first. Gone: `409`, `The review has expired` |
+| Job | Kind `bulk_binding_review`. It shares the limits of pull, push and container jobs: 2 running per user and 8 in the process. Over a limit: `429`, `Too many jobs are running`. A cancelled review ends with `The review was cancelled. Nothing was written.` and an unexpected failure with `The review failed.` Visible to the administrator who started it |
+| Job page | `Refresh status` and `Cancel the review` while running, `Open the review` once it succeeded. While the review runs, the panel is fetched again every 2 seconds and the poll that finds the review ready opens it (`HX-Redirect`). Without JavaScript the page reloads every 5 seconds |
+| Held review | In memory, for 30 minutes after the review finished, for the user and the environment that started it. 2 for each user and 16 in all; the oldest is dropped first. Gone: `409`, `The review has expired` |
 | Applied twice | While an apply runs, a second apply is refused: `409`, `Already being applied` |
 
-#### Coverage
+#### Which references are checked
 
 | Item | Value |
 |---|---|
 | References | Every tag of every image on the host that has no binding row, in any state. A binding that is `credential_missing` counts as bound |
+| Checked | A reference that is tagged, unbound, has a local registry digest, and names an address where at least one credential set is granted to the environment |
+| Credential set | A set granted to the environment that does not read as anonymous: authentication on, or certificate verification off, or a CA bundle. An entry that [reads as anonymous](Administration-Registries#anonymous-entries) is not a set here. Up to 200 granted sets are read |
 | Not read | Swarm services |
-| Checked | A reference at an address where a credential set with authentication off that [reads as anonymous](Administration-Registries#anonymous-entries) is granted to the environment. Up to 200 granted entries are read |
-| Credential sets at the address | A set with authentication on does not stop the offer. The review notes how many are granted at the address, and that confirming binds anonymously. A confirmation is refused with `409` when that number differs from the review's |
-| Request | One anonymous manifest `HEAD` for each reference, as in [Registry request](#registry-request). No login, no `GET` of a manifest, no pull, no Engine write |
+
+| Left out | Shown as |
+|---|---|
+| `pinned` | `Pinned by digest.` |
+| `no_local_digest` | `The image has no recorded registry digest.` |
+| `no_credential_set` | `No credential set at this address; updates use anonymous access.` |
+
+- Left-out references are listed under `Not checked ({N})` with `Reference` and `Why`. The first 200 are listed, with the total.
+- No request is sent for a left-out reference.
+
+#### Checks and limits
+
+| Item | Value |
+|---|---|
+| Order | Each granted set at the address first, in parallel, one manifest `HEAD` each, as in [Registry request](#registry-request): the set's TLS settings, the `Bearer` token request of that registry, and for Amazon ECR the set's token before its request. Anonymous only when no set matched |
+| Sets tried | 10 for each reference. With more than 10 sets at the address, a reference that a tried set read is offered with a picker. More than 200 sets give `not_checked` |
+| Anonymous | One manifest `HEAD` with no login, sent when no set matched and a granted set at the address is of a provider that allows anonymous access. Never for Amazon ECR |
+| Match | The digest the registry returns is one of the local `RepoDigests` |
+| Not done | No manifest `GET`, no pull, no Engine write |
 
 | Bound | Value |
 |---|---|
-| References checked | 200 for each review. The rest are not checked, counted on the review page, and not listed individually |
+| References checked | 200 for each review. Pinned references and references with no local digest do not count. The rest are not checked and are counted: `{N} not checked; start another review to check the next ones.` |
 | Requests in flight | 5 |
 | One request | 10 s, or the time left of the 120 s |
-| Whole review | 120 s. A reference not started by then is `not_checked` |
-
-#### Left out and not matched
-
-| Left out | Reason |
-|---|---|
-| `pinned` | The reference names a digest. No request is sent |
-| `no_local_digest` | The image has no recorded registry digest. No request is sent |
-| `no_anonymous_entry` | No entry with authentication off is granted to the environment at the address. No request is sent |
-| `entry_tls_settings` | Every entry with authentication off granted at the address has a CA bundle or verification off. `This address's entry uses its own certificate settings; bind its images from the adoption review or a pull.` No request is sent, since the request verifies against the operating system's roots only |
-
-The review lists the first 200 left-out references with their total.
-
-#### Order and resume point
-
-| Item | Behaviour |
-|---|---|
+| Whole review | 120 s. A request not started by then is `not_checked` |
 | Order | References used by a container first, then the rest, each in reference order |
-| Resume point | The review starts after the last reference checked by the same user's previous review of the environment, and continues from the start of the order when it reaches the end. Held in memory; lost at a restart |
-| Cleared | A review that leaves nothing unchecked |
-| Page | `{N} not checked; start another review to check the next ones.` while any reference was not checked |
-| Not matched rows | At most 200 for each registry, with the total |
+| Resume point | The review starts after the last reference checked by the same user's previous review of the environment, and continues from the start of the order when it reaches the end. Held in memory; lost at a restart. Cleared by a review that leaves nothing unchecked |
 
-| Not matched | Cause |
+#### Outcomes for each image
+
+| Outcome | Shown as | Offered |
+|---|---|---|
+| One set matched | The reference with the set's name and digest | Yes, bound to that set |
+| Several sets matched | The reference with a select of the matching sets, `Leave unbound` selected, and each set's digest | Yes, bound to the set chosen. Nothing is preselected: an image with no set chosen stays unbound |
+| No set matched, the anonymous request matched | `Works without binding.` under `Not offered` | No. The image needs no binding ([Bind unbound images anonymously](#bind-unbound-images-anonymously)) |
+| Nothing matched | `Needs a credential set.` under `Not offered`, with one line `{set name}: {reason}` for each set that failed or returned another digest | No |
+| Not reached | `Not checked: the limit on references or the time budget was reached.` under `Not offered` | No |
+
+| Reason of a set | Text |
 |---|---|
-| `mismatch` | The registry holds a different digest for the tag |
-| `not_found` | The registry has no such repository or tag |
-| `authentication` | The registry refused an anonymous read |
-| `rate_limited` | The registry answered `429`. Not retried |
-| `timeout` | The registry did not answer in time |
-| `not_checked` | The time limit was reached before the request started |
-| `no_digest`, `protocol` | The registry's reply carried no digest, or was not a valid registry response |
-| `dns`, `tcp`, `tls`, `certificate`, `address_refused` | The connection stage that failed ([Results](#results)) |
+| Another digest | `The registry holds a different digest for this tag.` |
+| A failed request | The registry client's text for the failure: [Results](#results) lists the stages and kinds |
+| A set that could not be used | `The check failed.` |
 
 #### Review page
 
 | Part | Content |
 |---|---|
-| Group | One for each registry address: the entries that make it configured, the number of credential sets granted there with authentication on, the matched references with their digests, and the references not matched with the reason. The text of each reason is the registry client's text for the failure |
-| Confirmation | One form for each group with a match: `Bind these {N} images at {address} anonymously`. The form carries the address and the plan |
-| Not checked | The left-out references with the reason, and the count of references that were not checked |
-| No group | `No unbound image can be checked anonymously.` |
+| Latest apply | After an apply: the [summary](#apply) at the top |
+| Not checked | `{N} not checked; start another review to check the next ones.` while any reference was not checked |
+| Form | One form for every registry with an image to bind. Text: `Each image offered below is unbound, and a credential set granted to this environment returned the digest the host holds. Confirming a registry binds its images to the sets shown, so their updates use those sets. Nothing is pulled and nothing on the host changes. Each registry is confirmed on its own.` |
+| `Apply all bindings` | Shown when more than one registry has an image to bind. It applies every registry in the form |
+| Registry | One section for each address: the credential sets granted there, the table `Reference`, `Credential set`, `Digest` of the images to bind, and its own button |
+| Registry button | `Bind these {N} images at {address}`, or `Bind the chosen images at {address}` when the registry has an image with a picker. It applies that registry only |
+| Picker | A select for each image that several sets read: `Leave unbound`, then each matching set. Help: `An image that more than one set can read stays unbound unless you choose a set for it.` |
+| Not offered | `Not offered ({N})`: `Reference` and `Outcome` of the checked references that are not offered, with the reason lines. At most 200 for each registry, with the total |
+| Registry with nothing to bind | `No image at this address can be bound.` |
+| Nothing to bind at all | `No unbound image can be bound to a credential set.` and `An image with no credential set at its address updates with anonymous access.`, with `Back to the images`. After an apply that left nothing: `No image is left to bind.` |
+| Left out | `Not checked ({N})`, as in [Which references are checked](#which-references-are-checked) |
 
 #### Apply
 
 | Item | Value |
 |---|---|
-| Confirmed | One or more registries. None: `400`, `Confirm at least one registry.` An address that is not in the review: `That registry is not in the review.` |
-| Plan | The SHA-256 of the sorted lines `image <reference> anonymous <digest>` of the confirmed registries |
-| Before any write | The plan is recomputed from the host's image list and the binding rows, and the number of granted sets with authentication on at each confirmed address is compared with the review's. No request goes to a registry. A difference in either answers `409`, `The host changed`: `The host or the bindings changed since the review. Start a new review to see the current list.` Nothing is written |
-| Write | Each reference is bound anonymously as its own operation, with the digest that matched. The checks are those of [Binding](#binding) |
-| Bound after the review | Before the write, the recomputed plan differs, so the request is refused as above. Between the recomputation and the write, the reference is `Skipped`: `It was bound in the meantime.` |
-| One fails | `Failed`, with the product message, or `The operation failed.` for an error that is not a product error; the error's type name is logged. The others proceed |
-| Held review | The confirmed groups leave it once the writes have been attempted, whatever their results. It is dropped when no group is left |
-| Result | `303` to `/results/{token}`. Title `Anonymous binding result`; `{N} bound, {N} skipped, {N} failed at {registries}.` and a table of `Reference`, `Result` and `Detail`. Done detail: `Bound anonymously; nothing was pulled.` |
-| Recorded | One `image_bound` row for each binding, with `bulk` `true` ([Recorded actions](#recorded-actions)). Starting the review, the confirmation and a refused apply write no row. The rows of one apply share a request id ([Request id](Administration-Activity#request-id)) |
+| Posted | `registry` and `expected_plan`, one pair for each registry with an image to bind; `choice`, repeated, as `{reference} {set id}` or `{reference} none`; `only`, the one registry a registry button applies. Without `only`, every posted registry is applied. At most 50 registries and 200 choices |
+| Confirmed | One or more registries. Refused before anything is written, `400`, `Check the selection`: `Confirm at least one registry.`, `That registry is not in the review.` for an address the review does not hold, or `The confirmed plan is not the one the review offered. Reload the review.` for a plan that is not the one offered |
+| Choice | Limited to the sets that matched for that image in the review. A choice for another set, for an image with no picker, or for a reference the review does not hold is refused, `400`, `Check the selection`: `That credential set is not one the review offered for the image.` A malformed or repeated choice is refused: `A credential set choice is malformed.`, `An image was chosen twice.` |
+| Plan | The SHA-256 of the sorted lines of the registry, one for each image to bind: `image <reference> set <id> <digest>`, or for a picker image `image <reference> sets <id>:<digest>,<id>:<digest>` with every set offered. The posted choice is not in the plan |
+| Plan check | For each confirmed registry on its own, before it is written: the local digests, the binding rows and the credential sets granted at the address are read again and compared with the review. No request goes to a registry. A difference makes that registry `changed`: nothing is bound there and it stays on the review. The other registries apply |
+| Write | Each image is bound as its own operation to the set it is offered with, or the set chosen. The checks are those of [Binding](#binding) |
+| Left unbound | A picker image with no set chosen is `Left unbound`: `No credential set was chosen; it stays in the review.` |
+| Bound meanwhile | A reference that has a binding when it is written is `Skipped`: `It was bound in the meantime.` The rest of its registry applies |
+| One fails | `Failed`, with the product message, or `The operation failed.` for an error that is not a product error. The others proceed |
+| Host not readable | The unavailable page. The review is kept |
+| Result | `303` to the review page, with `Latest apply` above the list |
+| Review afterwards | Images that were bound or skipped leave the review. Failed and left-unbound images and changed registries stay and can be applied again. A registry with nothing left to show is dropped. The review keeps its first expiry |
+
+| `Latest apply` | Content |
+|---|---|
+| Counts | `{N} bound, {N} skipped, {N} failed, {N} changed at {registries}.`, with `, {N} left unbound` when any |
+| Changed registry | `{address}: Changed since the review; nothing was bound at this address. Start a new review to see the current images.` |
+| Table | `Reference`, `Result` (`Bound`, `Skipped`, `Failed` or `Left unbound`) and `Detail` |
+| Bound detail | `Bound to {set name}; nothing was pulled.` |
+
+#### Recorded
+
+| Item | Value |
+|---|---|
+| Row | One `image_bound` row for each binding, with the set as `credential_set_id`, `anonymous` `false`, `digest`, `verified` `true`, `pulled` `false` and `bulk` `true` ([Recorded actions](#recorded-actions)) |
+| Failure | A binding the write refuses records a failure row with its reason |
+| No row | Starting the review, a refused apply, a changed registry, a skipped reference and a left-unbound image |
+| Request id | The rows of one apply share a request id ([Request id](Administration-Activity#request-id)) |
+
+#### Bind unbound images anonymously
+
+The tool writes no anonymous binding. An image that no granted set can read but its registry serves without credentials is listed as `Works without binding.` and is checked and updated anonymously like any unbound image ([Update check](#update-check)). An image at an address with no granted credential set is not checked and reads `No credential set at this address; updates use anonymous access.`
 
 A bound image takes part in update checks at once: [Update check](#update-check).
 
@@ -567,7 +612,7 @@ A pull runs in the background as a [job](#pull-and-push-jobs). The pull form is 
 
 1. Select `Pull image` on the image list, or `Pull again` on a tag.
 2. Enter the reference in `Image reference` and select `Continue`. With JavaScript, changing the field loads the next step without leaving the page, and `Continue` stays visible.
-3. Read the canonical reference, its registry, its binding, and the [credential picker](Administration-Registries#the-credential-picker): `Anonymous (no credentials)` and the sets that fit. Choose one.
+3. Read the canonical reference, its registry, its binding, and the [credential picker](Administration-Registries#the-credential-picker): `Anonymous (no credentials)` and the sets that fit. Choose one. `Anonymous` binds nothing.
 4. Select `Pull image`. The job page opens (`303`) and shows the layers.
 5. When the job ends, `View image` opens the image. If it failed, match the message in [Outcomes](#outcomes) or see [Troubleshooting](Troubleshooting).
 
@@ -576,14 +621,12 @@ A pull runs in the background as a [job](#pull-and-push-jobs). The pull form is 
 | Invalid reference or choice | 400 | The messages in [Refused references](#refused-references) |
 | Several sets fit and none was chosen | 400 | `Choose which credential set to pull with.` |
 | Standard user would change a binding | 403 | `Only an administrator can change which credential set this image uses.` |
-| Binding is `credential_missing` | 409 | `The credential set this image was pulled with has been deleted. Choose another set.` |
 | Chosen set not offered for this environment and user | 409 | `That registry credential set is not available here.` |
 | Chosen set is for another registry | 400 | `That credential set is for a different registry.` |
 | Job limit reached | 429 | The limit message ([Limits](#limits)) |
 | Host unavailable | 503 | The host message |
 
 - A standard user whose reference is bound to a set they hold no grant on sees `This image is bound to a credential set you cannot use. Only an administrator can change which credential set this image uses.` and no button.
-- A standard user whose reference is `credential_missing` sees `The credential set this image was pulled with has been deleted. Only an administrator can change which credential set this image uses.` and no button.
 - A reference already on the host is pulled again.
 - A reference with neither a tag nor a digest is pulled as `latest`. A pull never fetches every tag of a repository.
 - A failed start renders the form with the heading `The image was not pulled`.
@@ -807,13 +850,13 @@ Pruning removes unused images in bulk. Administrators only.
 
 The check compares the digest an image holds locally for a reference with the digest its registry reports now.
 
-1. Select `Check for updates` on the image list (it checks the bound tags of the page) or on the image page (its bound tags).
+1. Select `Check for updates` on the image list (it checks the tags of the page) or on the image page (its tags).
 2. Read the result. With JavaScript the status of each reference updates in place; without it a result page opens and the list or image page is the back link.
 3. For `Unknown`, read the reason in [Results](#results) and see [Troubleshooting](Troubleshooting).
 
 | Item | Value |
 |---|---|
-| Started by | `Check for updates` on the list (the bound tags of the page) and on the image page (its bound tags), `POST /environments/{id}/images/updates`. Also `container-updater` runs ([Automation](Operations-Automation#detection)) |
+| Started by | `Check for updates` on the list (the tags of the page) and on the image page (its tags), `POST /environments/{id}/images/updates`. Also `container-updater` runs ([Automation](Operations-Automation#detection)) |
 | Access | Sight of the environment |
 | References | 1 to 25 distinct references per request; more answers `400`: `Check between 1 and 25 references at once.` |
 | Stored | The latest result of each reference ([Stored status](#stored-status)) |
@@ -829,12 +872,12 @@ The check compares the digest an image holds locally for a reference with the di
 | Request | `HEAD` of `/v2/{repository}/manifests/{tag}` over HTTPS, accepting OCI and Docker manifest and index media types, `User-Agent: dockmin-image-update-check` |
 | Authentication | A `401` with a `Bearer` challenge sends one `GET` to the `https` token service, with the set's login when there is one, and repeats the `HEAD` with the token. A `Basic` challenge sends the set's login to the registry |
 | Compared | The `Docker-Content-Digest` header, which must be one `sha256:` value |
-| Connect to | The address of the bound set, with the set's TLS settings; for an anonymous binding, the registry in the reference, with verified certificates. `docker.io` is contacted at `registry-1.docker.io` |
+| Connect to | The address of the bound set, with the set's TLS settings; for a reference with no binding or a `credential_missing` binding, the registry in the reference, with verified certificates and no login. `docker.io` is contacted at `registry-1.docker.io` |
 | Limits | 5 s name lookup, 5 s per connection, 10 s per exchange, 30 s in all. Redirects are not followed. Replies are read with bounds |
 | Proxy variables | Not read ([Reference-Deployment](Administration-Registries#registry-connections)) |
 | Credentials | Never sent without a verified certificate |
 
-A request goes only to an address that has a credential set granted to the environment: the address of the bound credential set, or, for an anonymous binding, an address some credential set granted to the environment names. An entry with authentication off counts, among them the Docker Hub and GitHub Container Registry entries a new instance starts with ([Registries](Administration-Registries#entries-a-new-instance-starts-with)). Nothing contacts a registry without an administrator's pull or check, a user's update check or a `container-updater` run.
+A reference with no usable binding is checked anonymously at the registry its reference names. No registry entry is needed for the address, and the entries with authentication off, among them the Docker Hub and GitHub Container Registry entries a new instance starts with ([Registries](Administration-Registries#entries-a-new-instance-starts-with)), are not required. The [address policy](Reference-Security#address-policy) applies. Nothing contacts a registry without an administrator's pull or check, a user's update check or a `container-updater` run.
 
 ### Results
 
@@ -843,19 +886,17 @@ A request goes only to an address that has a credential set granted to the envir
 | `Up to date` | A local digest equals the registry's |
 | `Update available` | The registry's digest differs from every local digest |
 | `Pinned` | The reference names a digest, so it does not change |
-| `Not bound` | The reference has no binding. Not checked |
 | `Unknown` | The check could not decide. The reason follows |
 
 | Reason | Cause |
 |---|---|
 | `no_local_digest` | The host holds no registry digest for the image; it was built or tagged locally |
-| `credential_missing` | The binding lost its credential set |
 | `credential_not_available` | The user holds no grant on the bound set, or the set is not granted to the environment, or its secret cannot be read |
 | `credential_mismatch` | The bound set is for a different registry |
-| `registry_not_configured` | An anonymous binding, and no credential set for the registry, an entry with authentication off included, is granted to the environment |
 | `invalid_reference` | The reference is not valid |
 | `image_id_reference` | The text is an image id, not a registry reference. No registry is contacted |
 | `busy` | No check slot came free within 10 seconds. Not kept |
+| `authentication_required` | The anonymous check was refused with `401` or `403`. Bind the image to a credential set |
 | `no_digest` | The registry reported no digest |
 | `dns`, `tcp`, `tls`, `certificate`, `authentication` | The connection stage that failed |
 | `address_refused` | The registry or its token service is on this server or a link-local network and no permit covers it: `The registry or its token service is on this server or a link-local network. Set DOCKMIN_PERMITTED_INTERNAL_NETWORKS to allow it.` ([Reference-Deployment](Reference-Security#address-policy)) |
@@ -864,7 +905,14 @@ A request goes only to an address that has a credential set granted to the envir
 | `protocol` | The reply was not a valid registry response |
 | `timeout` | The registry did not answer in time |
 
-A failure is the reference's `Unknown`, never `Up to date`.
+A failure is the reference's `Unknown`, never `Up to date`. For a reference whose binding is `credential_missing`, the result carries `Checked anonymously; the bound set was deleted.`
+
+| `authentication_required` | Behaviour |
+|---|---|
+| Update check | `Unknown` with the reason, each time the check runs. Binding the image to a credential set clears it |
+| `container-updater`, update mode | The first run that meets it writes `image_update_refused` for the image and fails the object. Later runs count the object `held` and fail nothing, until the image is bound to a credential set or the reason changes ([Refusals and holds](Operations-Automation#refusals-and-holds)) |
+| `container-updater`, report mode | Failed object, reason `authentication_required`. Holds are ignored |
+| Compose stack | A reference whose check fails, for this or any other reason, is a failed object. The other services of the stack still update |
 
 | Limit | Value | Message |
 |---|---|---|
@@ -886,7 +934,7 @@ Every action records one activity row, for success and for failure. A refusal on
 |---|---|
 | `reference` | `image_pulled`, `image_pushed`, `image_tagged`, `image_untagged`: the canonical reference |
 | `credential_set_id`, `anonymous`, `credential_source` | Pull and push: the set used (`null` for none), whether the pull was anonymous, and how it was chosen: `choice`, `binding`, `only_match` or `no_match` |
-| `digest`, `binding` | Pull and push that ended cleanly: the digest observed, and the binding result (`created`, `rebound`, `kept`, `skipped`) |
+| `digest`, `binding` | Pull and push that ended cleanly: the digest observed, and the binding result (`created`, `rebound`, `removed`, `kept`, `skipped`) |
 | `trigger`, `remote_digest` | `image_pulled` by `container-updater`: `update`, and the digest the registry reported at the check |
 | `replaced_image_id` | Tag: the image the reference moved from |
 | `trigger`, `replaced_at`, `replaced_target_type`, `replaced_target` | `image_removed` by `container-updater` after a grace period: `update_prune`, when the update was recorded, `container` or `stack`, and the id of the new container or the name of the stack ([Automation](Operations-Automation#removal-of-replaced-images)) |
@@ -903,10 +951,10 @@ Every action records one activity row, for success and for failure. A refusal on
 | Failure reason | Cause |
 |---|---|
 | `object_busy` | Another action holds the reference or the image |
-| `credential_missing`, `credential_unavailable`, `credential_mismatch`, `credential_choice_required` | The credential errors of [Pull](#pull) |
+| `credential_unavailable`, `credential_mismatch`, `credential_choice_required` | The credential errors of [Pull](#pull) |
 | `not_found_or_denied`, `pull_failed`, `push_failed` | The registry's answer |
 | `reference_changed`, `replaced_changed`, `references_changed`, `in_use_changed` | Something changed since the review |
-| `pinned`, `not_bound`, `registry_not_configured`, `binding_changed` | Rebind: the reference is pinned by digest, has no binding, no set at the registry is granted for an anonymous choice (also a failure of `image_bound` from `Adopt everything on this host`), or the binding changed since the review. The reason of an unavailable set (`missing`, `not_granted_environment`, `not_granted_user`, `secret_unreadable`, `token_exchange_failed`, `credential_mismatch`) and the kind of a failed registry check (`dns`, `tcp`, `tls`, `certificate`, `authentication`, `not_found`, `rate_limited`, `no_digest`, `protocol`, `timeout`, `address_refused`) are recorded too |
+| `pinned`, `not_bound`, `anonymous_choice`, `binding_changed` | Rebind: the reference is pinned by digest, has no binding, or the binding changed since the review. `anonymous_choice`: a binding without a pull was asked to bind anonymously (a failure of `image_bound`). The reason of an unavailable set (`missing`, `not_granted_environment`, `not_granted_user`, `secret_unreadable`, `token_exchange_failed`, `credential_mismatch`) and the kind of a failed registry check (`dns`, `tcp`, `tls`, `certificate`, `authentication`, `not_found`, `rate_limited`, `no_digest`, `protocol`, `timeout`, `address_refused`) are recorded too |
 | `image_in_use`, `image_has_dependents` | Docker or the confirmation refused the removal |
 | `not_found` | The image is gone |
 | `engine_error`, `conflict` | Docker refused |
@@ -916,9 +964,9 @@ Rows about bindings are written with the operation that caused them. Target type
 
 | Action | Written by | Detail |
 |---|---|---|
-| `image_bound` | A pull, push, create, recreate, Swarm service change or Swarm stack deployment that created the binding; `Adopt everything on this host` ([Bindings without a pull](#bindings-without-a-pull)); or [bulk anonymous binding](#bind-unbound-images-anonymously) | `credential_set_id`, `anonymous`. From `Adopt everything on this host` and from [bulk anonymous binding](#bind-unbound-images-anonymously) also `digest` (the registry digest that matched the local image), `verified` (`true`) and `pulled` (`false`). From bulk anonymous binding also `bulk` (`true`) |
-| `image_rebound` | An administrator's choice that changed it, on a pull or push or on the [rebind page](#rebind-without-a-pull) | `credential_set_id`, `anonymous`, `previous_credential_set_id`, `previous_state`. From the rebind page also `registry_digest` and `verified` (`true` once the binding is changed) |
+| `image_bound` | A pull, push, create, recreate, Swarm service change or Swarm stack deployment that created the binding; `Adopt everything on this host` ([Bindings without a pull](#bindings-without-a-pull)); or [Bind unbound images](#bind-unbound-images) | `credential_set_id`, `anonymous` (`false`). From `Adopt everything on this host` and from `Bind unbound images` also `digest` (the registry digest that matched the local image), `verified` (`true`) and `pulled` (`false`). From `Bind unbound images` also `bulk` (`true`) |
+| `image_rebound` | An administrator's choice that changed it, on a pull or push or on the [rebind page](#rebind-without-a-pull) | `credential_set_id`, `anonymous`, `previous_credential_set_id`, `previous_state`. From the rebind page also `registry_digest` and `verified` (`true` once the binding is changed), and `removed` (`true`) for an `Anonymous` choice, which deletes the binding and sends no request |
 | `image_binding_credential_missing` | Deleting a set, or changing its address | `credential_set_id`, `credential_set_name`, `missing_reason` (`deleted` or `address_changed`) |
-| `image_binding_removed` | A reap | `credential_set_id`, `state` |
+| `image_binding_removed` | A reap, or an administrator's `Anonymous` choice on a pull or push | `credential_set_id`, `state`. From the `Anonymous` choice also `reason` (`anonymous_choice`) |
 
 A reap also writes `image_bindings_reaped`, with target type `environment` and the count in `count`.

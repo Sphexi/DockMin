@@ -44,7 +44,6 @@ from app.services.object_inspector import (
 )
 from app.services.object_locks import ObjectKey
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoice,
     CredentialChoiceRequired,
     PullCredentialResolver,
@@ -413,9 +412,6 @@ def guarded() -> Iterator[None]:
     except CredentialChoiceRequired:
         audit.reason = "credential_choice_required"
         raise
-    except BindingCredentialMissing:
-        audit.reason = "credential_missing"
-        raise
     except CredentialSetUnavailable:
         audit.reason = "credential_unavailable"
         raise
@@ -492,9 +488,9 @@ def binding_actor(actor: Acting) -> Principal | Actor:
 
 
 def require_binding(credentials: PullCredentials) -> None:
-    if credentials.source != "binding":
+    if credentials.source not in ("binding", "no_match"):
         current_audit().reason = "invalid_credentials"
-        raise ValueError("an automated image update sends the credentials its binding names")
+        raise ValueError("an automated image update sends what its binding names, or nothing")
 
 
 class SwarmServiceBase:

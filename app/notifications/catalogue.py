@@ -7,6 +7,7 @@ from typing import Final
 from app.db.repositories.activity_event import Outcome
 
 AUTOMATION_RUN_FAILED_ACTION: Final = "automation_run_failed"
+AUTOMATION_RUN_PARTIAL_ACTION: Final = "automation_run_partial"
 ENVIRONMENT_UNREACHABLE_ACTION: Final = "environment_unreachable"
 ENVIRONMENT_REACHABLE_ACTION: Final = "environment_reachable"
 DELIVERY_FAILED_ACTION: Final = "notification_delivery_failed"
@@ -42,7 +43,7 @@ CATALOGUE: Final[tuple[EventType, ...]] = (
     EventType(
         "automation_run_failed",
         "Automation run failed",
-        frozenset({AUTOMATION_RUN_FAILED_ACTION}),
+        frozenset({AUTOMATION_RUN_FAILED_ACTION, AUTOMATION_RUN_PARTIAL_ACTION}),
         result="failure",
     ),
     EventType(

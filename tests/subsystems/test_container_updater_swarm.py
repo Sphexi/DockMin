@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 import app.subsystems.container_updater as updater
+from app.registry_client.manifests import ManifestCheckKind
 from app.services.access import ResourceKey
 from app.services.activity import UserActor
 from app.services.image_bindings import BindingPullCredentials, SetCandidates
@@ -23,6 +24,7 @@ from tests.image_support import (
     decode_auth,
     digest,
     mark_missing,
+    move_sets_elsewhere,
     register,
 )
 from tests.registry_support import ADDRESS, grant_user
@@ -241,11 +243,11 @@ async def test_the_runs_reason_is_the_errors_own_reason(swarm_web: Built) -> Non
     assert (result.outcome, result.reason) == ("failure", "update_paused")
 
 
-async def test_a_credential_missing_binding_is_refused_once_held_and_no_other_set_is_asked(
+async def test_a_binding_that_does_not_fit_is_refused_once_held_and_no_other_set_is_asked(
     swarm: Any, swarm_web: Built, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await register(swarm, "other")
-    await mark_missing(swarm.db, swarm_web.set_id)
+    await move_sets_elsewhere(swarm.db)
     calls: list[tuple[str, Any, Any]] = []
     candidate_reads: list[Any] = []
     decide, candidates = BindingPullCredentials.decide, SetCandidates.at
@@ -269,9 +271,9 @@ async def test_a_credential_missing_binding_is_refused_once_held_and_no_other_se
     again = await swarm_web.subject.run(job)
 
     [row] = rows(swarm_web.subject, "image_update_refused")
-    assert (first.outcome, first.reason) == ("failure", "credential_missing")
+    assert (first.outcome, first.reason) == ("failure", "credential_mismatch")
     assert (row["target_type"], row["target_id"]) == ("service", swarm_web.sid)
-    assert row["detail"]["reason"] == "credential_missing"
+    assert row["detail"]["reason"] == "credential_mismatch"
     assert rows(swarm_web.subject, "service_updated") == []
     assert swarm_web.image() == OLD_IMAGE and swarm_web.host.mutating() == []
     assert calls == [] and candidate_reads == []
@@ -279,7 +281,7 @@ async def test_a_credential_missing_binding_is_refused_once_held_and_no_other_se
     assert counts(again)["held"] == 1 and len(rows(swarm_web.subject, "image_update_refused")) == 1
 
 
-async def test_a_set_lost_between_the_check_and_the_act_is_refused_without_trying_another(
+async def test_a_set_moved_between_the_check_and_the_act_is_refused_without_trying_another(
     swarm: Any, swarm_web: Built, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await register(swarm, "other")
@@ -289,7 +291,7 @@ async def test_a_set_lost_between_the_check_and_the_act_is_refused_without_tryin
 
     async def racing(self: Any, *arguments: Any, **keywords: Any) -> Any:
         found = await check(self, *arguments, **keywords)
-        await mark_missing(swarm.db, swarm_web.set_id)
+        await move_sets_elsewhere(swarm.db)
         return found
 
     async def spy(
@@ -304,11 +306,46 @@ async def test_a_set_lost_between_the_check_and_the_act_is_refused_without_tryin
 
     result = await swarm_web.subject.run(job)
 
-    assert result.reason == "credential_missing"
+    assert result.reason == "credential_unavailable"
     assert calls == [(REFERENCE, None, None)]
     [row] = rows(swarm_web.subject, "image_update_refused")
-    assert row["detail"]["reason"] == "credential_missing"
+    assert row["detail"]["reason"] == "credential_unavailable"
     assert swarm_web.image() == OLD_IMAGE
+
+
+async def test_a_service_that_needs_authentication_is_refused_once_and_then_held(
+    swarm: Any, swarm_web: Built
+) -> None:
+    await swarm.db.execute("DELETE FROM image_credential_binding")
+    swarm_web.manifests.default = ManifestCheckKind.AUTHENTICATION
+    _, job = await swarm_web.subject.rule(SERVICE, UPDATE)
+
+    first = await swarm_web.subject.run(job)
+    swarm_web.subject.advance(10)
+    held = await swarm_web.subject.run(job)
+
+    assert (first.outcome, first.reason) == ("failure", "authentication_required")
+    [row] = rows(swarm_web.subject, "image_update_refused")
+    assert row["detail"]["reason"] == "authentication_required"
+    assert (held.outcome, counts(held)["held"]) == ("success", 1)
+    assert len(rows(swarm_web.subject, "image_update_refused")) == 1
+    assert swarm_web.host.mutating() == []
+
+
+async def test_a_service_whose_bound_set_was_deleted_is_updated_anonymously_and_counted(
+    swarm: Any, swarm_web: Built
+) -> None:
+    await mark_missing(swarm.db, swarm_web.set_id)
+    _, job = await swarm_web.subject.rule(SERVICE, UPDATE)
+
+    result = await swarm_web.subject.run(job)
+
+    assert result.outcome == "success"
+    assert counts(result)["anonymous_fallback"] == 1
+    assert rows(swarm_web.subject, "image_update_refused") == []
+    assert len(rows(swarm_web.subject, "service_updated")) == 1
+    [(_, header)] = [h for h in swarm_web.host.auth_headers if h[0] == "update"]
+    assert decode_auth(header or "") == {}
 
 
 def make_unpinned(built: Built) -> None:

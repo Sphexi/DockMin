@@ -82,9 +82,7 @@ FORM_FIELD: Final = re.compile(
     r"name|compose_file|variables|files|variable-[0-9]{1,4}-(?:name|value)"
     r"|file-[0-9]{1,4}-(?:name|content)"
 )
-CREDENTIAL_REASONS: Final = frozenset(
-    {"credential_choice_required", "credential_missing", "credential_unavailable"}
-)
+CREDENTIAL_REASONS: Final = frozenset({"credential_choice_required", "credential_unavailable"})
 TITLES: Final = {
     "invalid_compose": "Docker Compose rejected the file",
     "refused_construct": "The file uses something dockmin does not allow",
@@ -98,7 +96,6 @@ TITLES: Final = {
     "built_image_missing": "The built image is missing",
     "secret_in_build_arg": "A build argument holds a secret",
     "credential_choice_required": "Choose how to pull the images",
-    "credential_missing": "A credential set is missing",
     "credential_unavailable": "A credential set cannot be used",
     "secrets_unreadable": "A stored secret cannot be read",
     "file_missing": "The file names a file that is not added",

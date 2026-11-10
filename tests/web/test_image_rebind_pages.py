@@ -11,7 +11,6 @@ from app.registry_client.manifests import ManifestCheckKind
 from app.services.image_bindings import (
     REBIND_CHANGED,
     REBIND_PINNED,
-    REBIND_REGISTRY_NOT_CONFIGURED,
     REBIND_UNBOUND,
 )
 from app.web.csrf import CSRF_FORM_FIELD
@@ -29,17 +28,17 @@ from tests.web.image_support import (
     make_set,
     text_of,
 )
-from tests.web.registry_support import create_set, custom_form, leaks, rendered
+from tests.web.registry_support import leaks, rendered
 
 OK, SEE_OTHER, BAD_REQUEST, NOT_FOUND, CONFLICT = 200, 303, 400, 404, 409
 REFERENCE = "registry.example.com/app:1"
 GHCR_REFERENCE = "ghcr.io/o/app:2"
-ANONYMOUS_REFERENCE = "docker.io/library/nginx:1"
 PINNED = f"registry.example.com/app@sha256:{'1' * 64}"
 SECRET = "rebind-page-secret-marker-6641"
 SECRET_USER = "rebind-page-user-marker"
 ANONYMOUS = "anonymous"
 SUCCESS_NOTICE = "The binding now uses the chosen credential set."
+REMOVED_NOTICE = "The binding was removed."
 AUTHENTICATION_MESSAGE = "The registry refused access"
 REBOUND = "image_rebound"
 
@@ -92,7 +91,7 @@ async def test_the_page_shows_the_reference_the_current_binding_and_the_sets_tha
     assert page.status_code == OK
     assert page.headers["cache-control"] == "no-store"
     assert REFERENCE in text and "Bound to original" in text
-    assert "Verify and rebind" in text and "Pull the image instead" in text
+    assert "Verify and change binding" in text and "Pull the image instead" in text
     assert any(link.startswith(pull) for link in links_in(page))
     assert checked_values(page.text, "credential_choice") == [str(original)]
     assert offered_choices(page) == {str(original), str(replacement), ANONYMOUS}
@@ -138,17 +137,19 @@ async def test_a_set_the_registry_refuses_leaves_the_binding_and_explains_beside
     assert (event["result"], event["detail"]["reason"]) == ("failure", "authentication")
 
 
-async def test_an_anonymous_choice_is_refused_where_no_set_at_the_registry_is_granted(
+async def test_an_anonymous_choice_removes_the_binding_without_asking_the_registry(
     admin_client: AsyncClient, world: World, manifests: ScriptedManifests
 ) -> None:
-    ungranted = await create_set(admin_client, custom_form(admin_client, "ungranted"))
-    await bind(world, ungranted, REFERENCE)
+    await bound_pair(admin_client, world)
     form = await reviewed_form(admin_client, world, credential_choice=ANONYMOUS)
 
     response = await admin_client.post(rebind_path(world), data=form)
 
-    assert response.status_code == BAD_REQUEST
-    assert REBIND_REGISTRY_NOT_CONFIGURED in text_of(response)
+    async with world.app.state.database.session() as db:
+        remaining = await binding_rows(db)
+    assert response.status_code == SEE_OTHER
+    assert REMOVED_NOTICE in await landed_texts(admin_client, response)
+    assert remaining == []
     assert manifests.calls == []
 
 
@@ -185,10 +186,28 @@ async def test_a_credential_missing_binding_is_repaired_from_the_page(
 
     async with world.app.state.database.session() as db:
         [binding] = await binding_rows(db)
-    assert "Credential set deleted" in text_of(page)
-    assert checked_values(page.text, "credential_choice") == []
+    assert "Bound set deleted" in text_of(page)
+    assert "was bound to was deleted, so updates use anonymous access." in text_of(page)
+    assert checked_values(page.text, "credential_choice") == [ANONYMOUS]
     assert response.status_code == SEE_OTHER, text_of(response)
     assert (binding["state"], binding["registry_credential_id"]) == ("bound", replacement)
+
+
+async def test_a_binding_whose_registry_address_changed_says_so_instead_of_deleted(
+    admin_client: AsyncClient, world: World, manifests: ScriptedManifests
+) -> None:
+    original, _ = await bound_pair(admin_client, world)
+    async with world.app.state.database.session() as db:
+        await mark_missing(db, original)
+        await db.execute("UPDATE image_credential_binding SET missing_reason = 'address_changed'")
+
+    page = await review(admin_client, world)
+
+    assert "Registry address changed" in text_of(page)
+    assert "address of the credential set this image was bound to changed, so updates" in text_of(
+        page
+    )
+    assert "was deleted" not in text_of(page)
 
 
 @pytest.mark.parametrize(
@@ -233,12 +252,11 @@ async def test_the_list_offers_a_change_link_to_administrators_only(
 ) -> None:
     alpha = await make_set(admin_client, world, "alpha", address="ghcr.io")
     await bind(world, alpha, GHCR_REFERENCE)
-    await bind(world, None, ANONYMOUS_REFERENCE)
 
     by_admin = await admin_client.get(images_path(world))
     by_standard = await standard_client.get(images_path(world))
 
-    assert unescape(by_admin.text).count("Change the credential set of") == 2
+    assert unescape(by_admin.text).count("Change the credential set of") == 1
     assert "Change the credential set of" not in by_standard.text
 
 

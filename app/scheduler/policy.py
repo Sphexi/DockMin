@@ -180,7 +180,7 @@ def failures_after(current: int, outcome: str) -> int:
     match outcome:
         case "failure":
             return current + 1
-        case "success" | "partial":
+        case "success":
             return 0
         case _:
             return current

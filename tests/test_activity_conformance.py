@@ -68,7 +68,7 @@ SELF_RECORDING = frozenset(
 
 NOT_AUDITED: Mapping[str, str] = {
     "app/services/navigation.py:remember_navigation": ("display preference; grants nothing"),
-    "app/services/anonymous_bindings.py:AnonymousBindingService.apply": (
+    "app/services/bulk_bindings.py:BulkBindingService.apply": (
         "binds each confirmed reference through bind_verified, one audited image_bound "
         "operation each"
     ),

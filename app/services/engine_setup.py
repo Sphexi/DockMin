@@ -10,7 +10,7 @@ from app.db.engine import Database
 from app.db.repositories.clocked import Clock
 from app.docker_engine.registry import EngineClientRegistry
 from app.docker_engine.transport import configure_tls_workdir
-from app.services.anonymous_binding_store import AnonymousBindingReviewStore
+from app.services.bulk_binding_store import BulkBindingReviewStore
 from app.services.compose_setup import ComposeRuntime
 from app.services.container_import_store import PreparedContainerStore
 from app.services.environment_connector import ProbeCoordinator
@@ -56,9 +56,7 @@ class EngineRuntime:
     stack_jobs: StackJobRegistry = field(default_factory=StackJobRegistry)
     host_reads: HostReadStash = field(default_factory=HostReadStash)
     onboarding_reviews: OnboardingReviewStore = field(default_factory=OnboardingReviewStore)
-    anonymous_binding_reviews: AnonymousBindingReviewStore = field(
-        default_factory=AnonymousBindingReviewStore
-    )
+    bulk_binding_reviews: BulkBindingReviewStore = field(default_factory=BulkBindingReviewStore)
     volume_imports: VolumeImportStore = field(default_factory=VolumeImportStore)
     stack_imports: StackImportStore = field(default_factory=StackImportStore)
     imported_volumes: ImportedVolumes = field(default_factory=ImportedVolumes)

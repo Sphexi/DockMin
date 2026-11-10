@@ -55,7 +55,6 @@ from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectBusy
 from app.services.pull_credentials import (
     CHOICE_FIELD,
-    BindingCredentialMissing,
     SeenBinding,
     SeenState,
 )
@@ -221,7 +220,7 @@ def _failure_of(error: Exception, services: ImageServices, actor: Principal) -> 
         return Failure(404, "The image no longer exists", str(error))
     if isinstance(error, EngineRefused):
         return Failure(502, "Docker refused the action", str(error))
-    if isinstance(error, BindingCredentialMissing | CredentialSetUnavailable):
+    if isinstance(error, CredentialSetUnavailable):
         return Failure(409, "The credential set cannot be used", str(error))
     return Failure(503, *unreachable_copy(error))
 
@@ -276,11 +275,11 @@ def _unavailable(
 
 
 def _is_checkable(reference: ImageReferenceView) -> bool:
-    return reference.kind == "tag" and reference.binding.state in ("bound", "anonymous")
+    return reference.kind == "tag"
 
 
 def _checkable(rows: Sequence[ImageRow]) -> list[str]:
-    """Collect the bound tag references of a page, at most as many as one check accepts."""
+    """Collect the tag references of a page, at most as many as one check accepts."""
     found = [ref.key for row in rows for ref in row.references if _is_checkable(ref)]
     return found[:MAX_CHECK_REFERENCES]
 
@@ -400,7 +399,7 @@ async def list_images(
         {
             **results,
             "environment": environment,
-            "can_bind_anonymously": actor.is_administrator,
+            "can_bind_unbound": actor.is_administrator,
             "q": filters.q or "",
             "dangling": filters.dangling or "",
             "usage": filters.usage or "",
@@ -560,7 +559,7 @@ async def start_pull(
         job_id = start_pull_job(request.app, actor, environment_id, plan)
     except ValidationFailed as invalid:
         return await again(400, fields=invalid.fields)
-    except (BindingCredentialMissing, CredentialSetUnavailable) as refused:
+    except CredentialSetUnavailable as refused:
         return await again(409, error=str(refused))
     except TooManyJobs as busy:
         return await again(429, error=str(busy))
@@ -1050,7 +1049,7 @@ async def rebind_form(
     environment_id: PathId,
     reference: Annotated[str, Query(max_length=FIELD_MAX)] = "",
 ) -> Response:
-    """Choose another credential set for a bound or anonymous reference without pulling it."""
+    """Choose another credential set for a bound reference, or remove its binding."""
     return await _rebind_page(request, images, environments, actor, environment_id, reference)
 
 
@@ -1067,7 +1066,7 @@ async def run_rebind(
     expected_state: Field = "",
     expected_set: Field = "",
 ) -> Response:
-    """Verify the chosen set with the registry and point the reference's binding at it."""
+    """Verify the chosen set and point the binding at it, or remove the binding."""
 
     async def again(status_code: int, **extra: Any) -> Response:
         return await _rebind_page(
@@ -1129,7 +1128,14 @@ async def run_rebind(
     return redirect(
         request,
         _list_path(request, environment_id),
-        [Flash("ok", "The binding now uses the chosen credential set.")],
+        [
+            Flash(
+                "ok",
+                "The binding was removed."
+                if choice.credential_set_id is None
+                else "The binding now uses the chosen credential set.",
+            )
+        ],
     )
 
 
@@ -1397,7 +1403,7 @@ async def start_push(
         job_id = start_push_job(request.app, actor, environment_id, plan)
     except ValidationFailed as invalid:
         return await again(400, fields=invalid.fields)
-    except (BindingCredentialMissing, CredentialSetUnavailable) as refused:
+    except CredentialSetUnavailable as refused:
         return await again(409, error=str(refused))
     except TooManyJobs as busy:
         return await again(429, error=str(busy))

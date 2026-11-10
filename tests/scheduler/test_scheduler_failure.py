@@ -129,8 +129,16 @@ async def test_a_skipped_run_leaves_the_failure_counter(rig: Rig) -> None:
     assert (await rig.job_row(job)).consecutive_failures == 2
 
 
-@pytest.mark.parametrize("outcome", ["success", "partial"])
-async def test_a_success_or_partial_result_resets_the_counter(rig: Rig, outcome: str) -> None:
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        pytest.param("success", 0, id="success-resets"),
+        pytest.param("partial", 3, id="partial-keeps"),
+    ],
+)
+async def test_a_success_resets_the_counter_and_a_partial_result_keeps_it(
+    rig: Rig, outcome: str, expected: int
+) -> None:
     job = await rig.rule_job("r", next_run=at(60))
     rig.sql("UPDATE scheduled_job SET consecutive_failures = 3 WHERE id = ?", (job,))
     handler = ScriptedHandler()
@@ -145,7 +153,39 @@ async def test_a_success_or_partial_result_resets_the_counter(rig: Rig, outcome:
     await scheduler.tick()
     await scheduler.idle()
 
-    assert (await rig.job_row(job)).consecutive_failures == 0
+    assert (await rig.job_row(job)).consecutive_failures == expected
+
+
+async def test_a_partial_rule_run_records_a_notifiable_row_with_the_reason(rig: Rig) -> None:
+    rule = await rig.rule("nightly", owner=rig.user("owner"), environment_id=rig.environment())
+    job = await rig.job(rule_id=rule, next_run=at(3600), threshold=THRESHOLD)
+    handler = ScriptedHandler()
+
+    async def partly(dispatch: Any) -> RunResult:
+        return RunResult("partial", attempted=2, reason="authentication_required")
+
+    handler.behaviour = partly
+    scheduler = rig.scheduler(handler)
+    run = await rig.start_run(job, "schedule")
+
+    scheduler.start_claimed(run)
+    await scheduler.idle()
+
+    [event] = rig.events("automation_run_partial")
+    assert (event["actor_subsystem"], event["result"], event["job_run_id"]) == (
+        "stack-restarter",
+        "failure",
+        run.id,
+    )
+    assert detail_of(event) == {
+        "rule_id": rule,
+        "rule_name": "nightly",
+        "reason": "authentication_required",
+    }
+    assert [
+        raised.key for raised in match(event["action"], event["result"], event["actor_subsystem"])
+    ] == ["automation_run_failed"]
+    assert rig.events("automation_run_failed") == []
 
 
 async def test_reaching_the_threshold_disables_the_job_and_records_who_and_why(rig: Rig) -> None:

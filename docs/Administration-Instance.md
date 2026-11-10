@@ -181,7 +181,7 @@ The Instance page shows the message and no button. The checks run again at the c
 | Item | Behaviour |
 |---|---|
 | Registry | The registry of dockmin's own image reference |
-| Credentials | A credential set the administrator may use at that address, or none. With none, a credential set at that address must be granted to the environment dockmin runs in. Otherwise: `No credential set for {address} is granted to this environment. Add one under Registries and grant it to the environment, then check again.` |
+| Credentials | A credential set the administrator may use at that address, or none. With none, the check is anonymous and needs no registry entry. A registry that refuses it shows the failure of the check |
 | Same tag | A manifest `HEAD` of the running tag. When its digest differs from the digest of the running image, the tag is offered as `The running tag at a new digest` |
 | Pinned reference | A reference that names a digest is not compared. `The image is pinned to a digest, so only newer release tags are offered.` |
 | Newer tags | `GET /v2/<repository>/tags/list` with 200 tags per page, at most 10 pages. Paging follows the registry's `Link` header on the same host only. Each page is at most 256 KiB |

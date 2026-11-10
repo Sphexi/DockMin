@@ -56,7 +56,6 @@ from app.services.image_bindings import RebindRefused
 from app.services.object_inspector import ContainerTooLarge, EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectBusy
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoice,
     CredentialChoiceRequired,
     CredentialSetMismatch,
@@ -534,8 +533,6 @@ async def recreate_container(
             reason="credential_choice_required",
             candidates=candidates,
         )
-    except BindingCredentialMissing as missing:
-        return _problem(HTTPStatus.CONFLICT, str(missing), reason="credential_missing")
     except (CredentialSetUnavailable, CredentialSetMismatch) as unavailable:
         return _problem(HTTPStatus.CONFLICT, str(unavailable), reason="credential_unavailable")
     except SubmissionRejected as refused:

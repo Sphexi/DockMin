@@ -54,12 +54,14 @@ from app.subsystems.container_updater import (
     REFRESHED,
     REFUSALS,
     REFUSED_ACTION,
+    RETIRED_REFUSALS,
     SIGNATURE_LIMIT,
     TARGET_MISSING,
     _Pass,
     _pull_refusal,
     _Refusal,
     _refusal_reason,
+    check_failure,
     credential_refusals,
     refusal_signature,
 )
@@ -364,12 +366,18 @@ class SwarmPass:
         for member in tagged:
             reference, deployed = _pair_of(member)
             status = statuses[(reference, deployed)]
+            if status.anonymous_fallback:
+                counts["anonymous_fallback"] += 1
             refusal = _refusal_reason(status)
             if refusal is not None:
                 if host.planning_update:
                     judged.append(_Judged(member, reference, status, refusal, False))
                 else:
-                    counts["unknown"] += 1
+                    tally.count("failed", reason=refusal)
+                continue
+            failure = check_failure(status)
+            if failure is not None:
+                tally.count("failed", reason=failure)
                 continue
             match status.state:
                 case "update_available" if _usable(status, deployed):
@@ -653,6 +661,8 @@ class SwarmPass:
             return True
         for item in signature.split(","):
             reference, _, reason = item.rpartition("=")
+            if reason in RETIRED_REFUSALS:
+                continue
             if not reference or reason not in REFUSALS or await self._still_refused(reference):
                 return True
         return False

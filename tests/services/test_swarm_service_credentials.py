@@ -94,7 +94,7 @@ async def test_the_chosen_set_is_used_and_an_anonymous_choice_sends_no_login(
 
     assert named["username"] == "user-second"
     assert last_auth(swarm, "create") is None
-    assert [b["registry_credential_id"] for b in await binding_rows(swarm.db)] == [chosen, None]
+    assert [b["registry_credential_id"] for b in await binding_rows(swarm.db)] == [chosen]
 
 
 async def test_the_registry_secret_appears_in_no_row_and_the_header_does_reach_the_engine(

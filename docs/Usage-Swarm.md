@@ -409,7 +409,7 @@ A create, or an edit that changes the image, resolves the credentials for the im
 
 | Step | Behaviour |
 |---|---|
-| 1. Credentials | The set is chosen by the rules of [Which set a pull uses](Usage-Images#which-set-a-pull-uses). The create form and the review of an edit that changes the image show the [credential picker](Administration-Registries#the-credential-picker), which sends an explicit choice; with JavaScript, changing the image field fetches it without a page load (`POST …/swarm/services/new/choices`). Without a choice and with several fitting sets the form is rendered again with the picker (`400`). A deleted bound set is refused (`409`). A set the user or environment cannot use is refused (`409`). A standard user's choice that differs from the existing binding is refused (`400`, reason `restricted`) beside the image field: `Only an administrator can change which credential set this image uses.` |
+| 1. Credentials | The set is chosen by the rules of [Which set a pull uses](Usage-Images#which-set-a-pull-uses). The create form and the review of an edit that changes the image show the [credential picker](Administration-Registries#the-credential-picker), which sends an explicit choice; with JavaScript, changing the image field fetches it without a page load (`POST …/swarm/services/new/choices`). Without a choice and with several fitting sets the form is rendered again with the picker (`400`). A set the user or environment cannot use is refused (`409`). A standard user's choice that differs from the existing binding is refused (`400`, reason `restricted`) beside the image field: `Only an administrator can change which credential set this image uses.` |
 | 2. Digest | dockmin asks the registry, with the same credentials, for the digest of the reference. The service is stored with the reference followed by `@sha256:` and the digest, so every node runs one image. The service page shows `Pinned to a digest` |
 | 2. No digest | When the lookup fails, the service is created or updated with the image as typed. The page warns `The image could not be pinned to a digest, so nodes may run different images of this tag.` The row records `digest_pinned` as `false` |
 | 2. Digest given | A reference that already names a digest is not looked up |
@@ -423,7 +423,7 @@ A create, or an edit that changes the image, resolves the credentials for the im
 | Edit that keeps the image | None. Swarm reuses the credentials stored with the service |
 | Scale, force update | None. Swarm reuses the stored credentials |
 | Roll back | None. Swarm uses the credentials stored with the previous configuration |
-| Image update by `container-updater` | Always sent explicitly: the bound set's credential, or the empty credential for an anonymous binding |
+| Image update by `container-updater` | Always sent explicitly: the bound set's credential, or the empty credential for an image with no binding or a `credential_missing` binding |
 | Credential renewal by `container-updater` | Always sent explicitly: the bound set's credential |
 
 - Swarm keeps the credential with the service and hands it to the nodes that pull the image. Docker does not return it, and dockmin never shows it, stores it in a row, or writes it to a log.
@@ -1085,7 +1085,7 @@ Access tab changes and image bindings are recorded as for other objects ([Record
 | `config_in_use`, `secret_in_use` | Services reference the object |
 | `not_replicated` | Scale of a service that is not replicated |
 | `no_previous_spec` | Roll back of a service with no previous configuration |
-| `credential_choice_required`, `credential_missing`, `credential_unavailable` | The credential errors of [Images and registry credentials](#images-and-registry-credentials) |
+| `credential_choice_required`, `credential_unavailable` | The credential errors of [Images and registry credentials](#images-and-registry-credentials) |
 | `update_paused`, `tasks_not_running`, `rolled_back_by_swarm`, `rollback_paused`, `unverifiable`, `interrupted` | `service_updated` by `container-updater`: how the watched rollout ended ([Verification of a service update](Operations-Automation#verification-of-a-service-update)) |
 | `update_in_progress`, `legacy_networks` | `service_credentials_refreshed`: a rollout is running or paused; the legacy `Networks` setting cannot be sent unchanged |
 | `self_protected` | The service, Swarm stack or node runs the container dockmin runs in |

@@ -133,7 +133,7 @@ async def test_a_finished_job_streams_one_last_event_and_its_page_shows_how_it_e
     assert LAYER in streamed.body
     assert world.app.state.engine.stream_slots.open_count == 0
     assert "Succeeded" in text_of(success_page)
-    assert "A binding was created for this reference." in text_of(success_page)
+    assert "A binding was created for this reference." not in text_of(success_page)
     assert f"{images_path(world)}/{'5' * 64}" in success_page.text
     assert "Refresh status" not in success_page.text and "Cancel pull" not in success_page.text
     assert "data-job-stream" not in success_page.text

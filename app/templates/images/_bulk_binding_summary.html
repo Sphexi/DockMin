@@ -1,0 +1,37 @@
+{% from "partials/badge.html" import badge %}
+
+{% macro summary_block(summary, changed_message) %}
+{% set labels = {"bound": ("Bound", "ok"), "skipped": ("Skipped", "warn"), "failed": ("Failed", "danger"), "left": ("Left unbound", "neutral")} %}
+<section class="section" aria-labelledby="summary-heading">
+  <h2 id="summary-heading">Latest apply</h2>
+  <div class="panel" role="status">
+    <p>{{ summary.count("bound") }} bound, {{ summary.count("skipped") }} skipped, {{ summary.count("failed") }} failed, {{ summary.changed|length }} changed{% if summary.count("left") %}, {{ summary.count("left") }} left unbound{% endif %} at {{ summary.registries|join(", ") }}.</p>
+    <p>Each image was handled on its own and has its own entry in the activity log. Nothing was pulled and nothing on the host changed.</p>
+  </div>
+  {% for address in summary.changed %}
+  <div class="panel panel--notice" role="note">
+    <p><span class="mono">{{ address }}</span>: {{ changed_message }}</p>
+  </div>
+  {% endfor %}
+  {% if summary.items %}
+  <div class="data-table__scroll" role="region" aria-label="Result for each image" tabindex="0">
+    <table class="table">
+      <caption class="visually-hidden">Result for each image</caption>
+      <thead>
+        <tr><th scope="col">Reference</th><th scope="col">Result</th><th scope="col">Detail</th></tr>
+      </thead>
+      <tbody>
+        {% for item in summary.items %}
+        {% set shown = labels[item.status] %}
+        <tr>
+          <th scope="row" class="cell-wrap mono">{{ item.display }}</th>
+          <td>{{ badge(shown[0], shown[1]) }}</td>
+          <td>{{ item.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endmacro %}

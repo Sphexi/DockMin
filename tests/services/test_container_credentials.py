@@ -6,11 +6,7 @@ import pytest
 
 from app.auth.errors import PermissionDenied
 from app.services.container_provisioning import ConfigurationRejected, PullFailed
-from app.services.pull_credentials import (
-    BindingCredentialMissing,
-    CredentialChoice,
-    CredentialChoiceRequired,
-)
+from app.services.pull_credentials import CredentialChoice, CredentialChoiceRequired
 from tests.access_support import ADMIN, ENV_A, STANDARD, container_id
 from tests.auth_support import STANDARD_ID
 from tests.docker_engine.container_engine import ENGINE_TEXT
@@ -200,7 +196,7 @@ async def test_a_standard_user_cannot_change_the_set_a_reference_is_bound_to_by_
     assert (await binding_rows(image_rig.db))[0]["registry_credential_id"] == bound
 
 
-async def test_an_anonymous_choice_pulls_without_credentials_and_binds_anonymously(
+async def test_an_anonymous_choice_pulls_without_credentials_and_binds_nothing(
     image_rig: ImageRig,
 ) -> None:
     await register(image_rig, "first")
@@ -210,10 +206,9 @@ async def test_an_anonymous_choice_pulls_without_credentials_and_binds_anonymous
         ADMIN, ENV_A, registry_form(), credential_choice=CredentialChoice(None)
     )
 
-    [binding] = await binding_rows(image_rig.db)
     [pull] = image_rig.host.calls("POST", "/images/create")
     assert "x-registry-auth" not in pull.headers
-    assert (binding["registry_credential_id"], binding["state"]) == (None, "bound")
+    assert await binding_rows(image_rig.db) == []
 
 
 async def test_recreate_with_a_pull_uses_the_bound_set_when_two_sets_share_the_host(
@@ -258,7 +253,7 @@ async def test_recreate_with_a_pull_of_an_unbound_image_and_two_sets_asks_and_ch
     assert image_rig.host.mutations() == []
 
 
-async def test_recreate_with_a_pull_of_a_credential_missing_image_needs_an_administrators_choice(
+async def test_recreate_with_a_pull_of_a_credential_missing_image_asks_like_an_unbound_one(
     image_rig: ImageRig,
 ) -> None:
     seed_registry_container(image_rig)
@@ -267,7 +262,7 @@ async def test_recreate_with_a_pull_of_a_credential_missing_image_needs_an_admin
     await bind_image(image_rig.db, gone, ENV_A)
     await mark_missing(image_rig.db, gone)
 
-    with pytest.raises(BindingCredentialMissing):
+    with pytest.raises(CredentialChoiceRequired):
         await image_rig.containers.recreation.recreate(
             ADMIN, ENV_A, OLD, expected_name="web", pull=True
         )

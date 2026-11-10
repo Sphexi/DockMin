@@ -139,8 +139,6 @@ async def test_any_local_digest_of_the_repository_counts_as_current(
     image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
 ) -> None:
     manifests.default = REMOTE
-    await bind_image(image_rig.db, None, ENV_A)
-    await register(image_rig, "granted")
     repository = REFERENCE.rpartition(":")[0]
     image_rig.host.add_image(
         REFERENCE, full_id(IMAGE), digests=(f"{repository}@{LOCAL}", f"{repository}@{REMOTE}")
@@ -192,26 +190,41 @@ async def test_a_reference_that_is_not_on_any_image_has_no_local_digest(
 async def test_a_reference_pinned_by_digest_is_pinned_and_never_checked(
     image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
 ) -> None:
-    await bind_image(image_rig.db, None, ENV_A, PINNED)
-
     [status] = await check(service, [PINNED])
 
     assert status.state == "pinned"
     assert manifests.calls == []
 
 
-async def test_a_reference_with_no_binding_is_not_bound_and_never_checked(
+async def test_an_unbound_reference_is_checked_anonymously_at_its_own_registry_without_an_entry(
     image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
 ) -> None:
+    manifests.answers[NOT_CONFIGURED] = LOCAL
+    pulled(image_rig, NOT_CONFIGURED)
+    pulled(image_rig, SECOND)
+
+    matching, newer = await check(service, [NOT_CONFIGURED, SECOND])
+
+    [(target, _, login), (other_target, _, _)] = manifests.calls
+    assert (matching.state, matching.anonymous_fallback) == ("up_to_date", False)
+    assert (newer.state, newer.remote_digest) == ("update_available", REMOTE)
+    assert login is None
+    assert (target.address, target.verify_tls, target.ca_bundle) == (UNREACHABLE_NAME, True, None)
+    assert other_target.address == ADDRESS
+
+
+async def test_an_anonymous_check_the_registry_refuses_for_authentication_asks_for_a_binding(
+    image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
+) -> None:
+    manifests.default = ManifestCheckKind.AUTHENTICATION
     pulled(image_rig)
 
     [status] = await check(service)
 
-    assert status.state == "not_bound"
-    assert manifests.calls == []
+    assert (status.state, status.reason) == ("unknown", "authentication_required")
 
 
-async def test_a_credential_missing_binding_is_unknown_and_never_checked(
+async def test_a_credential_missing_binding_is_checked_anonymously_and_marked(
     image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
 ) -> None:
     gone = await register(image_rig, "gone")
@@ -221,8 +234,10 @@ async def test_a_credential_missing_binding_is_unknown_and_never_checked(
 
     [status] = await check(service)
 
-    assert (status.state, status.reason) == ("unknown", "credential_missing")
-    assert manifests.calls == []
+    [(_, _, login)] = manifests.calls
+    assert (status.state, status.anonymous_fallback) == ("update_available", True)
+    assert status.missing_reason == "deleted"
+    assert login is None
 
 
 async def test_a_bound_set_is_the_only_one_asked_and_its_login_and_address_are_used(
@@ -283,48 +298,6 @@ async def test_a_bound_set_whose_address_no_longer_matches_is_unknown_and_never_
 
     assert (status.state, status.reason) == ("unknown", "credential_mismatch")
     assert manifests.calls == []
-
-
-async def test_an_anonymous_binding_to_a_registry_no_granted_set_names_never_connects(
-    image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
-) -> None:
-    await register(image_rig, "elsewhere", address=OTHER_ADDRESS)
-    await bind_image(image_rig.db, None, ENV_A, NOT_CONFIGURED)
-    pulled(image_rig, NOT_CONFIGURED)
-
-    [status] = await check(service, [NOT_CONFIGURED])
-
-    assert (status.state, status.reason) == ("unknown", "registry_not_configured")
-    assert manifests.calls == []
-
-
-async def test_a_set_at_the_address_that_is_not_granted_to_the_environment_does_not_enable_it(
-    image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
-) -> None:
-    await register(image_rig, "ungranted", environments=())
-    await bind_image(image_rig.db, None, ENV_A)
-    pulled(image_rig)
-
-    [status] = await check(service)
-
-    assert status.reason == "registry_not_configured"
-    assert manifests.calls == []
-
-
-async def test_an_anonymous_binding_at_a_granted_address_is_checked_without_a_login_and_verified(
-    image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
-) -> None:
-    await register(image_rig, "granted")
-    await image_rig.db.execute("UPDATE registry_credential SET verify_tls = 1, ca_bundle = NULL")
-    await bind_image(image_rig.db, None, ENV_A)
-    pulled(image_rig)
-
-    [status] = await check(service)
-
-    [(target, _, login)] = manifests.calls
-    assert status.state == "update_available"
-    assert login is None
-    assert (target.address, target.verify_tls, target.ca_bundle) == (ADDRESS, True, None)
 
 
 async def test_an_unparsable_reference_is_unknown_and_the_others_are_still_checked(
@@ -522,7 +495,7 @@ async def test_a_user_running_the_most_checks_a_user_may_is_refused_another_and_
     manifests.gate.set()
     await first
 
-    assert other[0].state == "not_bound"
+    assert (other[0].state, other[0].reason) == ("unknown", "no_local_digest")
 
 
 async def test_a_finished_request_frees_the_users_slot(image_rig: ImageRig, build: Build) -> None:
@@ -531,7 +504,7 @@ async def test_a_finished_request_frees_the_users_slot(image_rig: ImageRig, buil
     await check(service, who=STANDARD)
     statuses = await check(service, who=STANDARD)
 
-    assert statuses[0].state == "not_bound"
+    assert (statuses[0].state, statuses[0].reason) == ("unknown", "no_local_digest")
 
 
 async def test_the_check_logs_counts_only(

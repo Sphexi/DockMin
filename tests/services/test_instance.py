@@ -441,7 +441,6 @@ class TestRestartDuringAnUpdate:
             health_timeout_seconds=HEALTH_SECONDS,
             bindings=cast(Any, None),
             resolver=cast(Any, None),
-            granted=cast(Any, None),
             manifests=cast(Any, None),
             checks=cast(Any, None),
             settings=cast(Any, None),

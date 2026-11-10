@@ -13,7 +13,7 @@
     {% if job.running %}
     <progress class="progress-panel__bar" aria-label="Review progress">Working</progress>
     <p class="job__summary" role="status">
-      {% if job.progress.stages %}Sending one manifest HEAD request for each unbound image{% else %}Starting{% endif %}.
+      {% if job.progress.stages %}Sending manifest HEAD requests for each unbound image{% else %}Starting{% endif %}.
     </p>
     {% endif %}
     {% if job.outcome %}
@@ -22,7 +22,7 @@
     </div>
     {% endif %}
   </div>
-  <p>The review reads the host's image list and sends HEAD requests only. Nothing is pulled and nothing is written until you confirm a registry.</p>
+  <p>The review reads the host's image list and sends HEAD requests only, one for each credential set granted at an image's registry. Nothing is pulled and nothing is written until you confirm.</p>
   {% if job.running %}
   <p class="field__help">This page updates itself while the review runs, and opens the review when it is ready. Without script it reloads every few seconds.</p>
   <p class="job__refresh"><a class="btn" href="{{ job_href }}">Refresh status</a></p>

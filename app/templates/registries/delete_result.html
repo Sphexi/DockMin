@@ -11,7 +11,7 @@
 </div>
 {% if bindings %}
 <div class="panel panel--notice" role="note">
-  <p>{{ bindings }} {{ "image now reads" if bindings == 1 else "images now read" }} "Credential set deleted". Automatic updates for {{ "it" if bindings == 1 else "them" }} stop until each is pulled again with another credential set.</p>
+  <p>{{ bindings }} {{ "image now reads" if bindings == 1 else "images now read" }} "Bound set deleted". {{ "It is" if bindings == 1 else "They are" }} checked and updated anonymously until each is pulled again with another credential set.</p>
 </div>
 {% endif %}
 {% endblock %}

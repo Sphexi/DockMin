@@ -13,7 +13,6 @@ from app.services.image_views import ImageChangedSinceReview, ImagePullFailed, I
 from app.services.object_inspector import EnvironmentUnavailable
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoice,
     CredentialChoiceRequired,
 )
@@ -133,19 +132,15 @@ async def test_a_pull_writes_a_pull_row_and_a_bound_row_that_carry_the_set_and_n
     assert pulled["environment_id"] == ENV_A
 
 
-async def test_an_anonymous_pull_sends_no_credentials_and_binds_with_no_set(
+async def test_an_anonymous_pull_sends_no_credentials_and_writes_no_binding(
     image_rig: ImageRig,
 ) -> None:
     outcome = await pull(image_rig, HUB_REFERENCE)
 
-    [row] = await binding_rows(image_rig.db)
     assert auth_of(image_rig, "/images/create") is None
-    assert outcome.binding == "created"
-    assert (row["image_reference"], row["registry_credential_id"], row["state"]) == (
-        HUB_KEY,
-        None,
-        "bound",
-    )
+    assert outcome.binding == "skipped"
+    assert await binding_rows(image_rig.db) == []
+    assert await rows_for(image_rig.db, "image_bound") == []
 
 
 async def test_pulling_a_hub_name_asks_the_daemon_for_the_repository_and_the_tag_separately(
@@ -161,6 +156,7 @@ async def test_a_pull_by_digest_asks_for_the_digest_and_binds_the_repository_dig
     image_rig: ImageRig,
 ) -> None:
     pinned = f"busybox@{digest(3)}"
+    await register(image_rig, "hub", address="docker.io")
 
     outcome = await pull(image_rig, pinned)
 
@@ -250,7 +246,7 @@ async def test_a_standard_user_cannot_rebind_a_bound_reference_and_nothing_is_pu
     assert (await binding_rows(image_rig.db))[0]["registry_credential_id"] == bound
 
 
-async def test_a_standard_user_cannot_repair_a_credential_missing_binding(
+async def test_a_credential_missing_binding_asks_a_standard_user_like_an_unbound_image(
     image_rig: ImageRig,
 ) -> None:
     gone = await register(image_rig, "gone", users=(STANDARD_ID,))
@@ -258,12 +254,13 @@ async def test_a_standard_user_cannot_repair_a_credential_missing_binding(
     await bind_image(image_rig.db, gone, ENV_A)
     await mark_missing(image_rig.db, gone)
 
-    with pytest.raises(BindingCredentialMissing):
+    with pytest.raises(CredentialChoiceRequired):
         await image_rig.images.actions.prepare_pull(STANDARD, ENV_A, REFERENCE)
-    with pytest.raises(RebindRefused):
-        await pull(image_rig, who=STANDARD, choice=CredentialChoice(other))
+    outcome = await pull(image_rig, who=STANDARD, choice=CredentialChoice(other))
 
-    assert (await binding_rows(image_rig.db))[0]["state"] == "credential_missing"
+    [row] = await binding_rows(image_rig.db)
+    assert outcome.binding == "rebound"
+    assert (row["state"], row["registry_credential_id"]) == ("bound", other)
 
 
 async def test_an_administrator_repairs_a_credential_missing_binding_by_pulling_with_another_set(
@@ -514,18 +511,17 @@ async def push(
     return await rig.images.actions.push(who, ENV_A, plan)
 
 
-async def test_a_push_with_no_set_sends_the_empty_auth_document_and_binds_with_the_pushed_digest(
+async def test_a_push_with_no_set_sends_the_empty_auth_document_and_binds_nothing(
     image_rig: ImageRig,
 ) -> None:
     await stage_for_push(image_rig)
 
     outcome = await push(image_rig)
 
-    [row] = await binding_rows(image_rig.db)
     [pushed] = await rows_for(image_rig.db, "image_pushed")
     assert auth_of(image_rig, PUSH_PATH) == ANONYMOUS_AUTH
-    assert (outcome.binding, outcome.digest) == ("created", DAEMON_DIGEST)
-    assert (row["image_reference"], row["observed_digest"]) == (PUSH_TARGET, DAEMON_DIGEST)
+    assert (outcome.binding, outcome.digest) == ("skipped", DAEMON_DIGEST)
+    assert await binding_rows(image_rig.db) == []
     assert (pushed["target_type"], pushed["target_id"]) == ("image", image_id(PUSHED))
     assert pushed["detail"]["digest"] == DAEMON_DIGEST
     assert image_rig.host.calls("POST", PUSH_PATH)[0].query == {"tag": "1"}
@@ -551,6 +547,7 @@ async def test_a_push_names_the_repository_as_the_daemon_holds_it_not_the_canoni
     image_rig: ImageRig,
 ) -> None:
     await stage_for_push(image_rig, f"{TAG_NAME}:1")
+    await register(image_rig, "hub", address="docker.io")
 
     await push(image_rig, reference=f"{TAG_NAME}:1")
 

@@ -11,7 +11,6 @@ import pytest
 
 from app.auth.errors import PermissionDenied, ValidationFailed
 from app.auth.principal import Principal
-from app.config import Settings
 from app.registry_client.manifests import ManifestCheckKind
 from app.registry_client.probe import RegistryLogin, RegistryTarget
 from app.registry_client.references import ImageReference
@@ -19,7 +18,6 @@ from app.services.activity import ActivityRecorder
 from app.services.assembly import build_host_clients, build_image_bindings, build_registry_resolver
 from app.services.image_bindings import (
     REBIND_PINNED,
-    REBIND_REGISTRY_NOT_CONFIGURED,
     REBIND_UNBOUND,
     BindingChangedSinceReview,
     ImageBindingService,
@@ -40,7 +38,6 @@ from tests.image_support import (
 )
 from tests.registry_support import ADDRESS, SECRET, bind_image
 from tests.services.conftest import ImageRig
-from tests.updater_support import ACTION, World, build_world, container
 from tests.web.registry_support import leaks
 
 REBOUND = "image_rebound"
@@ -101,11 +98,6 @@ def manifests(image_rig: ImageRig) -> TransactionProbe:
 @pytest.fixture
 def rebind(image_rig: ImageRig, manifests: TransactionProbe) -> Rebind:
     return rebinder(bindings_over(image_rig, manifests))
-
-
-@pytest.fixture
-async def world(image_rig: ImageRig, settings: Settings) -> World:
-    return await build_world(image_rig, settings)
 
 
 async def review_of(rig: ImageRig) -> SeenBinding:
@@ -169,7 +161,7 @@ async def test_a_rebind_to_a_set_that_authenticates_repoints_the_binding_and_rec
     assert login is not None and login.username == "user-replacement"
 
 
-async def test_a_rebind_to_an_anonymous_pull_checks_the_registry_without_a_login(
+async def test_an_anonymous_choice_removes_the_binding_without_asking_the_registry(
     image_rig: ImageRig, manifests: TransactionProbe, rebind: Rebind
 ) -> None:
     original, _ = await bound_pair(image_rig)
@@ -177,13 +169,24 @@ async def test_a_rebind_to_an_anonymous_pull_checks_the_registry_without_a_login
 
     await rebind(ANONYMOUS, review)
 
-    [row] = await binding_rows(image_rig.db)
     [event] = await rows_for(image_rig.db, REBOUND)
-    [(_, _, login)] = manifests.calls
-    assert (row["registry_credential_id"], row["state"]) == (None, "bound")
+    assert await binding_rows(image_rig.db) == []
+    assert manifests.calls == []
     assert event["detail"]["anonymous"] is True
+    assert event["detail"]["removed"] is True
     assert event["detail"]["previous_credential_set_id"] == original
-    assert login is None
+
+
+async def test_an_anonymous_choice_made_against_a_stale_review_removes_nothing(
+    image_rig: ImageRig, rebind: Rebind
+) -> None:
+    _, replacement = await bound_pair(image_rig)
+    stale = dataclasses.replace(await review_of(image_rig), set_id=replacement)
+
+    with pytest.raises(BindingChangedSinceReview):
+        await rebind(ANONYMOUS, stale)
+
+    assert len(await binding_rows(image_rig.db)) == 1
 
 
 async def test_a_rebind_to_the_set_already_bound_changes_nothing_and_asks_the_registry_nothing(
@@ -270,45 +273,6 @@ async def test_a_credential_missing_binding_is_repaired_by_a_rebind(
     )
     assert event["detail"]["previous_state"] == "credential_missing"
     assert event["detail"]["previous_credential_set_id"] == gone
-
-
-async def test_the_next_updater_run_is_no_longer_refused_for_a_reference_that_was_repaired(
-    image_rig: ImageRig, world: World
-) -> None:
-    gone = (await image_rig.db.fetch_one("SELECT id FROM registry_credential"))["id"]  # type: ignore[index]
-    replacement = await register(image_rig, "replacement")
-    await mark_missing(image_rig.db, gone)
-    rebind = rebinder(bindings_over(image_rig, world.manifests))
-    _, job = await world.rule(container("web"), ACTION)
-    refused = await world.run(job)
-    world.advance(10)
-    held = await world.run(job)
-    await rebind(CredentialChoice(replacement), await review_of(image_rig))
-    world.advance(10)
-
-    repaired = await world.run(job)
-
-    assert (refused.outcome, refused.reason) == ("failure", "credential_missing")
-    assert held.outcome == "success"
-    assert (repaired.outcome, repaired.reason) == ("success", None)
-    assert len(world.rows("image_update_refused")) == 1
-    assert "pull" in world.verbs()
-
-
-async def test_an_anonymous_choice_is_refused_where_no_set_at_the_registry_is_granted(
-    image_rig: ImageRig, manifests: TransactionProbe, rebind: Rebind
-) -> None:
-    ungranted = await register(image_rig, "ungranted", environments=(ENV_B,))
-    await bind_image(image_rig.db, ungranted, ENV_A)
-    review = await review_of(image_rig)
-
-    with pytest.raises(ValidationFailed) as refused:
-        await rebind(ANONYMOUS, review)
-
-    [event] = await rows_for(image_rig.db, REBOUND)
-    assert refused.value.fields == {"credential_choice": REBIND_REGISTRY_NOT_CONFIGURED}
-    assert event["detail"]["reason"] == "registry_not_configured"
-    assert manifests.calls == []
 
 
 @pytest.mark.parametrize(

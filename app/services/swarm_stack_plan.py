@@ -54,7 +54,6 @@ from app.services.object_inspector import (
 )
 from app.services.object_locks import ObjectBusy, ObjectKey, ObjectLockRegistry
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CandidateListTooLarge,
     CredentialChoice,
     CredentialChoiceRequired,
@@ -178,9 +177,7 @@ SWARM_AUTOMATION_REFUSALS: Final = frozenset(
     {"pending_changes", "would_remove", "would_create", "drifted", "unresolved"}
 )
 
-type CredentialRefusal = Literal[
-    "credential_missing", "not_bound", "credential_mismatch", "credential_unavailable"
-]
+type CredentialRefusal = Literal["credential_mismatch", "credential_unavailable"]
 type PlanAction = Literal["create", "update", "remove", "keep"]
 type PlanKind = Literal["network", "config", "secret", "service"]
 type Level = Literal["read", "write"]
@@ -1284,14 +1281,9 @@ class SwarmStackPlanner:
                 )
             except CredentialChoiceRequired as error:
                 problems[reference] = str(error)
-                refused[reference] = "not_bound"
             except CredentialSetMismatch as error:
                 problems[reference] = str(error)
                 refused[reference] = "credential_mismatch"
-            except BindingCredentialMissing as error:
-                problems[reference] = str(error)
-                refused[reference] = "credential_missing"
-                reason = stronger_reason(reason, "credential_missing")
             except CredentialSetUnavailable as error:
                 problems[reference] = str(error)
                 refused[reference] = "credential_unavailable"

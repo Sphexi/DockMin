@@ -129,17 +129,17 @@
 <li>Each call recreates the container from its own configuration with the image it already has. No registry is contacted.</li>
 <li>A container that fails verification is restored to its previous state.</li>
 {% elif target_kind == "service" %}
-<li>Each call checks the service's image at its registry. When a newer version exists it is pulled with the credential set the image is bound to, and the service is updated in place by the rolling update its own update settings define.</li>
+<li>Each call checks the service's image at its registry. When a newer version exists it is pulled with the credential set the image is bound to, or anonymously when it has no binding, and the service is updated in place by the rolling update its own update settings define.</li>
 <li>An update that pauses or leaves fewer tasks running is rolled back to the service's previous configuration.</li>
 {% elif target_kind == "stack" and stack_kind == "swarm" %}
-<li>Each call checks the images of the stack's services at their registries. When one has a newer version it is pulled with the credential set it is bound to, and the stack is redeployed from its deployed file; only services whose image changed are updated. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
+<li>Each call checks the images of the stack's services at their registries. When one has a newer version it is pulled with the credential set it is bound to, or anonymously when it has no binding, and the stack is redeployed from its deployed file; only services whose image changed are updated. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
 {% elif target_kind == "stack" %}
-<li>Each call checks the images of the stack's containers at their registries. When one has a newer version it is pulled with the credential set it is bound to, and the stack is redeployed from its deployed file; only containers whose image changed are recreated. A failed redeploy is not rolled back.</li>
+<li>Each call checks the images of the stack's containers at their registries. When one has a newer version it is pulled with the credential set it is bound to, or anonymously when it has no binding, and the stack is redeployed from its deployed file; only containers whose image changed are recreated. A failed redeploy is not rolled back.</li>
 {% if stack_kind is none %}
 <li>If the name is a Swarm stack instead, it is redeployed from its deployed file; only services whose image changed are updated. A redeploy that would create or remove anything, or overwrite an edit made on a service page, is refused. A redeploy is not rolled back.</li>
 {% endif %}
 {% else %}
-<li>Each call checks the container's image at its registry. When a newer version exists it is pulled with the credential set the image is bound to, and the container is recreated from its own configuration with it.</li>
+<li>Each call checks the container's image at its registry. When a newer version exists it is pulled with the credential set the image is bound to, or anonymously when it has no binding, and the container is recreated from its own configuration with it.</li>
 <li>A container that fails verification is restored to its previous image.</li>
 {% endif %}
 {% if not redeploys %}

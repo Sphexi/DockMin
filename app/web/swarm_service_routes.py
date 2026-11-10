@@ -42,7 +42,6 @@ from app.services.image_bindings import CredentialOffer
 from app.services.object_locks import ObjectBusy, TooManyStreams
 from app.services.pull_credentials import (
     CHOICE_FIELD,
-    BindingCredentialMissing,
     CredentialChoice,
     CredentialChoiceRequired,
 )
@@ -534,8 +533,6 @@ async def create_service(
         return await again(
             {}, 400, credentials=True, choice_error="; ".join(required.fields.values())
         )
-    except BindingCredentialMissing as missing:
-        return await again({}, 409, credentials=True, choice_error=str(missing))
     except CredentialSetUnavailable as unavailable_set:
         return await again({"image": str(unavailable_set)}, 409)
     except ServiceNameInUse as taken:
@@ -932,8 +929,6 @@ async def review_service(
         return await again(
             {}, 400, credentials=True, choice_error="; ".join(required.fields.values())
         )
-    except BindingCredentialMissing as missing:
-        return await again({}, 409, credentials=True, choice_error=str(missing))
     except CredentialSetUnavailable as unavailable_set:
         return await again({"image": str(unavailable_set)}, 409)
     except ServiceChangedSinceReview as stale:
@@ -1028,8 +1023,6 @@ async def update_service(
         return await again(
             {}, 400, credentials=True, choice_error="; ".join(required.fields.values())
         )
-    except BindingCredentialMissing as missing:
-        return await again({}, 409, credentials=True, choice_error=str(missing))
     except CredentialSetUnavailable as unavailable_set:
         return await again({"image": str(unavailable_set)}, 409)
     except (ServiceChangedSinceReview, ObjectBusy) as error:

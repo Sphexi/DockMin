@@ -33,7 +33,6 @@ from app.services.image_views import (
 from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectBusy
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoiceRequired,
     CredentialSetMismatch,
 )
@@ -59,7 +58,7 @@ type JobKind = Literal[
     "container_create",
     "container_recreate",
     "onboarding_review",
-    "anonymous_binding_review",
+    "bulk_binding_review",
 ]
 type JobState = Literal["running", "succeeded", "failed", "cancelled"]
 type LayerStage = Literal[
@@ -94,7 +93,7 @@ _STAGES: Final[Mapping[str, LayerStage]] = {
 }
 _MOUNTED_PREFIX: Final = "Mounted from"
 _CONTAINER_KINDS: Final = frozenset({"container_create", "container_recreate"})
-_REVIEW_KINDS: Final = frozenset({"onboarding_review", "anonymous_binding_review"})
+_REVIEW_KINDS: Final = frozenset({"onboarding_review", "bulk_binding_review"})
 _FRESH_CONTEXT_KINDS: Final = _CONTAINER_KINDS | _REVIEW_KINDS
 _PULL_STAGE: Final = "pull"
 _DONE: Final = frozenset({"complete", "exists", "pushed", "mounted"})
@@ -324,8 +323,6 @@ def outcome_of(error: Exception, kind: JobKind | None = None) -> JobOutcome:
             return JobOutcome(False, str(error), "object_busy")
         case CredentialSetUnavailable():
             return JobOutcome(False, str(error), "credential_unavailable")
-        case BindingCredentialMissing():
-            return JobOutcome(False, str(error), "credential_missing")
         case CredentialChoiceRequired():
             return JobOutcome(False, str(error), "credential_choice_required")
         case CredentialSetMismatch():

@@ -17,7 +17,6 @@ from app.services.activity import UserActor
 from app.services.image_bindings import BindingPullCredentials
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoiceRequired,
     CredentialSetMismatch,
 )
@@ -492,15 +491,15 @@ async def test_a_bound_set_the_owner_may_not_use_refuses_the_redeploy_before_any
 CREDENTIAL_ERRORS = [
     (
         {"alpine:3": CredentialSetMismatch(), "busybox:latest": CredentialChoiceRequired(())},
-        {"alpine:3": "credential_mismatch", "busybox:latest": "not_bound"},
+        {"alpine:3": "credential_mismatch"},
         "credential_choice_required",
     ),
     (
         {
-            "alpine:3": BindingCredentialMissing(),
+            "alpine:3": CredentialSetMismatch(),
             "busybox:latest": CredentialSetUnavailable("not_granted_environment"),
         },
-        {"alpine:3": "credential_missing", "busybox:latest": "credential_unavailable"},
+        {"alpine:3": "credential_mismatch", "busybox:latest": "credential_unavailable"},
         None,
     ),
 ]
@@ -509,7 +508,7 @@ CREDENTIAL_ERRORS = [
 @pytest.mark.parametrize(
     ("errors", "per_reference", "reason"),
     CREDENTIAL_ERRORS,
-    ids=["mismatch-and-unbound", "missing-and-unavailable"],
+    ids=["mismatch-and-choice-required", "mismatch-and-unavailable"],
 )
 async def test_each_reference_a_redeploy_refuses_keeps_its_own_reason(
     swarm_stack_rig: Rig,
@@ -537,7 +536,7 @@ async def test_each_reference_a_redeploy_refuses_keeps_its_own_reason(
 
     assert isinstance(raised.value, StackRejected)
     assert raised.value.detail["refused_references"] == per_reference
-    assert set(raised.value.fields) == set(per_reference)
+    assert set(raised.value.fields) == set(errors)
     assert reason is None or raised.value.reason == reason
 
 

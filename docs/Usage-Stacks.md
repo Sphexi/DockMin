@@ -852,7 +852,6 @@ Credentials are chosen per reference by the rules of [Images](Usage-Images). The
 | Result | Behaviour |
 |---|---|
 | No choice posted for a reference with several fitting sets | Nothing is created until each is chosen (`409`, reason `credential_choice_required`). The picker for each reference is shown with the note `Choose a credential set for each image in the Credentials section, then submit again.` |
-| Binding names a deleted set | Refused (`409`, reason `credential_missing`). Only an administrator can choose another |
 | Set not usable by the user or the environment, or for another registry | Refused (`409`, reason `credential_unavailable`) |
 | Standard user's choice differs from the existing binding | Refused (`403`, reason `restricted`) |
 | After a pull | The image is bound to the set used, as after any pull ([Images](Usage-Images)). The row records the results in `binding` as a comma-separated list of `created`, `rebound`, `kept`, `skipped`, or `not_recorded` |
@@ -1071,7 +1070,7 @@ Deploy and redeploy run these steps for a stack with `build`. The first refusal 
 |---|---|
 | Picker | The redeploy confirmation shows one picker for each base of a service that will build, in addition to those for the images the stored file names. The check of an edited file does not read Dockerfiles |
 | Binding | Every base pulled is bound to the credential set used, and recorded in the deployment's final transaction. A failed deploy binds the pulls that finished |
-| Automation | Reuses bound sets only; never builds |
+| Automation | Uses the bound set of each reference, or none; never builds |
 | buildx | Runs with `--pull=false` and `DOCKER_CONFIG` holding `{}`. It holds no credential and reaches no registry for a base |
 
 #### buildx invocation
@@ -1218,7 +1217,7 @@ Compose chooses which containers to create, recreate or leave running.
 | Actor | The subsystem, with the rule and the run. Category `automation` |
 | Not available | `remove_orphans`, a new file, new variables, a credential choice, the confirmation's digests, `Pull the images again`, `Rebuild the images`, the [container name and port check](#container-name-and-port-collisions) |
 | Access | The rule owner's write access to the stack and to every project container, checked at the run. A standard-user owner is held to the [restrictions](#restrictions-for-standard-users), and needs a grant on each credential set a pull uses |
-| Credentials | The bound set of each reference, never another set. A reference the redeploy has to pull, with no usable bound set, refuses the redeploy |
+| Credentials | The bound set of each reference, never another set. A reference with no binding, or a `credential_missing` binding, is pulled anonymously. A bound set that cannot be used refuses the redeploy |
 | Lock | The stack, action `redeploy`, waited for up to the automation's lock wait |
 
 Checks, in this order. A refusal changes nothing on the host and records a failure row with its reason, except `object_busy`, which records none.
@@ -2662,7 +2661,7 @@ The stack list, the stack page and the redeploy confirmation show `Changed since
 | `pending_changes` | None | A redeploy by `container-updater` found a stored file, variables or files that were not deployed. Reached only by the automation |
 | `object_busy` | 409 | [Locks](#locks-and-busy) |
 | `self_protected` | 409 | [dockmin's own stack](#dockmins-own-stack) |
-| `credential_choice_required`, `credential_missing`, `credential_unavailable` | 409 | [Images and credentials](#images-and-credentials) |
+| `credential_choice_required`, `credential_unavailable` | 409 | [Images and credentials](#images-and-credentials) |
 | `secrets_unreadable` | 409 | A stored secret variable or secret file cannot be decrypted |
 | `compose_failed` | 502 | `Docker Compose exited with status {N}.` The output is shown; for a failed start, stop, restart or remove, to administrators only |
 | `pull_failed` | 502 | `Pulling an image failed.` |
@@ -3015,7 +3014,7 @@ Other bodies are `{"error": {"status": N, "message": text, "reason": reason, ...
 | 409 | `name_in_use`, `not_deployed`, `changed_since_review`, `self_protected` | |
 | 409 | `container_name_in_use`, `port_in_use`, `file_in_use`, `file_missing`, `not_running` | `fields` as for a `400` from a check, and `warnings` (array of text) when the check raised any. `container_name_in_use` and `port_in_use` come from create and redeploy before any image is pulled; `file_in_use` from a delete; `file_missing` from a create, or a redeploy with a new `compose_file`, that names a file the stack does not hold; `not_running` from a restart |
 | 409 | `preexisting_objects` | `objects`: array of text |
-| 409 | `credential_choice_required`, `credential_missing`, `credential_unavailable` | `references`: `[{reference, message, candidates: [{id, name}]}]`. Repeat the request with `credential_choices` |
+| 409 | `credential_choice_required`, `credential_unavailable` | `references`: `[{reference, message, candidates: [{id, name}]}]`. Repeat the request with `credential_choices` |
 | 409 | `secrets_unreadable` | |
 | 429 | `too_many_operations` | |
 | 502 | `compose_failed`, `pull_failed`, `address_refused`, `host_unresolved` | `exit_code`, `events`, `progress`, and `stderr` when Compose printed any. `stderr` of a failed start, stop, restart or remove is empty for a standard user |
@@ -3325,7 +3324,7 @@ Credentials are chosen per distinct `image` reference of the file, before anythi
 
 | Rule | Value |
 |---|---|
-| Choice | The rules of [Images and credentials](#images-and-credentials) and [Images](Usage-Images). The check of a new stack, of an edited file and of an adopted namespace, and the redeploy review, show a credential picker ([Registries](Administration-Registries)) for every image of the file. Several fitting sets and no choice posted: the picker for each reference is shown (`409`, reason `credential_choice_required`). Deleted bound set: `credential_missing`. Set unusable: `credential_unavailable`. A standard user's choice that differs from the binding: `restricted` |
+| Choice | The rules of [Images and credentials](#images-and-credentials) and [Images](Usage-Images). The check of a new stack, of an edited file and of an adopted namespace, and the redeploy review, show a credential picker ([Registries](Administration-Registries)) for every image of the file. Several fitting sets and no choice posted: the picker for each reference is shown (`409`, reason `credential_choice_required`). Set unusable: `credential_unavailable`. A standard user's choice that differs from the binding: `restricted` |
 | Pull | None by dockmin. The nodes pull |
 | Digest | dockmin asks the registry, with the same credentials, for each reference's digest, once per operation. Every service of that reference runs `{reference}@sha256:{digest}`. A reference that already names a digest is not looked up. Every redeploy looks up again, so a moved tag reaches its services |
 | No answer | That reference is deployed as written and listed as not pinned on the confirmation and the result. Nodes may run different images of the tag |
@@ -3528,7 +3527,7 @@ To redeploy:
 | Actor | The subsystem, with the rule and the run. Category `automation` |
 | Not available | `remove_orphans`, a credential choice, the confirmation's digests (`expected_file_digest`, `expected_inputs_digest`, `expected_plan`), the [port check](#swarm-port-collisions) |
 | Access | The rule owner's write access to the stack and to every service of it, checked at the run. A standard-user owner is held to the [restrictions](#swarm-stack-restrictions-for-standard-users), and needs a grant on each credential set a reference is bound to |
-| Credentials | The bound set of each reference, never another set. A reference with no usable bound set refuses the redeploy |
+| Credentials | The bound set of each reference, never another set. A reference with no binding, or a `credential_missing` binding, is sent with no credential. A bound set that cannot be used refuses the redeploy |
 | Locks | The stack and every existing service, config and secret the plan touches, action `redeploy`, waited for up to the automation's lock wait |
 | Sent | The services whose specification differs from the file's. The others are not sent |
 | Verification, rollback | None |
@@ -3543,7 +3542,7 @@ Refusals. Each is decided inside the locks and before anything is sent to the cl
 | A service to update differs from the file in more than its image digest ([Drift](#drift-of-a-swarm-service)) | `drifted` | `drifted_services` |
 | The digest of a reference could not be looked up, so the redeploy would send a bare tag | `unresolved` | `unresolved_references` |
 | A standard-user owner could not change every service, or a service uses options only administrators may set | `restricted` | None |
-| A reference's bound credentials cannot be used | `credential_missing`, `credential_choice_required`, `credential_mismatch` or `credential_unavailable` | None. `container-updater` writes `image_update_refused` for the stack |
+| A reference's bound credentials cannot be used | `credential_mismatch` or `credential_unavailable` | None. `container-updater` writes `image_update_refused` for the stack |
 
 - `pending_changes`, `would_remove`, `would_create`, `drifted` and `unresolved` are reached only by the automation; no response carries them.
 - Counts appear when above zero.
@@ -3822,7 +3821,7 @@ One operation runs on a stack at a time. A second is refused at once.
 | `changed_since_review` | 409 | The file, the inputs (variables and files), the plan, the members or the stack differ from the confirmation, or from the inputs a file form named. For a redeploy by `container-updater`, a service changed after the plan was made |
 | `pending_changes`, `would_remove`, `would_create`, `drifted`, `unresolved` | None | A redeploy by `container-updater` was refused ([Redeploy of a Swarm stack by container-updater](#redeploy-of-a-swarm-stack-by-container-updater)). Reached only by the automation |
 | `object_busy` | 409 | [Swarm stack locks](#swarm-stack-locks) |
-| `credential_choice_required`, `credential_missing`, `credential_unavailable` | 409 | [Swarm images and credentials](#swarm-images-and-credentials) |
+| `credential_choice_required`, `credential_unavailable` | 409 | [Swarm images and credentials](#swarm-images-and-credentials) |
 | `secrets_unreadable` | 409 | A stored secret variable or secret file cannot be decrypted with the server's key |
 | `engine_rejected` | 502 | Docker refused to create, update or remove an object |
 | `not_swarm_manager` | 503 | The host is no longer an active Swarm manager, or its swarm is locked |

@@ -128,7 +128,6 @@ from app.services.object_inspector import (
 )
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey, ObjectLockRegistry
 from app.services.pull_credentials import (
-    BindingCredentialMissing,
     CredentialChoice,
     CredentialChoiceRequired,
     CredentialSetMismatch,
@@ -208,7 +207,7 @@ class ImageActionService:
         """Validate a pull and decide its credentials without starting it; nothing is recorded.
 
         Raises ValidationFailed for a bad reference, CredentialChoiceRequired when several sets fit
-        and none was chosen, BindingCredentialMissing, CredentialSetUnavailable, or
+        and none was chosen, CredentialSetUnavailable, or
         RebindRefused when a standard user would change an existing binding. The plan is decided
         again when the pull runs; only an explicit choice is carried over.
         """
@@ -876,9 +875,6 @@ class ImageActionService:
             )
             if isinstance(actor, AutomationAuthority) and credentials.credential_set_id is not None:
                 await actor.authorise_credential_set(credentials.credential_set_id)
-        except BindingCredentialMissing:
-            audit.reason = "credential_missing"
-            raise
         except CredentialSetUnavailable:
             audit.reason = "credential_unavailable"
             raise

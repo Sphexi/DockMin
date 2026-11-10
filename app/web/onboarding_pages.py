@@ -42,6 +42,7 @@ EXTRA_REASONS: Final = {
 }
 OUTCOMES: Final = {
     "ambiguous": "More than one set can read this image. Choose one.",
+    "anonymous_only": "The registry answered without credentials; the image needs no binding.",
     "no_match": "No credential set could be matched to the image on the host.",
     "no_local_digest": "The host holds no registry digest for it; it was built or tagged locally.",
     "pinned": "It names a digest, so it needs no binding.",
@@ -85,6 +86,7 @@ class ImageRow:
     offered: bool
     ticked: bool
     ambiguous: bool
+    unneeded: bool
     set_name: str | None
     choices: tuple[tuple[str, str], ...]
     notes: tuple[str, ...]
@@ -131,16 +133,12 @@ def stack_rows(review: OnboardingReview) -> tuple[StackRow, ...]:
 def _image_row(index: int, target: ImageTarget) -> ImageRow:
     outcome = target.outcome
     names = {check.choice: check.name for check in outcome.matches}
-    set_name = None
+    set_name: str | None = None
     text = OUTCOMES.get(outcome.outcome, "")
     if outcome.outcome == "binds":
-        (only,) = names.values()
-        set_name = only
-        text = "Binds anonymously." if only is None else f"Binds to {only}."
-    choices = tuple(
-        (ANONYMOUS if choice.credential_set_id is None else str(choice.credential_set_id), name)
-        for choice, name in ((c, n or "Anonymous") for c, n in names.items())
-    )
+        (set_name,) = names.values()
+        text = f"Binds to {set_name}."
+    choices = tuple((str(choice.credential_set_id), name or "") for choice, name in names.items())
     notes = tuple(
         f"{check.name or 'Anonymous'}: {CHECK_ERRORS.get(check.error or '', check.error or '')}"
         for check in outcome.tried
@@ -157,6 +155,7 @@ def _image_row(index: int, target: ImageTarget) -> ImageRow:
         offered=target.offered,
         ticked=outcome.outcome == "binds",
         ambiguous=outcome.outcome == "ambiguous",
+        unneeded=outcome.outcome == "anonymous_only",
         set_name=set_name,
         choices=choices,
         notes=notes,

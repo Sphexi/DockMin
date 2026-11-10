@@ -1030,13 +1030,13 @@ Target type `container`, the archived container's name (from the archive's manif
 | Action | Target type | Target id | Detail keys |
 |---|---|---|---|
 | `stack_adopted` | `stack` | The project or namespace name | `onboarding` `true`, `as_is` `true`, `file_source` (`read`, `merged`, `generated` or `reconstructed`), and the keys of [Stack rows](#stack-rows). `control_created` is `true` when a control was claimed for the owner and team |
-| `image_bound` | `image_binding` | The canonical reference | `verified` `true`, `pulled` `false`, `credential_set_id` (`null` for anonymous), `anonymous`, `digest` (the registry digest that matched the local image) |
+| `image_bound` | `image_binding` | The canonical reference | `verified` `true`, `pulled` `false`, `credential_set_id`, `anonymous` (`false`), `digest` (the registry digest that matched the local image) |
 | `resource_control_created` | The object's type | The object's id | `onboarding` `true`. `candidate_source` for a volume that took its owner from the ownership backfill ([Volumes](Usage-Volumes#assign-owners)). With an owner only: `owner_user_id` and `access_level` (`write`). With a team: `access_level`, `public` (`false`), `administrators_only` (`false`), `users` (`0`) and `teams` (`1`) |
 
 | Row | Written when |
 |---|---|
 | `stack_files_read` | The review reads a project or namespace ([Stack rows](#stack-rows)). Written during the review, before the confirmation |
-| `image_bound` | An image is bound. An image that has a binding by then is skipped and writes no row. A refused bind is a failure row |
+| `image_bound` | An image is bound to a credential set. An image that has a binding by then, and an image whose choice is anonymous, is skipped and writes no row. A refused bind is a failure row |
 | `resource_control_created` | An object is given a control. An object that the apply finds already controlled is skipped before the write and writes no row |
 | Failure row | A stack adoption or a write that its own operation refused or that failed. It carries `reason` and `message` like the failures of [Stack rows](#stack-rows) |
 
@@ -1049,7 +1049,7 @@ Three existing actions carry a detail key for anonymous registry entries. No act
 
 | Action | Target type | Key | Present when |
 |---|---|---|---|
-| `image_bound` | `image_binding` | `bulk` (`true`) | Written by `Bind unbound images anonymously` ([Images](Usage-Images#bind-unbound-images-anonymously)). Absent from every other `image_bound` row. The row holds `verified` `true`, `pulled` `false`, `credential_set_id` `null`, `anonymous` `true` and `digest`. One row for each binding; the rows of one apply share a request id ([Request id](#request-id)). Starting the review, the confirmation and a refused apply write no row |
+| `image_bound` | `image_binding` | `bulk` (`true`) | Written by `Bind unbound images` ([Images](Usage-Images#bind-unbound-images)). Absent from every other `image_bound` row. The row holds `verified` `true`, `pulled` `false`, `credential_set_id` (the set the image is bound to), `anonymous` `false` and `digest`. One row for each binding; the rows of one apply share a request id ([Request id](#request-id)). Starting the review, the confirmation and a refused apply write no row |
 | `environment_created` | `environment` | `registry_grants` | The environment was granted registry entries when it was created. The ids of the entries, comma-separated ([Environments](Usage-Environments#registry-entries-on-a-new-environment)) |
 | `registry_credential_updated` | `registry_credential` | `seeded_default_cleared` (`true`) | The edit removed the `Added with this instance` mark ([Registries](Administration-Registries#entries-a-new-instance-starts-with)) |
 

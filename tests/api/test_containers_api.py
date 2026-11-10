@@ -705,7 +705,7 @@ async def test_a_recreate_with_a_pull_asks_which_set_refuses_bad_choices_and_bin
     assert "x-registry-auth" not in done.text
 
 
-async def test_a_recreate_may_choose_to_pull_anonymously(
+async def test_a_recreate_may_choose_to_pull_anonymously_and_binds_nothing(
     admin_api: AsyncClient,
     admin_client: AsyncClient,
     world: World,
@@ -716,10 +716,9 @@ async def test_a_recreate_may_choose_to_pull_anonymously(
 
     reply = await admin_api.post(recreate_url(world), json=recreate_body(anonymous=True))
 
-    [binding] = await bindings_of(world)
     assert reply.status_code == OK
     assert username_sent(recreatable) is None
-    assert (binding["registry_credential_id"], binding["state"]) == (None, "bound")
+    assert await bindings_of(world) == []
 
 
 async def test_a_recreate_pulls_with_the_bound_set_when_none_is_named(
@@ -738,7 +737,7 @@ async def test_a_recreate_pulls_with_the_bound_set_when_none_is_named(
     assert username_sent(recreatable) == USERNAME
 
 
-async def test_a_recreate_of_a_credential_missing_image_is_409_until_a_set_is_chosen(
+async def test_a_recreate_of_a_credential_missing_image_asks_for_a_set_like_an_unbound_one(
     admin_api: AsyncClient,
     admin_client: AsyncClient,
     world: World,
@@ -757,7 +756,7 @@ async def test_a_recreate_of_a_credential_missing_image_is_409_until_a_set_is_ch
 
     [binding] = await bindings_of(world)
     assert refused.status_code == CONFLICT
-    assert refused.json()["error"]["reason"] == "credential_missing"
+    assert refused.json()["error"]["reason"] == "credential_choice_required"
     assert repaired.status_code == OK
     assert (binding["state"], binding["registry_credential_id"]) == ("bound", replacement)
 

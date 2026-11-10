@@ -33,7 +33,10 @@ from app.db.repositories.scheduled_job import (
 )
 from app.db.repositories.setting import SettingRepository
 from app.logging import get_logger
-from app.notifications.catalogue import AUTOMATION_RUN_FAILED_ACTION
+from app.notifications.catalogue import (
+    AUTOMATION_RUN_FAILED_ACTION,
+    AUTOMATION_RUN_PARTIAL_ACTION,
+)
 from app.scheduler.events import rule_detail
 from app.scheduler.gates import job_gates, moment_of, next_run_text, stored_of
 from app.scheduler.housekeeping import Housekeeping
@@ -1122,10 +1125,14 @@ class Scheduler:
     ) -> None:
         failures = failures_after(job.consecutive_failures, outcome.outcome)
         recorder = ActivityRecorder(db, self._clock)
-        if outcome.outcome == "failure" and job.rule_id is not None and run.trigger != "dry_run":
+        if (
+            outcome.outcome in ("failure", "partial")
+            and job.rule_id is not None
+            and run.trigger != "dry_run"
+        ):
             await self._record_run_failed(db, recorder, job, run, outcome)
         match outcome.outcome:
-            case "success" | "partial":
+            case "success":
                 if job.consecutive_failures:
                     await jobs.record_success(job.id, job.next_run_at)
             case "failure" if reached_threshold(failures, job.failure_threshold):
@@ -1183,7 +1190,11 @@ class Scheduler:
             SubsystemActor(
                 job.subsystem, job.rule_id, run.id, name if isinstance(name, str) else None
             ),
-            action=AUTOMATION_RUN_FAILED_ACTION,
+            action=(
+                AUTOMATION_RUN_PARTIAL_ACTION
+                if outcome.outcome == "partial"
+                else AUTOMATION_RUN_FAILED_ACTION
+            ),
             target_type="scheduled_job",
             target_id=str(job.id),
             environment_id=job.environment_id,

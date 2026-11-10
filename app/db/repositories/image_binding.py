@@ -33,8 +33,7 @@ _SELECT = (
 class StoredBinding:
     """One binding as stored, with the name, address and provider of the set it names, if any.
 
-    A bound row with no set is a deliberate anonymous pull. A credential_missing row records the
-    id and name of the set it lost.
+    A bound row names a set. A credential_missing row records the id and name of the set it lost.
     """
 
     id: int
@@ -150,16 +149,6 @@ class ImageBindingRepository(Repository[StoredBinding]):
         )
         return row is not None
 
-    async def has_granted_set_at(self, environment_id: int, address: str) -> bool:
-        """Report whether any credential set at the address is granted to the environment."""
-        row = await self._session.fetch_one(
-            "SELECT 1 AS present FROM registry_credential rc "
-            "JOIN registry_environment_access rea ON rea.registry_credential_id = rc.id "
-            "WHERE rc.url = ? AND rea.environment_id = ? LIMIT 1",
-            (address, environment_id),
-        )
-        return row is not None
-
     async def count_for_credential(self, credential_id: int) -> int:
         """Count the bindings that name the set."""
         row = await self._session.fetch_one(
@@ -230,11 +219,11 @@ class ImageBindingRepository(Repository[StoredBinding]):
         *,
         environment_id: int,
         image_reference: str,
-        credential_id: int | None,
+        credential_id: int,
         observed_digest: str | None,
         now: datetime,
     ) -> None:
-        """Create a bound row; a null credential records a deliberate anonymous pull."""
+        """Create a bound row naming the set."""
         stamp = format_timestamp(now)
         await self._execute(
             "INSERT INTO image_credential_binding (environment_id, image_reference, "
@@ -256,11 +245,11 @@ class ImageBindingRepository(Repository[StoredBinding]):
         self,
         binding_id: int,
         *,
-        credential_id: int | None,
+        credential_id: int,
         observed_digest: str | None,
         now: datetime,
     ) -> None:
-        """Point a row at a set, or at none, and return it to bound; the repair path."""
+        """Point a row at a set and return it to bound; the repair path."""
         await self._execute(
             "UPDATE image_credential_binding SET registry_credential_id = ?, "
             "observed_digest = ?, state = 'bound', missing_credential_id = NULL, "

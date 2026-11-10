@@ -557,9 +557,10 @@ class SwarmServiceActions(SwarmServiceBase):
     ) -> ServiceImageUpdated:
         """Move a service to a newer digest of the image it runs and watch the rollout.
 
-        Only the image changes, and it is sent with the credentials of the binding. The service
-        stays locked while the rollout is watched. ServiceUpdateFailed when the rollout ended
-        badly or could not be read; the service is not rolled back.
+        Only the image changes, and it is sent with the credentials of the binding, or with none
+        for an unbound image. The service stays locked while the rollout is watched.
+        ServiceUpdateFailed when the rollout ended badly or could not be read; the service is not
+        rolled back.
         """
         audit = current_audit()
         if not isinstance(actor, AutomationAuthority):

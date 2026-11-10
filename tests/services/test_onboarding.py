@@ -30,6 +30,7 @@ from app.services.onboarding_plan import (
     Selection,
 )
 from app.services.pull_credentials import CredentialChoice
+from app.web.onboarding_pages import image_rows
 from tests.access_support import ADMIN, ENV_A, ENV_B, STANDARD
 from tests.auth_support import STANDARD_ID, STANDARD_USERNAME
 from tests.docker_engine.container_engine import ContainerEngine
@@ -533,6 +534,31 @@ async def test_an_unknown_owner_or_team_and_a_bad_level_are_refused_by_field(
         await services.onboarding.resolve_ownership(ADMIN, "nobody-here", "no-such-team", "admin")
 
     assert set(refused.value.fields) == {"owner", "team", "level"}
+
+
+async def test_an_image_only_the_registry_serves_without_credentials_needs_no_binding(
+    stack_rig: Rig, tmp_path: Path
+) -> None:
+    rig = stack_rig
+    await stock(rig, tmp_path)
+    await register(rig, "alpha", environments=(ENV_B,))
+    manifests = ByLogin({ALPHA_USER: digest(9), None: LOCAL})
+    rig.registry.registries.manifests = manifests  # type: ignore[assignment]
+
+    review = await review_of(rig)
+
+    [index] = [i for i, t in enumerate(review.images) if t.reference == REFERENCE]
+    target = review.images[index]
+    [row] = [r for r in image_rows(review) if r.index == index]
+    assert (target.outcome.outcome, target.offered) == ("anonymous_only", False)
+    assert (row.offered, row.ticked, row.unneeded) == (False, False, True)
+    assert "needs no binding" in row.outcome
+    assert [login is None for _, _, login in manifests.calls] == [False, True]
+    with pytest.raises(ValidationFailed):
+        await onboarding_for(rig).onboarding.plan(
+            ADMIN, ENV_B, review, Selection(images={index: CredentialChoice(None)})
+        )
+    assert await binding_rows(rig.db) == []
 
 
 async def test_a_ticked_index_the_review_does_not_hold_is_refused(

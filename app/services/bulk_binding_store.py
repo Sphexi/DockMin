@@ -1,4 +1,4 @@
-"""Holds a finished anonymous binding review for the user and environment that started it."""
+"""Holds a finished bulk binding review for the user and environment that started it."""
 
 import secrets
 import time
@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
-from app.services.anonymous_binding_plan import AnonymousBindingReview
+from app.services.bulk_binding_plan import BulkBindingResult, BulkBindingReview
 
 type ResumePoint = tuple[int, str]
 
@@ -22,12 +22,13 @@ _TOKEN_BYTES: Final = 16
 class _Held:
     user_id: int
     environment_id: int
-    review: AnonymousBindingReview
+    review: BulkBindingReview
     expires: float
     applying: bool = False
+    summary: BulkBindingResult | None = None
 
 
-class AnonymousBindingReviewStore:
+class BulkBindingReviewStore:
     """In-memory reviews, each usable only by the user and environment that started it.
 
     A review expires 30 minutes after it was kept. Each user keeps at most two and the process
@@ -40,7 +41,7 @@ class AnonymousBindingReviewStore:
         self._held: OrderedDict[str, _Held] = OrderedDict()
         self._resume: OrderedDict[tuple[int, int], ResumePoint] = OrderedDict()
 
-    def put(self, user_id: int, environment_id: int, review: AnonymousBindingReview) -> str:
+    def put(self, user_id: int, environment_id: int, review: BulkBindingReview) -> str:
         """Hold a review and return the token that names it."""
         self._expire()
         token = secrets.token_urlsafe(_TOKEN_BYTES)
@@ -52,20 +53,22 @@ class AnonymousBindingReviewStore:
             self._held.popitem(last=False)
         return token
 
-    def get(self, token: str, user_id: int, environment_id: int) -> AnonymousBindingReview | None:
+    def get(self, token: str, user_id: int, environment_id: int) -> BulkBindingReview | None:
         """Return the review when the token is live and was made for exactly this."""
         held = self._find(token, user_id, environment_id)
         return None if held is None else held.review
 
-    def replace(self, token: str, review: AnonymousBindingReview) -> None:
-        """Keep a smaller review under the same token, or forget it when no group is left."""
+    def summary(self, token: str, user_id: int, environment_id: int) -> BulkBindingResult | None:
+        """Return the result of the latest apply of the review, if there was one."""
+        held = self._find(token, user_id, environment_id)
+        return None if held is None else held.summary
+
+    def replace(self, token: str, review: BulkBindingReview, summary: BulkBindingResult) -> None:
+        """Keep the smaller review under the same token, with the result of the apply behind it."""
         held = self._held.get(token)
-        if held is None:
-            return
-        if review.groups:
+        if held is not None:
             held.review = review
-        else:
-            del self._held[token]
+            held.summary = summary
 
     def begin_apply(self, token: str, user_id: int, environment_id: int) -> bool:
         """Mark the review as being applied; False when it is gone or already being applied."""
