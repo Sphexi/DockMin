@@ -3,9 +3,9 @@
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from typing import Any, Final, Literal
+from typing import Any, Final
 
 from pydantic import ValidationError
 
@@ -28,14 +28,29 @@ from app.db.repositories.scheduled_job import (
     ScheduleKind,
 )
 from app.db.repositories.setting import SettingRepository
+from app.db.repositories.stack import StackListRepository
 from app.db.repositories.user import UserRepository
 from app.db.repositories.webhook import WebhookRepository
 from app.scheduler.loop import SchedulerBusy
 from app.scheduler.registry import HandlerRegistry
 from app.scheduler.schedules import Schedule, parse_schedule
-from app.services.access import ResourceKey, is_canonical_id
+from app.services.access import COMPOSE_PROJECT_LABEL, ResourceKey, is_canonical_id
 from app.services.activity import SUBSYSTEMS, ActivityRecorder, audited, current_audit
 from app.services.authorisation import Authoriser
+from app.services.automation_quick_add import (
+    Addition,
+    Declined,
+    ObjectKind,
+    OwnerStanding,
+    QuickAddHelp,
+    QuickAddObject,
+    QuickAddOffer,
+    QuickAddOption,
+    names_in,
+    names_services,
+    qualify,
+)
+from app.services.container_derivation import SWARM_SERVICE_LABEL
 from app.services.containers import ContainerService
 from app.services.jobs import (
     NOT_AVAILABLE,
@@ -61,6 +76,7 @@ from app.services.restart_holds import (
     is_held,
     rule_holds,
 )
+from app.services.stack_document import SWARM_STACK_NAME
 from app.services.webhooks import WEBHOOK_SUBSYSTEM, IssuedWebhook, WebhookView, issue_token
 from app.subsystems.activity_log_exporter import NAME as EXPORTER
 from app.subsystems.activity_log_exporter import ExportRelease, export_release
@@ -70,11 +86,14 @@ from app.subsystems.selectors import (
     ALL_KINDS,
     MAX_SELECTOR_BYTES,
     TOO_LARGE,
+    ContainerTarget,
     EnvironmentTarget,
     ServiceTarget,
     StackTarget,
+    canonical,
     describe_stored,
     matches,
+    only_name,
     parse_selector_text,
 )
 
@@ -105,6 +124,12 @@ CHANGED_BEFORE_ENABLE: Final = (
 CHANGED_BEFORE_RUN: Final = (
     "The automation changed since you reviewed it; review it again to run it."
 )
+CHANGED_BEFORE_ADD: Final = (
+    "The automation changed since you reviewed it; review it again to add to it."
+)
+OBJECT_RENAMED: Final = "The name changed since you reviewed it; review it again to add it."
+NO_WRITE_ACCESS: Final = "You do not have write access to everything this automation would act on."
+NO_CREATE_ACCESS: Final = "You cannot create automations in this environment."
 NOT_HELD: Final = "This container is not held by this automation."
 HOLDS_UNAVAILABLE: Final = "Held containers cannot be listed while the environment is unreachable."
 HOLDS_SHOWN: Final = 50
@@ -120,6 +145,7 @@ __all__ = [
     "HeldContainer",
     "PanelRule",
     "PanelRules",
+    "QuickAddPreview",
     "RuleBusy",
     "RuleDeletePreview",
     "RuleHolds",
@@ -128,8 +154,6 @@ __all__ = [
     "describe_target",
     "rule_digest",
 ]
-
-type ObjectKind = Literal["container", "stack", "swarm_stack", "service"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,12 +283,40 @@ class PanelRule:
 
 @dataclass(frozen=True, slots=True)
 class PanelRules:
-    """The rules acting on one object: the first few, how many more matched, and the add offer."""
+    """The rules acting on one object: the first few, how many more matched, and the add offer.
+
+    quick_add lists the enabled automations the object can be added to, and is empty unless
+    can_add; quick_add_help carries the facts behind the lines that point elsewhere.
+    """
 
     rules: tuple[PanelRule, ...]
     more: int
     can_add: bool
     pause_options: tuple[tuple[str, str], ...] = PAUSE_OPTIONS
+    quick_add: tuple[QuickAddOption, ...] = ()
+    quick_add_help: QuickAddHelp = field(default_factory=QuickAddHelp)
+
+
+@dataclass(frozen=True, slots=True)
+class QuickAddPreview:
+    """A rule and the object to add to it, as confirmed: the digest, the targets around the add.
+
+    refusal is the reason the add cannot be confirmed, or None. target is None when the rule
+    is refused or the subsystem offers no preview. owner_is_other is true when the rule's owner
+    is not the viewer; owner_standing is then the owner's access to the object as a run sees it,
+    and is None when the owner is the viewer or the add is refused. released_holds counts the
+    restart holds the add releases.
+    """
+
+    view: RuleView
+    digest: str
+    names_before: tuple[str, ...]
+    names_after: tuple[str, ...]
+    target: TargetPreview | None
+    refusal: str | None
+    owner_is_other: bool
+    owner_standing: OwnerStanding | None
+    released_holds: int
 
 
 class AutomationRuleService:
@@ -515,6 +567,7 @@ class AutomationRuleService:
         labels: Mapping[str, str],
         stack: str | None,
         kind: ObjectKind,
+        key: str | None = None,
     ) -> PanelRules:
         """Return the rules whose target is, contains or matches one object.
 
@@ -522,7 +575,8 @@ class AutomationRuleService:
         targets the whole environment; a Compose stack by its name or the whole environment; a
         Swarm service by its name or its stack's name; a Swarm stack only by its name, and only
         when the rule's automation acts on Swarm stacks. A rule of another user is returned
-        without its id, name or target.
+        without its id, name or target. With `key`, the object's container or service id or its
+        stack's name, the automations it can be added to are listed as well.
         """
         await self._authoriser.require_environment(viewer, environment_id)
         ruled = [subsystem for subsystem, takes_rules in SUBSYSTEMS.items() if takes_rules]
@@ -562,10 +616,114 @@ class AutomationRuleService:
                     last_run_id=None if last is None or not manageable else last.id,
                 )
             )
+        can_add = await self._authoriser.may_create(viewer, environment_id)
+        offer = (
+            QuickAddOffer()
+            if key is None
+            else await self.quick_add_options(
+                viewer,
+                QuickAddObject(environment_id, kind, key, name, labels),
+                candidates,
+                can_create=can_add,
+            )
+        )
         return PanelRules(
             rules=tuple(rows),
             more=len(matched) - len(shown),
-            can_add=await self._authoriser.may_create(viewer, environment_id),
+            can_add=can_add,
+            quick_add=offer.options,
+            quick_add_help=offer.help,
+        )
+
+    async def quick_add_options(
+        self,
+        viewer: Principal,
+        obj: QuickAddObject,
+        candidates: Sequence[AutomationRule],
+        *,
+        can_create: bool,
+    ) -> QuickAddOffer:
+        """List the enabled automations the viewer may add the object to, with no host read each.
+
+        Empty unless can_create and the viewer may write the object; both are checked only when
+        some automation qualifies. The full target check runs when the add is previewed and
+        again when it is confirmed.
+        """
+        options: list[QuickAddOption] = []
+        compose_left_out = False
+        names_service = False
+        for rule in candidates:
+            handler = self._offerable(viewer, rule)
+            if handler is None:
+                continue
+            names_service = names_service or (
+                obj.is_swarm_task and names_services(rule.target_selector)
+            )
+            verdict = qualify(handler, rule, obj)
+            if isinstance(verdict, Addition):
+                options.append(
+                    QuickAddOption(
+                        rule.id, rule.name, rule.subsystem, describe_target(rule.target_selector)
+                    )
+                )
+            elif verdict.reason == "compose_managed":
+                compose_left_out = True
+        if not (options or compose_left_out or names_service):
+            return QuickAddOffer()
+        if not can_create or not await self._may_write_object(viewer, obj):
+            return QuickAddOffer()
+        return QuickAddOffer(
+            tuple(options), await self._quick_add_help(viewer, obj, compose_left_out, names_service)
+        )
+
+    async def quick_add_preview(
+        self, actor: Principal, rule_id: int, obj: QuickAddObject
+    ) -> QuickAddPreview:
+        """Return what adding the object to the rule would do, or the refusal; changes nothing.
+
+        An unreachable host raises EnvironmentUnavailable.
+        """
+        rule = await self._visible(actor, rule_id)
+        [view] = await self._views(actor, [rule])
+        owner_is_other = rule.created_by_user_id != actor.user_id
+        before = names_in(rule.target_selector)
+        after = before
+        refusal: str | None = None
+        target: TargetPreview | None = None
+        standing: OwnerStanding | None = None
+        released = 0
+        try:
+            handler = self._handler(rule.subsystem)
+            verdict = qualify(handler, rule, obj)
+            if isinstance(verdict, Declined):
+                raise ValidationFailed({"rule": verdict.message})
+            _check_prune(
+                rule.subsystem,
+                _normalised(handler, rule.parameters),
+                verdict.selector,
+                owner_is_administrator=await self._owner_is_administrator(rule),
+            )
+            await self._authorise_added(actor, handler, obj, verdict.selector)
+        except ValidationFailed as invalid:
+            refusal = " ".join(invalid.fields.values())
+        except PermissionDenied as denied:
+            refusal = str(denied)
+        else:
+            after = verdict.after
+            target = await self._preview_added(actor, handler, rule, verdict.selector, obj)
+            released = len(await rule_holds(self._db, self._clock, rule))
+            if owner_is_other:
+                standing = await self._owner_standing(rule, handler, obj)
+        return QuickAddPreview(
+            view=view,
+            digest=rule_digest(rule, view.job),
+            names_before=before,
+            names_after=after,
+            target=target,
+            refusal=refusal,
+            owner_is_other=owner_is_other,
+            owner_standing=standing,
+            released_holds=released,
         )
 
     async def create(
@@ -717,6 +875,32 @@ class AutomationRuleService:
             schedule_expression=schedule_expression,
             time_zone=time_zone,
             overrun_policy=overrun_policy,
+        )
+
+    async def quick_add(
+        self,
+        actor: Principal,
+        rule_id: int,
+        obj: QuickAddObject,
+        *,
+        expected_updated_at: str,
+        expected_digest: str,
+        expected_name: str,
+    ) -> AutomationRule:
+        """Add one object's name to an enabled rule's target, leaving the rule enabled.
+
+        The rule is written only if it still matches what the caller reviewed and the object
+        still has the reviewed name; the caller's access to every target is checked first.
+        """
+        rule = await self._visible(actor, rule_id)
+        return await self._quick_add(
+            actor,
+            rule_id,
+            environment_id=rule.environment_id,
+            obj=obj,
+            expected_updated_at=expected_updated_at,
+            expected_digest=expected_digest,
+            expected_name=expected_name,
         )
 
     async def enable(
@@ -881,6 +1065,63 @@ class AutomationRuleService:
         return updated
 
     @audited(
+        action="automation_rule_updated",
+        target_type="automation_rule",
+        target_id=lambda a: str(a["rule_id"]),
+        environment_id=lambda a: a["environment_id"],
+    )
+    async def _quick_add(
+        self,
+        actor: Principal,
+        rule_id: int,
+        *,
+        environment_id: int | None,
+        obj: QuickAddObject,
+        expected_updated_at: str,
+        expected_digest: str,
+        expected_name: str,
+    ) -> AutomationRule:
+        audit = current_audit()
+        audit.detail["target_added"] = obj.name
+        rule = await self._visible(actor, rule_id)
+        handler = self._handler(rule.subsystem)
+        if obj.name != expected_name:
+            audit.reason = "changed_since_review"
+            raise ValidationFailed({"object": OBJECT_RENAMED})
+        job = await self._job_of(rule)
+        self._require_reviewed(rule, job, expected_updated_at, expected_digest)
+        added = self._require_addition(rule, handler, obj)
+        _check_prune(
+            rule.subsystem,
+            _normalised(handler, rule.parameters),
+            added.selector,
+            owner_is_administrator=await self._owner_is_administrator(rule),
+        )
+        await self._authorise_added(actor, handler, obj, added.selector)
+        async with self._db.transaction():
+            rule = await self._visible(actor, rule_id)
+            job = await self._job_of(rule)
+            self._require_reviewed(rule, job, expected_updated_at, expected_digest)
+            added = self._require_addition(rule, handler, obj)
+            await self._rules.update(
+                rule_id,
+                name=rule.name,
+                target_selector=added.selector,
+                parameters=rule.parameters,
+            )
+            audit.detail.update(
+                name_changed=False,
+                target_changed=True,
+                parameters_changed=False,
+                schedule_changed=False,
+                overrun_changed=False,
+            )
+            updated = await self._rules.get(rule_id)
+        if updated is None:
+            raise DatabaseError("a rule written by this call could not be read back")
+        return updated
+
+    @audited(
         action=lambda a: "automation_rule_enabled" if a["enabled"] else "automation_rule_disabled",
         target_type="automation_rule",
         target_id=lambda a: str(a["rule_id"]),
@@ -1014,6 +1255,137 @@ class AutomationRuleService:
                 audit.detail.update(
                     subsystem=rule.subsystem, name=rule.name, job_id=job.id, runs_deleted=runs
                 )
+
+    def _require_reviewed(
+        self, rule: AutomationRule, job: ScheduledJob, updated_at: str, digest: str
+    ) -> None:
+        if rule.updated_at != updated_at or rule_digest(rule, job) != digest:
+            current_audit().reason = "changed_since_review"
+            raise ValidationFailed({"rule": CHANGED_BEFORE_ADD})
+
+    def _require_addition(
+        self, rule: AutomationRule, handler: Subsystem, obj: QuickAddObject
+    ) -> Addition:
+        verdict = qualify(handler, rule, obj)
+        if isinstance(verdict, Declined):
+            current_audit().reason = verdict.reason
+            raise ValidationFailed({"rule": verdict.message})
+        return verdict
+
+    def _offerable(self, viewer: Principal, rule: AutomationRule) -> Subsystem | None:
+        if not rule.is_enabled or not (viewer.is_administrator or _owns(viewer, rule)):
+            return None
+        try:
+            handler = self._handler(rule.subsystem)
+        except ValidationFailed:
+            return None
+        return None if handler.administrators_only and not viewer.is_administrator else handler
+
+    async def _authorise_added(
+        self, actor: Principal, handler: Subsystem, obj: QuickAddObject, selector: str
+    ) -> None:
+        try:
+            await self._authoriser.require_create(actor, obj.environment_id)
+        except PermissionDenied:
+            raise PermissionDenied(NO_CREATE_ACCESS) from None
+        try:
+            await handler.authorise_target(actor, obj.environment_id, selector, self._authoriser)
+        except PermissionDenied:
+            raise PermissionDenied(NO_WRITE_ACCESS) from None
+
+    async def _owner_standing(
+        self, rule: AutomationRule, handler: Subsystem, obj: QuickAddObject
+    ) -> OwnerStanding:
+        owner_id = rule.created_by_user_id
+        owner = (
+            None if owner_id is None else await UserRepository(self._db, self._clock).get(owner_id)
+        )
+        if owner is None or not owner.is_enabled:
+            return "lost"
+        principal = Principal(user_id=owner.id, username=owner.username, role=owner.role)
+        if principal.is_administrator:
+            return "write"
+        if handler.administrators_only:
+            return "lost"
+        try:
+            await self._authoriser.require_create(principal, obj.environment_id)
+        except (ResourceNotFound, PermissionDenied):
+            return "lost"
+        self._authoriser.forget_decisions()
+        try:
+            await self._authoriser.require_access(principal, obj.resource_key, "write")
+        except (PermissionDenied, ObjectTooLarge):
+            return "read"
+        except ResourceNotFound:
+            return "hidden"
+        return "write"
+
+    async def _may_write_object(self, viewer: Principal, obj: QuickAddObject) -> bool:
+        try:
+            await self._authoriser.require_access(viewer, obj.resource_key, "write")
+        except (PermissionDenied, ResourceNotFound, EnvironmentUnavailable, ObjectTooLarge):
+            return False
+        return True
+
+    async def _may_read_object(self, viewer: Principal, key: ResourceKey) -> bool:
+        try:
+            await self._authoriser.require_access(viewer, key, "read")
+        except (PermissionDenied, ResourceNotFound, EnvironmentUnavailable, ObjectTooLarge):
+            return False
+        return True
+
+    async def _quick_add_help(
+        self, viewer: Principal, obj: QuickAddObject, compose_left_out: bool, names_service: bool
+    ) -> QuickAddHelp:
+        project = obj.labels.get(COMPOSE_PROJECT_LABEL, "")
+        valid = compose_left_out and SWARM_STACK_NAME.fullmatch(project) is not None
+        stack: str | None = None
+        if valid:
+            found = await StackListRepository(self._db).kinds_folded(obj.environment_id, [project])
+            row = next(iter(found.values()), None)
+            if (
+                row is not None
+                and row[1] == "compose"
+                and await self._may_read_object(
+                    viewer, ResourceKey(obj.environment_id, "stack", row[0])
+                )
+            ):
+                stack = row[0]
+        service = obj.labels.get(SWARM_SERVICE_LABEL, "")
+        readable_service = (
+            names_service
+            and is_canonical_id("service", service)
+            and await self._may_read_object(
+                viewer, ResourceKey(obj.environment_id, "service", service)
+            )
+        )
+        return QuickAddHelp(
+            compose_left_out=compose_left_out,
+            compose_project=project if valid else None,
+            compose_stack=stack,
+            swarm_service_id=service if readable_service else None,
+        )
+
+    async def _preview_added(
+        self,
+        actor: Principal,
+        handler: Subsystem,
+        rule: AutomationRule,
+        selector: str,
+        obj: QuickAddObject,
+    ) -> TargetPreview | None:
+        environment_id = rule.environment_id
+        parsed = parse_selector_text(selector, ALL_KINDS)
+        if environment_id is None or not isinstance(
+            parsed, ServiceTarget | StackTarget | ContainerTarget
+        ):
+            return None
+        try:
+            return await handler.preview_targets(
+                actor, environment_id, canonical(only_name(parsed, obj.name))
+            )
+        except (EnvironmentUnavailable, ObjectTooLarge) as error:
+            return TargetPreview(names=(), others=0, note=str(error))
 
     async def _preview(self, actor: Principal, rule_id: int) -> RulePreview:
         rule = await self._visible(actor, rule_id)

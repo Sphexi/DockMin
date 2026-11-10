@@ -1612,6 +1612,7 @@ class ContainerUpdater(Subsystem):
         {"container", "labels", "stack", "service"}
     )
     stack_kinds: ClassVar[frozenset[StackKind]] = frozenset({"compose", "swarm"})
+    refuses_compose_managed: ClassVar[bool] = True
 
     def __init__(
         self, deps: SubsystemDeps, *, self_identity: SelfIdentitySource | None = None
@@ -1644,7 +1645,7 @@ class ContainerUpdater(Subsystem):
             authoriser,
             self.target_kinds,
             stack_kinds=self.stack_kinds,
-            refuse_compose_managed=True,
+            refuse_compose_managed=self.refuses_compose_managed,
         )
 
     async def preview_targets(

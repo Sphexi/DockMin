@@ -531,6 +531,7 @@ class Subsystem(ABC):
     supports_dry_run: ClassVar[bool] = False
     target_kinds: ClassVar[frozenset[SelectorKind]] = frozenset()
     stack_kinds: ClassVar[frozenset[StackKind]] = frozenset({"compose"})
+    refuses_compose_managed: ClassVar[bool] = False
 
     def __init__(self, deps: SubsystemDeps) -> None:
         if self.name not in SUBSYSTEMS:

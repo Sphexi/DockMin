@@ -337,6 +337,7 @@ async def _automation_panel(
         labels={},
         stack=None,
         kind="swarm_stack",
+        key=detail.stack.name,
     )
 
 

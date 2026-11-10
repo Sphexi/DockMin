@@ -1,13 +1,16 @@
-{# panel holds rules, more and can_add; a rule of another user carries no name, target or link; return_to names the object the page returns to. Import with context. #}
+{# panel: rules, more, can_add, pause_options, quick_add, quick_add_help; a rule of another user carries no name, target or link. Import with context. #}
 {% from "partials/badge.html" import badge %}
 {% from "partials/job_state_badge.html" import job_state_badge %}
 {% from "jobs/_parts.html" import outcome_badge %}
 
-{% macro automation_panel(panel, add_href, return_to) %}
+{% macro automation_panel(panel, add_href, return_to, environment_id=none) %}
 {% set rules = panel.rules|default([]) %}
 {% set more = panel.more|default(0) %}
 {% set can_add = panel.can_add|default(true) %}
 {% set pause_options = panel.pause_options|default([]) %}
+{% set quick_add = panel.quick_add|default([]) %}
+{% set quick_help = panel.quick_add_help|default(none) %}
+{% set object_word = "container" if return_to.startswith("container:") else ("service" if return_to.startswith("service:") else "stack") %}
 <div class="automation-panel">
   {% if rules %}
   <ul class="automation-list">
@@ -76,6 +79,32 @@
   {% endif %}
   {% else %}
   <p class="field__help">Nothing acts on this yet.</p>
+  {% endif %}
+  {% if quick_add %}
+  <form method="get" action="{{ route_path('automation_rule_quick_add_confirm') }}">
+    <div class="field">
+    <label class="field__label" for="quick-add-rule">Add this {{ object_word }} to an automation</label>
+    <div class="row-actions">
+      <select class="field__input field__input--auto" id="quick-add-rule" name="rule_id">
+        {% for option in quick_add %}
+        <option value="{{ option.rule_id }}">{{ option.name }} ({{ option.subsystem }}: {{ option.target }})</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="object" value="{{ return_to }}">
+      <button type="submit" class="btn btn--compact">Add to automation</button>
+    </div>
+    </div>
+  </form>
+  {% endif %}
+  {% if quick_help and quick_help.compose_left_out %}
+  <p class="field__help">To add this container's stack to a container-updater or webhook-receiver automation, use
+    {%- if quick_help.compose_stack and environment_id %} <a href="{{ route_path('environment_stack_detail', environment_id=environment_id, stack_name=quick_help.compose_stack) ~ '?tab=automation' }}">the stack's Automation tab</a>.
+    {%- elif quick_help.compose_project %} the Automation tab of the Compose stack {{ quick_help.compose_project }}.
+    {%- else %} the Automation tab of its Compose stack.
+    {%- endif %}</p>
+  {% endif %}
+  {% if quick_help and quick_help.swarm_service_id and environment_id %}
+  <p class="field__help">Swarm replaces this task container under a new name. Add its service to an automation from <a href="{{ route_path('environment_swarm_service_detail', environment_id=environment_id, service_id=quick_help.swarm_service_id) ~ '?tab=automation' }}">the service's Automation tab</a>.</p>
   {% endif %}
   {% if can_add %}
   <p><a class="btn btn--compact" href="{{ add_href }}">Add automation</a></p>

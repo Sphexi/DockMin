@@ -803,6 +803,7 @@ async def _automation_panel(
         labels={},
         stack=detail.stack,
         kind="service",
+        key=detail.id,
     )
 
 

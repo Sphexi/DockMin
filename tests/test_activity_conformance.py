@@ -185,6 +185,10 @@ NOT_AUDITED: Mapping[str, str] = {
         "reads the rule for its environment, then calls the audited "
         "operation that records the change"
     ),
+    "app/services/automation_rules.py:AutomationRuleService.quick_add": (
+        "reads the rule for its environment, then calls the audited "
+        "operation that records the change"
+    ),
     "app/services/automation_rules.py:AutomationRuleService.enable": (
         "reads the rule for its environment, then calls the audited "
         "operation that records the change"
@@ -348,6 +352,7 @@ NOT_AUDITED: Mapping[str, str] = {
 WRAPPERS = frozenset(
     {
         "app/services/automation_rules.py:AutomationRuleService.update",
+        "app/services/automation_rules.py:AutomationRuleService.quick_add",
         "app/services/automation_rules.py:AutomationRuleService.enable",
         "app/services/automation_rules.py:AutomationRuleService.disable",
         "app/services/automation_rules.py:AutomationRuleService.pause",

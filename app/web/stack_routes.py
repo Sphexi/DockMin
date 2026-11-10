@@ -842,7 +842,13 @@ async def _detail_response(
         "tab_keys": visible,
         "automation": (
             await jobs.rules.for_object(
-                actor, environment_id, name=detail.row.name, labels={}, stack=None, kind="stack"
+                actor,
+                environment_id,
+                name=detail.row.name,
+                labels={},
+                stack=None,
+                kind="stack",
+                key=detail.row.name,
             )
             if jobs is not None and (tab == "automation" or not is_htmx_request(request))
             else None

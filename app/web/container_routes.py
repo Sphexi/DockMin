@@ -1184,6 +1184,7 @@ async def _automation_panel(
         labels={label.key: label.value for label in detail.labels if not label.redacted},
         stack=detail.stack,
         kind="container",
+        key=detail.id,
     )
 
 

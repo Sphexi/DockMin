@@ -30,6 +30,7 @@ An automation runs one type against its target, on a schedule or, for `webhook-r
 | Automation | `/automation/rules/{id}` | `GET`. Query: `limit`, `cursor` |
 | Edit form, save | `/automation/rules/{id}/edit`, `/automation/rules/{id}` | `GET`, `POST` |
 | Add or remove a target name row | `/automation/rules/-/targets` | `POST`, htmx; the form posts to itself without script ([Target field](#target-field)) |
+| Quick add confirmation, quick add | `/automation/rules/-/quick-add` | `GET`, `POST`. `GET` query: `rule_id`, `object` (`container:<id>`, `stack:<name>`, `swarm_stack:<name>` or `service:<id>`) ([Add to an automation](#add-to-an-automation)) |
 | Enable confirmation, enable | `/automation/rules/{id}/enable` | `GET`, `POST` |
 | Disable | `/automation/rules/{id}/disable` | `POST` |
 | Pause, resume | `/automation/rules/{id}/pause`, `/automation/rules/{id}/resume` | `POST` |
@@ -94,6 +95,7 @@ An automation runs one type against its target, on a schedule or, for `webhook-r
 | Create an automation | In any environment | In an environment where they have create access, never the local socket environment |
 | Edit, enable, resume | Any automation | Their own automations; create access and the target check apply again |
 | Disable, pause, delete | Any automation | Their own automations |
+| Add an object to an enabled automation from the object's page | Any enabled automation in the object's environment | Their own enabled automations; create access in the environment and write access to the object ([Add to an automation](#add-to-an-automation)) |
 | Run now, dry run | Any automation | Their own automations |
 | Release a held container | Any automation, with write access to the container | Their own automations, with write access to the container |
 | Rotate a webhook URL | Their own automations only | Their own automations |
@@ -172,6 +174,7 @@ Settings are posted as `param_<name>`. An empty field takes the default. The sto
 | A save that changes nothing | Records nothing |
 | A save that changes the target, a setting or the schedule of an **enabled automation** | The automation is saved and **disabled**. The page reads `The automation is saved and disabled. Review it, then enable it again.` The event carries `rule_disabled: true` |
 | A save that changes only the name or the overrun policy | The automation stays enabled |
+| Adding one object's name to the target from the object's page | The automation stays enabled. This is a separate action, not a save of this form ([Add to an automation](#add-to-an-automation)) |
 | A schedule change | The next run is recomputed |
 | Access | The editor needs create access to the environment and the target check |
 | Recorded | `automation_rule_updated`, with `name_changed`, `target_changed`, `parameters_changed`, `schedule_changed` and `overrun_changed` ([Jobs](Administration-Jobs)) |
@@ -1697,12 +1700,96 @@ The container page, the Compose stack page, the Swarm service page and the manag
 | Other users' automations | `An automation of another user`, with its type |
 | Empty | `Nothing acts on this yet.` |
 | `Add automation` | Shown when the viewer has create access in the environment. Opens the new-automation form with the environment and the object filled in |
+| `Add this <object> to an automation` | A list of existing automations and `Add to automation`. Shown when at least one automation qualifies ([Add to an automation](#add-to-an-automation)) |
 
 - `Pause` and `Resume` on the panel return to the object's Automation tab. Their `return_to` is `container:<full id>`, `stack:<name>`, `service:<full id>` or `swarm_stack:<name>` and is mapped to a fixed page; any other value returns to the automation page.
 - `Pause` and `Resume` are offered for an automation that is scheduled, running, waiting for calls or without a next run, or paused.
 - `Add automation` on the Swarm service page fills in `target_kind=service` and the service's name. On the Swarm stack page it fills in `target_kind=stack` and the stack's name.
 - On a container page, an automation that matches a label is listed only when the viewer can see that label. A label withheld from the viewer does not make its automations appear.
 - For administrators, the Automation tab also lists the events that subsystems wrote on the object, under `Automated actions` ([Activity](Administration-Activity)).
+
+### Add to an automation
+
+The panel lists the existing automations the object can be added to. Choosing one opens a confirmation page. Confirming appends the object's name to the automation's target and leaves the automation enabled.
+
+| Item | Content |
+|---|---|
+| Control | `Add this container to an automation`, `Add this stack to an automation` or `Add this service to an automation`: a labelled list and `Add to automation`. A plain `GET` form, so it works without script |
+| Option text | `<automation name> (<type>: <target>)` |
+| Shown when | The viewer has create access in the environment and write access to the object, and at least one automation qualifies. Otherwise the control is absent and `Add automation` is unchanged |
+| Pages | Container, Compose stack, managed Swarm stack, Swarm service |
+
+An automation is listed when all of these hold:
+
+- It is enabled. A paused automation and an automation that turned itself off after failed runs are listed; their state is on the confirmation page.
+- It is in the object's environment.
+- The viewer owns it, or is an administrator. `container-log-exporter` is listed to administrators only.
+- Its target lists names of the page's kind, and its type offers that kind:
+
+  | Page | Target kind | Types listed |
+  |---|---|---|
+  | Container | Container names | `container-health-checker`, `stack-restarter`, `container-updater`, `container-log-exporter`, `webhook-receiver` |
+  | Compose stack | Stack names | The same five types |
+  | Swarm stack | Stack names | `container-updater`, `container-log-exporter`, `webhook-receiver` |
+  | Swarm service | Service names | `container-updater`, `container-log-exporter`, `webhook-receiver` |
+
+- It does not already name the object. Stack names are compared ignoring case.
+- It names fewer than 20 targets.
+- The object's name passes the name rules of the target kind ([Targets](#targets)).
+
+Never listed: an automation whose target is `Containers with labels`, `Services with labels` or `Every container in the environment`; a disabled automation; an automation in another environment; an automation of another user, for a standard user.
+
+| Case | Behaviour |
+|---|---|
+| A container that belongs to a Compose stack | `container-updater` and `webhook-receiver` automations are not listed. When one was left out, a line points to the stack's Automation tab (linked when the stack is managed and the viewer can read it; otherwise the project name as text when it is a valid stack name, else `its Compose stack`) |
+| A Swarm task container | No list. When an automation that names services exists, a line points to the Automation tab of the container's service (linked when the viewer can read the service). Swarm replaces a task container under a new name |
+
+The list makes no Engine call for each automation. The full target check runs on the confirmation page and again on confirm.
+
+#### Confirmation page
+
+`GET /automation/rules/-/quick-add` changes nothing. A refusal shows the reason, offers no confirm and links back to the tab.
+
+| Section | Content |
+|---|---|
+| Facts | Name, type, environment, what the automation acts on, schedule, each parameter, and the state, with the pause end or the failure count where one applies; the owner (administrators only), the next run and the last run |
+| Targets | The names now and the names after, the added name marked `Added`. Names are stored sorted |
+| Matches now | Shown for `container-updater` and `webhook-receiver`: what the target matches, narrowed to the added object |
+| What changes | That the automation stays enabled and acts on the object from its next run; what a run does, with destructive parameters named |
+| `webhook-receiver` | `The automation stays enabled, and anyone holding its webhook token can act on this <object> from now on.` |
+| `container-health-checker` with held containers | The number of held containers released. A confirmed add is a write to the automation, which ends its restart holds ([Budget and hold](#budget-and-hold)) |
+
+When the owner is another user, the page states that runs act with the owner's access, and adds one of these:
+
+| Owner's access to the object | Page states |
+|---|---|
+| Write | Nothing further |
+| Read only | Each run records a failure for the object. After the automation's failure threshold of failed runs in a row it turns itself off, and its owner cannot enable or resume it until the name is removed |
+| Cannot see it | Runs skip it, and the name is shown to the owner on the automation's page |
+| Account disabled or removed, or the owner can no longer use the type or create in the environment | Every run is refused |
+
+The line that the automation stays enabled is omitted when one of the last three applies.
+
+#### Confirm
+
+`POST /automation/rules/-/quick-add` carries the automation, the object, the automation's last-changed time and digest, and the object's name as shown.
+
+| Step | Behaviour |
+|---|---|
+| Success | The name is appended. `is_enabled`, a pause, the job, its schedule and its next run are unchanged. The browser returns to the object's Automation tab with `<name> is added to <automation>. The automation stays enabled.` |
+| Automation changed since the page opened | Refused: `The automation changed since you reviewed it; review it again to add to it.` (`422`, reason `changed_since_review`). A save, pause, resume, enable or disable counts |
+| Object renamed since the page opened | Refused: `The name changed since you reviewed it; review it again to add it.` (`422`, reason `changed_since_review`) |
+| Automation no longer qualifies | Refused with the reason from the list above (`422`; reasons `other_environment`, `rule_disabled`, `not_offered`, `compose_managed`, `swarm_task`, `already_target`, `target_full`, `name_not_valid`, `target_not_valid`) |
+| No create access in the environment | `403`: `You cannot create automations in this environment.` |
+| No write access to the object or its targets | `403`: `You do not have write access to everything this automation would act on.` |
+| Prune rule | Refused as on save when the new target makes `prune_replaced` invalid ([container-updater](#removal-of-replaced-images)) |
+| Automation or object not visible to the viewer, or an `object` outside the four forms | `404`, no row |
+| Host unreachable | `503` |
+| CSRF token missing | Refused |
+
+- Recorded as `automation_rule_updated` with `target_changed` true and `target_added` set to the name, and `name_changed`, `parameters_changed`, `schedule_changed` and `overrun_changed` false. No `rule_disabled`. A refused add records a failure row that also carries `target_added` ([Jobs](Administration-Jobs#recorded-actions)).
+- The object is read again on the server under the viewer's read access. Its name and labels never come from the request.
+- Adding to an automation of another user as an administrator keeps the owner. The checks use the viewer's access; runs use the owner's.
 
 ## Activity events
 

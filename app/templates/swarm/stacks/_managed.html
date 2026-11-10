@@ -177,7 +177,7 @@
 {% macro automation_tab(detail, automation) %}
 <h2 id="tab-heading">Automation</h2>
 {% if automation is not none %}
-{{ automation_panel(automation, route_path("automation_rule_new") ~ "?" ~ {"environment_id": detail.environment_id, "target_kind": "stack", "target": detail.stack.name}|urlencode, "swarm_stack:" ~ detail.stack.name) }}
+{{ automation_panel(automation, route_path("automation_rule_new") ~ "?" ~ {"environment_id": detail.environment_id, "target_kind": "stack", "target": detail.stack.name}|urlencode, "swarm_stack:" ~ detail.stack.name, environment_id=detail.environment_id) }}
 {% else %}
 <p class="field__help">Automation is not available.</p>
 {% endif %}

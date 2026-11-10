@@ -120,6 +120,7 @@ from app.web import (
     activity_routes,
     anonymous_binding_routes,
     auth_routes,
+    automation_quick_add_routes,
     automation_routes,
     automation_webhook_routes,
     backup_routes,
@@ -891,6 +892,7 @@ def build_app(options: AppOptions) -> FastAPI:
     app.include_router(suggestion_routes.router)
     app.include_router(job_routes.router)
     app.include_router(activity_routes.router)
+    app.include_router(automation_quick_add_routes.router)
     app.include_router(automation_routes.router)
     app.include_router(automation_webhook_routes.router)
     app.include_router(environment_routes.router)

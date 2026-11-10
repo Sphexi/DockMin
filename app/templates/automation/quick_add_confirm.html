@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "automation/_parts.html" import rule_facts, run_marker, what_runs_do with context %}
+{% from "automation/_target_preview.html" import target_preview %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% from "partials/error_state.html" import error_state %}
+{% from "partials/page_header.html" import page_header %}
+{% block title %}Add to {{ view.rule.name }} - dockmin{% endblock %}
+{% set crumb_object = view.rule.name %}
+{% set crumb_object_href = route_path('automation_rule_detail', rule_id=view.rule.id) %}
+{% set crumb_page = "Add to automation" %}
+{% block content %}
+{% set rule = view.rule %}
+{% call page_header("Add to automation", "Review the automation and its targets. Nothing changes until you confirm.") %}
+<a class="btn" href="{{ back_href }}">Back</a>
+{% endcall %}
+
+<p><strong>Add {{ object_word }} {{ object.name }} to {{ rule.name }}</strong></p>
+
+{{ rule_facts(view, parameters) }}
+<dl class="facts">
+  {% if view.owner %}
+  <dt>Owner</dt>
+  <dd>{{ view.owner }}</dd>
+  {% endif %}
+  <dt>Next run</dt>
+  <dd>{% if view.job.schedule_kind == "webhook" %}{{ "Pending" if view.next_run_at else "When called" }}{% elif view.next_run_at %}<time datetime="{{ view.next_run_at|timestamp_iso }}">{{ view.next_run_at|timestamp }}</time>{% else %}&mdash;{% endif %}</dd>
+  <dt>Last run</dt>
+  <dd>{% if view.last_run %}{{ run_marker(view.last_run) }} <span class="cell-note"><time datetime="{{ view.last_run.started_at|timestamp_iso }}">{{ view.last_run.started_at|timestamp }}</time></span>{% else %}Never run{% endif %}</dd>
+</dl>
+
+{% if refusal %}
+{{ error_state("This " ~ object_word ~ " cannot be added", refusal) }}
+<p><a class="btn" href="{{ back_href }}">Cancel</a></p>
+{% else %}
+<section class="section" aria-labelledby="targets-heading">
+  <h2 id="targets-heading">Targets</h2>
+  <h3>Now</h3>
+  {% if names_before %}
+  <ul class="target-preview">
+    {% for name in names_before %}
+    <li class="mono cell-wrap">{{ name }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="field__help">No names.</p>
+  {% endif %}
+  <h3>After</h3>
+  <ul class="target-preview">
+    {% for name in names_after %}
+    <li><span class="mono cell-wrap">{{ name }}</span>{% if name not in names_before %} {{ badge("Added", "ok") }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+</section>
+
+{{ target_preview(target) }}
+
+<section class="section" aria-labelledby="effect-heading">
+  <h2 id="effect-heading">What changes</h2>
+  {% set owner_name = view.owner or "the owner" %}
+  <ul>
+    {% if owner_standing is none or owner_standing == "write" %}
+    {% if view.job.schedule_kind == "webhook" %}
+    <li>The automation stays enabled, and anyone holding its webhook token can act on this {{ object_word }} from now on.</li>
+    {% else %}
+    <li>The automation stays enabled and acts on this {{ object_word }} from its next run.</li>
+    {% endif %}
+    {% endif %}
+    {% if owner_is_other %}
+    <li>Runs of this automation act with the access of its owner{% if view.owner %}, {{ view.owner }}{% endif %}.</li>
+    {% endif %}
+    {% if released_holds and rule.subsystem == "container-health-checker" %}
+    <li>{{ released_holds }} held {{ "container is" if released_holds == 1 else "containers are" }} released; the next run may restart {{ "it" if released_holds == 1 else "them" }}.</li>
+    {% endif %}
+    {{ what_runs_do(view, parameters, target_kind, stack_kind) }}
+  </ul>
+  {% if owner_standing == "read" %}
+  <div class="panel panel--alert" role="note">
+    <p>Its owner, {{ owner_name }}, can see this {{ object_word }} but cannot change it, so each run records a failure for it.{% if view.job.failure_threshold %} After {{ view.job.failure_threshold }} failed runs in a row the automation turns itself off, and its owner cannot enable or resume it until this name is removed.{% endif %}</p>
+  </div>
+  {% elif owner_standing == "hidden" %}
+  <div class="panel panel--notice" role="note">
+    <p>Its owner, {{ owner_name }}, cannot see this {{ object_word }}, so runs skip it, and its name is shown to the owner on the automation's page.</p>
+  </div>
+  {% elif owner_standing == "lost" %}
+  <div class="panel panel--alert" role="note">
+    <p>Its owner's account is disabled or removed, so every run of this automation is refused.</p>
+  </div>
+  {% endif %}
+</section>
+
+<div class="job-actions">
+  <form class="form" method="post" action="{{ route_path('automation_rule_quick_add') }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="rule_id" value="{{ rule.id }}">
+    <input type="hidden" name="object" value="{{ object_ref }}">
+    <input type="hidden" name="expected_updated_at" value="{{ rule.updated_at }}">
+    <input type="hidden" name="expected_digest" value="{{ digest }}">
+    <input type="hidden" name="expected_name" value="{{ object.name }}">
+    {{ confirm_targets([rule.name], "automation") }}
+    <div class="form__actions">
+      <button type="submit" class="btn btn--primary">Add to automation</button>
+      <a class="btn" href="{{ back_href }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
