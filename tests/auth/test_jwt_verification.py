@@ -56,7 +56,10 @@ def _case(
     return build, reason, algorithms, extra_key
 
 
-NOW = int(time.time())
+def _now() -> int:
+    return int(time.time())
+
+
 REFUSALS = {
     "alg none": _case(lambda s: unsigned_token("none"), "alg_not_allowed"),
     "alg None in another case": _case(lambda s: unsigned_token("None"), "alg_not_allowed"),
@@ -79,13 +82,13 @@ REFUSALS = {
     "wrong issuer": _case(lambda s: s.token({"iss": "elsewhere"}), "bad_issuer"),
     "wrong audience": _case(lambda s: s.token({"aud": "another-network"}), "bad_audience"),
     "missing issuer": _case(lambda s: s.token(drop=("iss",)), "missing_claim"),
-    "expired beyond the skew": _case(lambda s: s.token(_claims(exp=NOW - PAST)), "expired"),
-    "not yet valid": _case(lambda s: s.token(_claims(nbf=NOW + PAST)), "not_yet_valid"),
+    "expired beyond the skew": _case(lambda s: s.token(_claims(exp=_now() - PAST)), "expired"),
+    "not yet valid": _case(lambda s: s.token(_claims(nbf=_now() + PAST)), "not_yet_valid"),
     "issued longer ago than the maximum age": _case(
-        lambda s: s.token(_claims(iat=NOW - int(MAX_AGE) - 60)), "too_old"
+        lambda s: s.token(_claims(iat=_now() - int(MAX_AGE) - 60)), "too_old"
     ),
     "issued in the future beyond the skew": _case(
-        lambda s: s.token(_claims(iat=NOW + PAST)), "iat_future"
+        lambda s: s.token(_claims(iat=_now() + PAST)), "iat_future"
     ),
     "no issue time": _case(lambda s: s.token(drop=("iat",)), "missing_claim"),
     "no expiry": _case(lambda s: s.token(drop=("exp",)), "missing_claim"),
