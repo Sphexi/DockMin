@@ -4,6 +4,7 @@ import asyncio
 import json
 import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -503,6 +504,22 @@ async def test_a_registry_on_a_permitted_internal_address_is_reached(
     digest = await head(server)
 
     assert digest and len(server.requests) == 1
+
+
+async def test_a_public_only_target_on_a_private_address_is_refused_before_any_connection(
+    servers: Serve, certificates: Certificates, address_policy: Callable[..., None]
+) -> None:
+    server = await servers(registry_ok)
+    address_policy("127.0.0.0/8")
+    client = ManifestClient(timeouts=FAST)
+    address = f"{LOOPBACK}:{server.port}"
+    target = replace(target_for(address, certificates), public_only=True)
+
+    failure = await failure_of(client.head_digest(target, reference_at(address), None))
+    await client.aclose()
+
+    assert failure.kind is ManifestCheckKind.PRIVATE_ADDRESS
+    assert server.requests == []
 
 
 async def test_a_token_service_on_an_internal_address_is_refused_and_the_credentials_stay_home(

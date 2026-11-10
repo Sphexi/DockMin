@@ -352,7 +352,7 @@ A new environment is granted every registry entry that carries the `Added with t
 |---|---|
 | When | In the transaction that creates the environment, for a local socket environment, a remote TLS environment and the environment of the [first-run panel](#first-run-panel) |
 | Entries | `Docker Hub (anonymous)` and `GitHub Container Registry (anonymous)` on a new instance, until they are deleted or edited to use authentication |
-| Effect | The entries are listed as granted to the environment. They are not required: images at any address are checked and updated anonymously without an entry ([Images](Usage-Images#update-check)) |
+| Effect | The entries are listed as granted to the environment. They are not required for public registries. A registry on a private network is checked only when an entry for its address is granted to the environment ([Images](Usage-Images#update-check)) |
 | Recorded | `registry_grants` in the detail of `environment_created` ([Recorded actions](#recorded-actions)) |
 | Environments that exist | Not granted. Grant an entry as any set ([Registries](Administration-Registries#grant-a-set-to-an-environment)) |
 | Withdraw | Per environment ([Registries](Administration-Registries#remove-a-grant)) |

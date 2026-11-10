@@ -70,6 +70,25 @@ def test_an_internal_address_is_refused_without_a_permit(text: str) -> None:
     assert "%" not in refused.value.address
 
 
+@pytest.mark.parametrize(
+    ("text", "public"),
+    [
+        ("8.8.8.8", True),
+        ("2606:4700:4700::1111", True),
+        ("10.0.0.7", False),
+        ("172.16.4.2", False),
+        ("192.168.1.10", False),
+        ("100.64.0.1", False),
+        ("fd12:3456::1", False),
+        ("::ffff:10.0.0.7", False),
+        ("64:ff9b::a00:7", False),
+        ("127.0.0.1", False),
+    ],
+)
+def test_only_a_globally_routable_address_is_public(text: str, public: bool) -> None:
+    assert netpolicy.is_public(address(text)) is public
+
+
 @pytest.mark.parametrize("text", NOT_INTERNAL)
 def test_every_other_address_is_allowed_without_a_permit(text: str) -> None:
     policy = AddressPolicy()

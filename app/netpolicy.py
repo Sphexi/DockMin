@@ -152,6 +152,13 @@ def current() -> AddressPolicy:
     return _policy
 
 
+def is_public(address: IpAddress) -> bool:
+    """Report whether the address, and any IPv4 address it embeds, is globally routable."""
+    plain = _unscoped(address)
+    embedded = _embedded_v4(plain) if isinstance(plain, ipaddress.IPv6Address) else []
+    return plain.is_global and all(form.is_global for form in embedded)
+
+
 def sockaddr_address(sockaddr: tuple[Any, ...]) -> IpAddress | None:
     """Return the IP address of a socket address, or None when it does not parse."""
     try:

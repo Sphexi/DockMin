@@ -136,6 +136,7 @@ DEFERRED: Final = "deferred"
 PERMANENT_REFUSALS: Final = frozenset({"restricted_option", "not_recreatable", "invalid"})
 CHECK_REFUSALS: Final = {
     "authentication_required": "authentication_required",
+    "private_address": "private_address",
     "credential_mismatch": "credential_mismatch",
     "credential_not_available": "credential_unavailable",
 }
@@ -196,6 +197,16 @@ class AuthenticationRequired(_Refusal):
     message = "The registry requires authentication. Bind the image to a credential set."
 
 
+class PrivateAddress(_Refusal):
+    """The registry is on a private network and no entry for its address is granted."""
+
+    reason = "private_address"
+    message = (
+        "The registry is on a private network. Add a registry entry for its address, with "
+        "authentication off if it needs none."
+    )
+
+
 class CredentialMismatch(_Refusal):
     """The bound credential set belongs to another registry address."""
 
@@ -220,7 +231,8 @@ class Deferred(ProductError):
 
 
 REFUSALS: Final[dict[str, type[_Refusal]]] = {
-    cls.reason: cls for cls in (AuthenticationRequired, CredentialMismatch, CredentialUnavailable)
+    cls.reason: cls
+    for cls in (AuthenticationRequired, PrivateAddress, CredentialMismatch, CredentialUnavailable)
 }
 
 

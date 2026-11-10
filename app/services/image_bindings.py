@@ -1047,7 +1047,7 @@ def _binding_target(reference: str) -> str:
         return reference[:128]
 
 
-def public_target(address: str) -> RegistryTarget:
+def public_target(address: str, *, public_only: bool = False) -> RegistryTarget:
     """Return the target for reading a registry with no login."""
     provider: ProviderKind = "dockerhub" if address == DOCKER_HUB_ADDRESS else "custom"
     return RegistryTarget(
@@ -1056,6 +1056,7 @@ def public_target(address: str) -> RegistryTarget:
         verify_tls=True,
         ca_bundle=None,
         extras=parse_extras(provider, {}),
+        public_only=public_only,
     )
 
 

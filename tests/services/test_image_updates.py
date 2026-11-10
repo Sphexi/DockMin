@@ -211,6 +211,19 @@ async def test_an_unbound_reference_is_checked_anonymously_at_its_own_registry_w
     assert login is None
     assert (target.address, target.verify_tls, target.ca_bundle) == (UNREACHABLE_NAME, True, None)
     assert other_target.address == ADDRESS
+    assert target.public_only and other_target.public_only
+
+
+async def test_an_anonymous_check_at_an_address_with_a_granted_entry_may_reach_a_private_network(
+    image_rig: ImageRig, service: ImageUpdateService, manifests: ScriptedManifests
+) -> None:
+    await register(image_rig, "entry")
+    pulled(image_rig)
+
+    await check(service)
+
+    [(target, _, login)] = manifests.calls
+    assert (target.address, target.public_only, login) == (ADDRESS, False, None)
 
 
 async def test_an_anonymous_check_the_registry_refuses_for_authentication_asks_for_a_binding(

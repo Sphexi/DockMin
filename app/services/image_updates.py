@@ -411,7 +411,10 @@ class ImageUpdateService:
                 )
             target, login = resolved.target, resolved.login
         else:
-            target, login = public_target(reference.registry_address), None
+            entry = await self._bindings.has_granted_set_at(
+                environment_id, reference.registry_address
+            )
+            target, login = public_target(reference.registry_address, public_only=not entry), None
         key: _Key = (environment_id, reference.key, set_id, tuple(sorted(digests)))
         verdict = await self._state.verdict(
             key, partial(self._compare, target, reference, login, digests)

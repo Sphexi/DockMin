@@ -149,6 +149,16 @@ class ImageBindingRepository(Repository[StoredBinding]):
         )
         return row is not None
 
+    async def has_granted_set_at(self, environment_id: int, address: str) -> bool:
+        """Report whether any credential set at the address is granted to the environment."""
+        row = await self._session.fetch_one(
+            "SELECT 1 AS present FROM registry_credential rc "
+            "JOIN registry_environment_access rea ON rea.registry_credential_id = rc.id "
+            "WHERE rc.url = ? AND rea.environment_id = ? LIMIT 1",
+            (address, environment_id),
+        )
+        return row is not None
+
     async def count_for_credential(self, credential_id: int) -> int:
         """Count the bindings that name the set."""
         row = await self._session.fetch_one(

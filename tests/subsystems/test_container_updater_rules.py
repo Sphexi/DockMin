@@ -94,6 +94,7 @@ def test_a_verdict_comes_from_the_state_and_the_image_ids(
     ("update", "refusal"),
     [
         (status("unknown", "authentication_required"), "authentication_required"),
+        (status("unknown", "private_address"), "private_address"),
         (status("unknown", "credential_mismatch"), "credential_mismatch"),
         (status("unknown", "credential_not_available"), "credential_unavailable"),
         (status("unknown", "timeout"), None),
@@ -152,6 +153,7 @@ def test_any_other_error_at_pull_time_is_not_a_refusal(error: Exception) -> None
 def test_every_refusal_carries_a_fixed_message_without_registry_text() -> None:
     assert set(REFUSALS) == {
         "authentication_required",
+        "private_address",
         "credential_mismatch",
         "credential_unavailable",
     }

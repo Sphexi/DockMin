@@ -94,13 +94,18 @@ class RegistryProbeTimeouts:
 
 @dataclass(frozen=True, slots=True)
 class RegistryTarget:
-    """What to test: the saved set's connection settings, never its secret."""
+    """What to test: the saved set's connection settings, never its secret.
+
+    `public_only` refuses every resolved address that is not globally routable, the token
+    service's included.
+    """
 
     provider: ProviderKind
     address: str
     verify_tls: bool
     ca_bundle: str | None = field(repr=False)
     extras: ProviderExtras
+    public_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -357,7 +357,7 @@ A Swarm stack chooses credentials for each distinct image reference of its file 
 | Registry address of the set edited | Every binding becomes `credential_missing`, `Registry address changed`. The set's default flag is cleared |
 
 - The name of the lost set is kept with the binding.
-- A `credential_missing` binding behaves as `unbound`. The update check and `container-updater` use anonymous access to the registry in the reference. The update check shows `Checked anonymously; the bound set was deleted.` beside the result, and the run detail of `container-updater` counts `anonymous_fallback` ([Automation](Operations-Automation#updater-run-detail)). A registry that refuses the anonymous request gives `authentication_required`.
+- A `credential_missing` binding behaves as `unbound`. The update check and `container-updater` use anonymous access to the registry in the reference. The update check shows `Checked anonymously; the bound set was deleted.` beside the result, and the run detail of `container-updater` counts `anonymous_fallback` ([Automation](Operations-Automation#updater-run-detail)). A registry that refuses the anonymous request gives `authentication_required`; a registry on a private network with no entry granted at its address gives `private_address` ([Update check](#update-check)).
 - Repair: any pull that names a set, or is offered the only fitting set, binds the reference to it (`rebound`). An administrator uses `Repair` to choose a set without a pull ([Rebind without a pull](#rebind-without-a-pull)). A reference pinned by digest is repaired by pulling it.
 - An administrator's `Anonymous` choice on the rebind page deletes the record.
 
@@ -877,7 +877,7 @@ The check compares the digest an image holds locally for a reference with the di
 | Proxy variables | Not read ([Reference-Deployment](Administration-Registries#registry-connections)) |
 | Credentials | Never sent without a verified certificate |
 
-A reference with no usable binding is checked anonymously at the registry its reference names. No registry entry is needed for the address, and the entries with authentication off, among them the Docker Hub and GitHub Container Registry entries a new instance starts with ([Registries](Administration-Registries#entries-a-new-instance-starts-with)), are not required. The [address policy](Reference-Security#address-policy) applies. Nothing contacts a registry without an administrator's pull or check, a user's update check or a `container-updater` run.
+A reference with no usable binding is checked anonymously at the registry its reference names. No registry entry is needed when the registry and its token service resolve to globally routable addresses. Otherwise an entry for the registry address, with authentication off if it needs none, must be granted to the environment; any credential set counts, an entry with authentication off included. Without one, the check refuses every address that is not global (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, IPv6 `fc00::/7`, loopback, link-local, and IPv4 addresses embedded in IPv6 forms of these), after name resolution and before connecting, for the registry and for the token service it names. The result is `Unknown` with `private_address`. With an entry granted, only the [address policy](Reference-Security#address-policy) applies. The Docker Hub and GitHub Container Registry entries a new instance starts with ([Registries](Administration-Registries#entries-a-new-instance-starts-with)) are not required for these public registries. The check for a dockmin update is not restricted. Nothing contacts a registry without an administrator's pull or check, a user's update check or a `container-updater` run.
 
 ### Results
 
@@ -897,6 +897,7 @@ A reference with no usable binding is checked anonymously at the registry its re
 | `image_id_reference` | The text is an image id, not a registry reference. No registry is contacted |
 | `busy` | No check slot came free within 10 seconds. Not kept |
 | `authentication_required` | The anonymous check was refused with `401` or `403`. Bind the image to a credential set |
+| `private_address` | No registry entry is granted to the environment at the registry address, and the registry or its token service resolves to an address that is not globally routable: `The registry is on a private network. Add a registry entry for its address, with authentication off if it needs none.` |
 | `no_digest` | The registry reported no digest |
 | `dns`, `tcp`, `tls`, `certificate`, `authentication` | The connection stage that failed |
 | `address_refused` | The registry or its token service is on this server or a link-local network and no permit covers it: `The registry or its token service is on this server or a link-local network. Set DOCKMIN_PERMITTED_INTERNAL_NETWORKS to allow it.` ([Reference-Deployment](Reference-Security#address-policy)) |
@@ -913,6 +914,13 @@ A failure is the reference's `Unknown`, never `Up to date`. For a reference whos
 | `container-updater`, update mode | The first run that meets it writes `image_update_refused` for the image and fails the object. Later runs count the object `held` and fail nothing, until the image is bound to a credential set or the reason changes ([Refusals and holds](Operations-Automation#refusals-and-holds)) |
 | `container-updater`, report mode | Failed object, reason `authentication_required`. Holds are ignored |
 | Compose stack | A reference whose check fails, for this or any other reason, is a failed object. The other services of the stack still update |
+
+| `private_address` | Behaviour |
+|---|---|
+| Update check | `Unknown` with the reason, each time the check runs. Granting a registry entry at the registry address clears it |
+| `container-updater`, update mode | As for `authentication_required`: written once as `image_update_refused`, then held until an entry is granted at the address or the reason changes ([Refusals and holds](Operations-Automation#refusals-and-holds)) |
+| `container-updater`, report mode | Failed object, reason `private_address`. Holds are ignored |
+| Entry granted | Only the loopback, link-local and metadata classes still need `DOCKMIN_PERMITTED_INTERNAL_NETWORKS` |
 
 | Limit | Value | Message |
 |---|---|---|

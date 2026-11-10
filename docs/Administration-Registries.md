@@ -265,18 +265,18 @@ An anonymous set records that pulls from the address need no login. The registry
 
 ## Anonymous entries
 
-An entry with authentication off is not required for any address. Unbound images are checked and updated anonymously at the registry their reference names, with or without an entry.
+An entry with authentication off is required only for a registry on a private network. Unbound images are checked and updated anonymously at the registry their reference names, with or without an entry, when the registry and its token service resolve to globally routable addresses.
 
 | Where an entry with authentication off counts | Effect |
 |---|---|
-| Update checks and automatic updates | None. The address needs no entry |
+| Update checks and automatic updates | A registry whose address, or whose token service, is not globally routable is checked only when an entry for its address is granted to the environment, any credential set included. Without one the check fails with `private_address`. With one, the [address policy](Reference-Security#address-policy) applies. A public registry needs no entry |
 | Adoption review | The review checks unbound images at the address ([Environments](Usage-Environments#adopt-everything-on-this-host)) |
 | Pull picker and pull with no choice | An entry that reads as anonymous is handled as in the table below |
 
 | Item | Behaviour |
 |---|---|
 | Binding | An entry is never recorded as a binding. A pull with `Anonymous` writes no binding |
-| Entry deleted | No effect on images. Checks and updates of unbound images do not depend on it |
+| Entry deleted | No effect on images at a public registry. Checks and updates of unbound images at a private-network registry fail with `private_address` |
 | Standard user | Needs no grant on the entry. Anonymous needs none |
 | Stored | No user name and no secret |
 
@@ -763,7 +763,7 @@ The dockmin server connects to registries directly, over HTTPS. It makes these c
 | Direct egress | Allow outbound TCP from the dockmin server to the destinations above. A proxy is not used |
 | Egress policy | Compose provides none. The default bridge network allows all outbound traffic; a restriction is applied at the host's firewall |
 | Internal addresses | Refused unless permitted ([Address policy](Reference-Security#address-policy)) |
-| Update check requests | On a user's request and on each run of a `container-updater` automation ([Automation](Operations-Automation#detection)). `HEAD /v2/<repository>/manifests/<tag>` to the registry address of the bound set or, for an image with no binding, of the image reference, with no registry entry required, and `GET` to its token service when the registry asks for a token. No image data is fetched. Nothing is sent when no check is requested and no automation runs |
+| Update check requests | On a user's request and on each run of a `container-updater` automation ([Automation](Operations-Automation#detection)). `HEAD /v2/<repository>/manifests/<tag>` to the registry address of the bound set or, for an image with no binding, of the image reference, and `GET` to its token service when the registry asks for a token. An image with no binding needs no registry entry when the registry and its token service resolve to globally routable addresses; otherwise an entry granted to the environment at the registry address is required. No image data is fetched. Nothing is sent when no check is requested and no automation runs |
 | Bind unbound images and adoption reviews | On an administrator's request only. `HEAD` requests, one for each granted credential set, and an anonymous `HEAD` only when no set matched; at most 200 references, 5 requests at a time ([Images](Usage-Images#bind-unbound-images)) |
 | Pulls and pushes | The Docker host connects to the registry, not dockmin. The host needs outbound access to the registry. dockmin sends the credential set's login to the host with the request |
 | Proxy variables | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and their lower-case forms are not read |

@@ -67,6 +67,7 @@ class ManifestCheckKind(StrEnum):
     PROTOCOL = "protocol"
     TIMEOUT = "timeout"
     ADDRESS_REFUSED = "address_refused"
+    PRIVATE_ADDRESS = "private_address"
 
 
 _MESSAGES: Final = {
@@ -86,6 +87,10 @@ _MESSAGES: Final = {
     ManifestCheckKind.ADDRESS_REFUSED: (
         "The registry or its token service is on this server or a link-local network. "
         f"Set {netpolicy.PERMIT_VARIABLE} to allow it."
+    ),
+    ManifestCheckKind.PRIVATE_ADDRESS: (
+        "The registry or its token service is on a private network. Add a registry entry for "
+        "its address, with authentication off if it needs none, to check it."
     ),
 }
 
@@ -317,6 +322,10 @@ class RegistryAttempt:
             addresses = [literal_address(literal, port)]
         else:
             addresses = await self._resolve(host, port)
+        if self._target.public_only:
+            addresses = [address for address in addresses if _public(address)]
+            if not addresses:
+                raise AttemptFailed(ManifestCheckKind.PRIVATE_ADDRESS)
         result = await connect_first(
             addresses, attempt_limit=self._timeouts.tcp, budget=self._budget
         )
@@ -415,6 +424,11 @@ def refuse_status(status: int) -> None:
     if status == 429:
         raise AttemptFailed(ManifestCheckKind.RATE_LIMITED)
     raise AttemptFailed(ManifestCheckKind.PROTOCOL)
+
+
+def _public(address: Address) -> bool:
+    found = netpolicy.sockaddr_address(address[1])
+    return found is not None and netpolicy.is_public(found)
 
 
 def _digest_of(reply: wire.WireResponse) -> str:

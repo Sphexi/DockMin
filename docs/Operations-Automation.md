@@ -530,7 +530,7 @@ A run does not act on the container dockmin runs in, on its Compose project, on 
 | `failure` | `would_remove`, `would_create`, `drifted`, `unresolved` | `container-updater`, Swarm stack: the redeploy was refused before anything was sent ([Refusals of a stack redeploy](#refusals-of-a-stack-redeploy)) |
 | `failure` | `restricted` | `container-updater`, Swarm service or stack: the owner is a standard user and the service, or a service of the stack, uses options only administrators may set |
 | `failure` | `changed_since_review` | `container-updater`, Swarm stack: a member service changed after the plan was made and the redeploy stopped |
-| `failure`, `partial` | `credential_mismatch`, `credential_unavailable`, `authentication_required` | `container-updater`: the object was refused in update mode, or failed its check in report mode ([Refusals and holds](#refusals-and-holds)) |
+| `failure`, `partial` | `credential_mismatch`, `credential_unavailable`, `authentication_required`, `private_address` | `container-updater`: the object was refused in update mode, or failed its check in report mode ([Refusals and holds](#refusals-and-holds)) |
 | `failure`, `partial` | `dns`, `tcp`, `tls`, `certificate`, `authentication`, `address_refused`, `not_found`, `rate_limited`, `no_digest`, `protocol`, `timeout`, `busy` | `container-updater`: the registry check of the failed object reached no verdict ([Detection](#detection)) |
 | `failure` | `compose_failed`, `pull_failed`, `engine_rejected`, `outcome_unknown` | `container-updater`, stack target: the redeploy failed with the reason its activity row records ([Stacks](Usage-Stacks)) |
 | `failure` | `update_check_failed` | `container-updater`: the update check could not be completed |
@@ -779,7 +779,7 @@ Targets: container, Compose stack, Swarm stack, Swarm service, labels. Not offer
 | Item | Behaviour |
 |---|---|
 | Reference checked | The image reference the container was created from (`Config.Image`), in canonical form. For a stack, that of each project container |
-| Check | The update check ([Images](Usage-Images)), from the dockmin server, in groups of 25 references. A bound reference is checked with its set; a reference with no binding, or a `credential_missing` binding, is checked anonymously at the registry in the reference. No registry entry is needed |
+| Check | The update check ([Images](Usage-Images)), from the dockmin server, in groups of 25 references. A bound reference is checked with its set; a reference with no binding, or a `credential_missing` binding, is checked anonymously at the registry in the reference. No registry entry is needed when the registry and its token service resolve to globally routable addresses; for a registry on a private network an entry for its address must be granted to the environment, else the check fails with `private_address` |
 | Image id reference | `Config.Image` is an image id (12 to 64 hexadecimal digits, optionally `sha256:`): skipped, `image_id_reference` |
 | Digest reference | Skipped, `pinned` |
 | Invalid reference | Counted `unknown` |
@@ -790,14 +790,14 @@ Targets: container, Compose stack, Swarm stack, Swarm service, labels. Not offer
 | `Up to date`, and the container runs an image other than the image the reference names on the host | Counted `local_newer` | Recreate without a pull. `update_reason` is `local_newer` |
 | `Up to date`, same image | Counted `up_to_date` | Counted `up_to_date` |
 | `Pinned` | Skipped, `pinned` | Skipped, `pinned` |
-| `Unknown` with `credential_mismatch`, `credential_not_available` or `authentication_required` | Failed object, reason `credential_mismatch`, `credential_unavailable` or `authentication_required` | [Refused](#refusals-and-holds) |
+| `Unknown` with `credential_mismatch`, `credential_not_available`, `authentication_required` or `private_address` | Failed object, reason `credential_mismatch`, `credential_unavailable`, `authentication_required` or `private_address` | [Refused](#refusals-and-holds) |
 | `Unknown` with `no_local_digest` | Counted `unknown` | Counted `unknown` |
 | Any other `Unknown`: the registry failures of [Images](Usage-Images#results) | Failed object, reason the check's | Failed object, reason the check's. Nothing is written |
 
 - A result that could not be decided is never treated as up to date. Except for `no_local_digest`, it fails the object, so the run is `partial` or `failure` and notifies ([Outcomes](#outcomes)).
 - A reference with no binding is checked and pulled anonymously. A registry that refuses it gives `authentication_required`, which update mode refuses once and then holds until the image is bound to a credential set ([Images](Usage-Images#credential-bindings)) or the reason changes ([Refusals and holds](#refusals-and-holds)).
 - A binding whose set was deleted, or whose registry address changed, behaves as no binding. Each such reference is counted `anonymous_fallback` in the run detail.
-- Entries with authentication off, among them those a new instance starts with ([Registries](Administration-Registries#entries-a-new-instance-starts-with)), are not required for a check. The [address policy](Reference-Security#address-policy) applies.
+- Entries with authentication off, among them those a new instance starts with ([Registries](Administration-Registries#entries-a-new-instance-starts-with)), are required only for a registry on a private network. With an entry granted at the registry address the [address policy](Reference-Security#address-policy) applies; without one every address that is not globally routable is refused as `private_address`.
 - A Compose stack with a reference whose check failed is a failed object. The stack's other references still update.
 - The tables above describe containers and Compose stacks. Swarm services and stacks are compared with the digest in the service's own image ([Swarm detection](#swarm-detection)).
 
@@ -958,7 +958,7 @@ A Swarm service target, or each service of a Swarm stack target. The nodes pull 
 | `Update available` | Counted `update_available`; listed in `update_available_refs` | Update ([Swarm services](#swarm-services), [Swarm stacks](#swarm-stacks)) |
 | `Up to date` | Counted `up_to_date` | Counted `up_to_date` |
 | `Pinned` | Skipped, `pinned` | Skipped, `pinned` |
-| `Unknown` with `credential_mismatch`, `credential_not_available` or `authentication_required` | Failed object, reason `credential_mismatch`, `credential_unavailable` or `authentication_required` | [Refused](#refusals-and-holds) |
+| `Unknown` with `credential_mismatch`, `credential_not_available`, `authentication_required` or `private_address` | Failed object, reason `credential_mismatch`, `credential_unavailable`, `authentication_required` or `private_address` | [Refused](#refusals-and-holds) |
 | `Unknown` with `no_local_digest` | Counted `unknown` | Counted `unknown` |
 | Any other `Unknown` | Failed object, reason the check's | Failed object, reason the check's. Nothing is written |
 
@@ -1152,9 +1152,10 @@ A refusal is written in update mode only. Report mode counts these objects as fa
 | `credential_mismatch` | The bound set belongs to another registry address |
 | `credential_unavailable` | The bound set is not granted to the environment, the owner holds no grant on it, or its secret cannot be used. A set that still exists at the same address is never replaced by anonymous access |
 | `authentication_required` | The registry refused the anonymous check of a reference with no usable binding |
+| `private_address` | The registry or its token service is on a private network and no registry entry is granted to the environment at the registry address |
 
 - A refusal fails the object in the run that writes it: `image_update_refused`, result `failure`, reason as above.
-- A reference with no binding, and a `credential_missing` binding, are checked and pulled anonymously. They are refused only with `authentication_required`, when the registry refuses the anonymous request.
+- A reference with no binding, and a `credential_missing` binding, are checked and pulled anonymously. They are refused only with `authentication_required`, when the registry refuses the anonymous request, and `private_address`, when the registry is on a private network and no entry is granted at its address.
 - The registry failures (`dns`, `tcp`, `tls`, `certificate`, `authentication`, `address_refused`, `not_found`, `rate_limited`, `no_digest`, `protocol`, `timeout`, `busy`) are not refusals. They fail the object with the check's reason in every mode and write nothing.
 - An `image_update_refused` row that names `not_bound` or `credential_missing` holds nothing.
 
@@ -1179,7 +1180,7 @@ A hold ends when any of these happens:
 | A user acts on the object | Any user action recorded for it after the row. For a Swarm stack, an action on any of its services releases as well. Times have one-second resolution; an action in the same second does not release |
 | The automation is written to | An edit, disable then enable, pause then resume, after the row. An automation cannot release its own holds |
 | A newer row of the automation | A later `container_recreated` (container), `stack_redeployed` (stack) or, for a Swarm service, `service_updated` or `service_credentials_refreshed` row of the automation on the object |
-| The cause changes | A different refusal reason or reference, or, for `authentication_required`, the image being bound to a credential set. For the rollback holds, a new digest at the registry or a different local image |
+| The cause changes | A different refusal reason or reference, or, for `authentication_required`, the image being bound to a credential set, or, for `private_address`, a registry entry being granted to the environment at the registry address. For the rollback holds, a new digest at the registry or a different local image |
 
 - A hold on a Compose stack with a refusal does not stop the stack's other references from being updated. A Swarm stack with a refused reference is not redeployed ([Swarm stacks](#swarm-stacks)).
 - A report run ignores holds. A dry run applies them.
@@ -1954,6 +1955,7 @@ An automation writes no activity event when it skips an object. The run record i
 | `failure`, `target_missing` | No named target exists or is visible to the owner | [Names](#names) |
 | `partial` | Some objects failed and others succeeded. The reason is the failed object's when one failed, otherwise `some_objects_failed` | The `automation_run_partial` event; detail `failed` |
 | `failure` or `partial`, `authentication_required` | The registry refused the anonymous check of an image that has no binding. In update mode the next runs hold the object instead | [Images](Usage-Images#results): bind the image to a credential set |
+| `failure` or `partial`, `private_address` | The registry is on a private network and no entry is granted at its address. In update mode the next runs hold the object instead | [Images](Usage-Images#results): add a registry entry for the address, with authentication off if it needs none |
 | `success` with zero counts | Nothing matched, or every match was skipped | The run detail counts: `matched`, `suppressed`, `busy`, `held`, `not_permitted`, `deferred`. For named targets, `target_outcomes` and `not_found_names` say what became of each name |
 
 4. A container the health checker counts `held` has used its budget earlier. The hold ends when a user acts on the container, when the automation is written to, when `Release` is used on the automation page, or, with `auto_release`, when the container has stayed healthy long enough ([Budget and hold](#budget-and-hold)).
