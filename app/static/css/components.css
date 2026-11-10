@@ -2622,6 +2622,22 @@ a.resource-tile .resource-tile__count {
   align-items: center;
 }
 
+.automation-panel__add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: var(--space-3);
+  margin-block: var(--space-7) var(--space-6);
+}
+
+.automation-panel__add > .field__label {
+  margin: 0;
+}
+
+.automation-panel__add > select {
+  max-inline-size: 100%;
+}
+
 .target-preview {
   display: grid;
   gap: var(--space-1);

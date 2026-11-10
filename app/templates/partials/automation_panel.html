@@ -81,19 +81,15 @@
   <p class="field__help">Nothing acts on this yet.</p>
   {% endif %}
   {% if quick_add %}
-  <form method="get" action="{{ route_path('automation_rule_quick_add_confirm') }}">
-    <div class="field">
-    <label class="field__label" for="quick-add-rule">Add this {{ object_word }} to an automation</label>
-    <div class="row-actions">
-      <select class="field__input field__input--auto" id="quick-add-rule" name="rule_id">
-        {% for option in quick_add %}
-        <option value="{{ option.rule_id }}">{{ option.name }} ({{ option.subsystem }}: {{ option.target }})</option>
-        {% endfor %}
-      </select>
-      <input type="hidden" name="object" value="{{ return_to }}">
-      <button type="submit" class="btn btn--compact">Add to automation</button>
-    </div>
-    </div>
+  <form class="automation-panel__add" method="get" action="{{ route_path('automation_rule_quick_add_confirm') }}">
+    <label class="field__label" for="quick-add-rule">Add this {{ object_word }} to an existing automation</label>
+    <select class="field__input field__input--auto" id="quick-add-rule" name="rule_id">
+      {% for option in quick_add %}
+      <option value="{{ option.rule_id }}">{{ option.name }} ({{ option.subsystem }}: {{ option.target }})</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="object" value="{{ return_to }}">
+    <button type="submit" class="btn btn--compact">Add to automation</button>
   </form>
   {% endif %}
   {% if quick_help and quick_help.compose_left_out %}
@@ -107,7 +103,10 @@
   <p class="field__help">Swarm replaces this task container under a new name. Add its service to an automation from <a href="{{ route_path('environment_swarm_service_detail', environment_id=environment_id, service_id=quick_help.swarm_service_id) ~ '?tab=automation' }}">the service's Automation tab</a>.</p>
   {% endif %}
   {% if can_add %}
-  <p><a class="btn btn--compact" href="{{ add_href }}">Add automation</a></p>
+  <div class="automation-panel__add">
+    <p class="field__label">Add this {{ object_word }} to a new automation</p>
+    <a class="btn btn--compact" href="{{ add_href }}">Add to new automation</a>
+  </div>
   {% endif %}
 </div>
 {% endmacro %}

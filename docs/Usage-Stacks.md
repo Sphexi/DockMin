@@ -1460,8 +1460,8 @@ The `Automation` tab holds the panel. No other tab shows it. `Pause` and `Resume
 | Every viewer | Automation, schedule, state, next run, pause end, last outcome |
 | The rule's owner and administrators | Rule name and target, linked; `Pause` or `Resume` |
 | Another user's rule | `A rule of another user` |
-| `Add automation` | Shown to users with create access in the environment. Opens the `New automation` form with the stack's name filled in |
-| `Add this stack to an automation` | A list of the enabled automations of the stack's environment that the viewer may edit and that name stacks, and `Add to automation`. Shown to users with create access in the environment and write access to the stack. Opens a confirmation page; confirming adds the stack's name and leaves the automation enabled |
+| `Add to new automation` | Under the heading `Add this stack to a new automation`. Shown to users with create access in the environment. Opens the `New automation` form with the stack's name filled in |
+| `Add this stack to an existing automation` | A list of the enabled automations of the stack's environment that the viewer may edit and that name stacks, and `Add to automation`. Shown to users with create access in the environment and write access to the stack. Opens a confirmation page; confirming adds the stack's name and leaves the automation enabled |
 
 Details: [Automation](Operations-Automation#per-object-panel), [Add to an automation](Operations-Automation#add-to-an-automation).
 
@@ -3684,7 +3684,7 @@ A namespace that is not managed shows the tabs `Overview`, `Logs` and `Access`. 
 - The file, the values of plain variables and the content of plain files are shown to everyone who can read the stack. Keep credentials in [secret variables](#secret-variables) or [secret files](#secret-files).
 - A notice reads `This stack was adopted from objects created outside dockmin, and nothing has been deployed from its file yet. The first redeploy replaces the running tasks of every service, replaces configs and secrets that the Docker command line named, and removes the old ones. The redeploy confirmation names each one.` until the first redeploy.
 - When the cluster cannot be read, the page lists only the services the file declares.
-- A managed stack has an `Automation` tab: the rules whose target is the stack by name, for automations that act on Swarm stacks, with `Pause`, `Resume`, `Add automation` and `Add this stack to an automation` where allowed ([Automation](Operations-Automation#per-object-panel)). The list offers automations whose type acts on Swarm stacks ([Add to an automation](Operations-Automation#add-to-an-automation)).
+- A managed stack has an `Automation` tab: the rules whose target is the stack by name, for automations that act on Swarm stacks, with `Pause`, `Resume`, `Add to new automation` and `Add this stack to an existing automation` where allowed ([Automation](Operations-Automation#per-object-panel)). The list offers automations whose type acts on Swarm stacks ([Add to an automation](Operations-Automation#add-to-an-automation)).
 - Administrators see an activity panel on the Overview, Automation and Access tabs: `Recent activity`, `Automated actions` and `Access changes` ([Activity panel](#activity-panel)).
 - Redeploy and remove are refused when they would change the Swarm service that runs the container dockmin runs in ([Swarm](Usage-Swarm)).
 

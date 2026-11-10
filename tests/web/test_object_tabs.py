@@ -20,7 +20,7 @@ from tests.web.test_swarm_stack_pages import Browser, create_shop, namespace_ser
 from tests.web.test_swarm_stack_pages import base as swarm_stacks_path
 
 HTMX = {"HX-Request": "true"}
-ADD_AUTOMATION = "Add automation"
+ADD_AUTOMATION = "Add to new automation"
 BLOG = "blog"
 STACK_TABS = ("overview", "file", "variables", "logs", "automation", "access")
 SERVICE_TABS = ("overview", "configuration", "tasks", "automation", "access")

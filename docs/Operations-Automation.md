@@ -122,7 +122,7 @@ Creating takes two steps.
 | 1 | `Automation` radio list of the types offered, and `Environment`. Standard users see the environments they can see, without the local socket environment. Buttons `Continue` and `Cancel` |
 | 2 | The form for that type, headed `Step 2 of 2`. `Create automation` saves the automation disabled and opens it |
 
-1. Open `Automation` and choose `New automation`. From an object's page, the `Automation` tab holds `Add automation`, which fills in the environment and the object.
+1. Open `Automation` and choose `New automation`. From an object's page, the `Automation` tab holds `Add to new automation`, which fills in the environment and the object.
 2. Choose the type and the environment. Choose `Continue`. The types are listed alphabetically.
 3. Fill in `Name`, `Schedule`, `Target` and `Settings` ([Fields](#fields)).
 4. Choose `Create automation`.
@@ -1699,12 +1699,12 @@ The container page, the Compose stack page, the Swarm service page and the manag
 | Owner and administrators also see | Automation name, linked, with the type and target beneath; the last-run link; `Pause` (with a duration) or `Resume` |
 | Other users' automations | `An automation of another user`, with its type |
 | Empty | `Nothing acts on this yet.` |
-| `Add automation` | Shown when the viewer has create access in the environment. Opens the new-automation form with the environment and the object filled in |
-| `Add this <object> to an automation` | A list of existing automations and `Add to automation`. Shown when at least one automation qualifies ([Add to an automation](#add-to-an-automation)) |
+| `Add to new automation` | Under the heading `Add this <object> to a new automation`, below the list of existing automations. Shown when the viewer has create access in the environment. Opens the new-automation form with the environment and the object filled in |
+| `Add this <object> to an existing automation` | A list of existing automations with `Add to automation` below it. Shown when at least one automation qualifies ([Add to an automation](#add-to-an-automation)) |
 
 - `Pause` and `Resume` on the panel return to the object's Automation tab. Their `return_to` is `container:<full id>`, `stack:<name>`, `service:<full id>` or `swarm_stack:<name>` and is mapped to a fixed page; any other value returns to the automation page.
 - `Pause` and `Resume` are offered for an automation that is scheduled, running, waiting for calls or without a next run, or paused.
-- `Add automation` on the Swarm service page fills in `target_kind=service` and the service's name. On the Swarm stack page it fills in `target_kind=stack` and the stack's name.
+- `Add to new automation` on the Swarm service page fills in `target_kind=service` and the service's name. On the Swarm stack page it fills in `target_kind=stack` and the stack's name.
 - On a container page, an automation that matches a label is listed only when the viewer can see that label. A label withheld from the viewer does not make its automations appear.
 - For administrators, the Automation tab also lists the events that subsystems wrote on the object, under `Automated actions` ([Activity](Administration-Activity)).
 
@@ -1714,9 +1714,9 @@ The panel lists the existing automations the object can be added to. Choosing on
 
 | Item | Content |
 |---|---|
-| Control | `Add this container to an automation`, `Add this stack to an automation` or `Add this service to an automation`: a labelled list and `Add to automation`. A plain `GET` form, so it works without script |
+| Control | `Add this container to an existing automation`, `Add this stack to an existing automation` or `Add this service to an existing automation`: a labelled list and `Add to automation`. A plain `GET` form, so it works without script |
 | Option text | `<automation name> (<type>: <target>)` |
-| Shown when | The viewer has create access in the environment and write access to the object, and at least one automation qualifies. Otherwise the control is absent and `Add automation` is unchanged |
+| Shown when | The viewer has create access in the environment and write access to the object, and at least one automation qualifies. Otherwise the control is absent and `Add to new automation` is unchanged |
 | Pages | Container, Compose stack, managed Swarm stack, Swarm service |
 
 An automation is listed when all of these hold:

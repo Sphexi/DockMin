@@ -26,7 +26,7 @@ from tests.web.test_container_pages import containers
 
 HTMX = {"HX-Request": "true"}
 OK = 200
-ADD_AUTOMATION = "Add automation"
+ADD_AUTOMATION = "Add to new automation"
 TABS = ("overview", "labels", "mounts", "networks", "environment", "stats", "logs", "automation")
 ADMIN_TAB_ORDER = [*TABS, "access"]
 STANDARD_TAB_ORDER = ["overview", "labels", "mounts", "networks", "stats", "logs", "automation"]

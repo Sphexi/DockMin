@@ -44,8 +44,9 @@ UNPROCESSABLE = 422
 UNAVAILABLE = 503
 ADD_PATH = "/automation/rules/-/quick-add"
 UPDATED = "automation_rule_updated"
-LABEL = "Add this {} to an automation"
+LABEL = "Add this {} to an existing automation"
 BUTTON = "Add to automation"
+NEW_LABEL = "Add this {} to a new automation"
 COMPOSE_HELP = "To add this container's stack to a container-updater or webhook-receiver automation"
 TASK_HELP = "Swarm replaces this task container under a new name"
 STAYS_ENABLED = "The automation stays enabled and acts on this"
@@ -165,6 +166,9 @@ async def test_each_object_page_lists_the_automations_and_a_confirmed_add_return
     assert {
         kind: LABEL.format(WORDS[kind]) in visible_text(tab.text) for kind, tab in tabs.items()
     } == dict.fromkeys(pages, True)
+    assert {
+        kind: NEW_LABEL.format(WORDS[kind]) in visible_text(tab.text) for kind, tab in tabs.items()
+    } == dict.fromkeys(pages, True)
     assert {kind: object_values(tab.text) for kind, tab in tabs.items()} == {
         kind: [references[kind]] for kind in pages
     }
@@ -236,7 +240,7 @@ async def test_the_container_page_lists_what_fits_and_points_elsewhere_where_it_
     assert COMPOSE_HELP in managed_text
     task_text = visible_text(task.text)
     assert LABEL.format("container") not in task_text and BUTTON not in task_text
-    assert TASK_HELP in task_text and "Add automation" in task_text
+    assert TASK_HELP in task_text and "Add to new automation" in task_text
     assert read_only.status_code == OK
     assert LABEL.format("container") not in visible_text(read_only.text)
     assert options_of(read_only.text) == []

@@ -215,7 +215,7 @@ The Configuration tab lists mounts with the columns `Type`, `Source`, `Target`, 
 
 #### Automation
 
-The `Automation` tab lists the rules that act on the service by name or through its Swarm stack, with `Pause`, `Resume`, `Add automation` and `Add this service to an automation` where allowed ([Per-object panel](Operations-Automation#per-object-panel)). `Add this service to an automation` lists the enabled automations of the service's environment that the viewer may edit and that name services; confirming adds the service's name and leaves the automation enabled ([Add to an automation](Operations-Automation#add-to-an-automation)). No other tab shows it. `Pause` and `Resume` return to the tab.
+The `Automation` tab lists the rules that act on the service by name or through its Swarm stack, with `Pause`, `Resume`, `Add to new automation` and `Add this service to an existing automation` where allowed ([Per-object panel](Operations-Automation#per-object-panel)). `Add this service to an existing automation` lists the enabled automations of the service's environment that the viewer may edit and that name services; confirming adds the service's name and leaves the automation enabled ([Add to an automation](Operations-Automation#add-to-an-automation)). No other tab shows it. `Pause` and `Resume` return to the tab.
 
 #### Activity
 

@@ -243,7 +243,7 @@ When a standard user is refused a terminal because the container uses administra
 | Environment | `environment` | Environment variables (administrators) |
 | Stats | `stats` | CPU, memory, network, block I/O and process readings, and four charts ([Stats](#stats)) |
 | Logs | `logs` | Output of the container ([Logs](#logs)) |
-| Automation | `automation` | The automations that act on the container, `Add this container to an automation` and `Add automation` ([Automation](#automation)) |
+| Automation | `automation` | The automations that act on the container, `Add this container to an existing automation` and `Add to new automation` ([Automation](#automation)) |
 | Access | `access` | Resource control for the container and an effective access search (administrators) |
 
 ### Automation
@@ -256,8 +256,8 @@ The `Automation` tab holds the automations panel. No other tab shows it.
 | Every viewer | Type, schedule, state, next run, last outcome |
 | The automation's owner and administrators | Name and target, linked; `Pause` or `Resume` |
 | Another user's automation | `An automation of another user` |
-| `Add automation` | Shown to users with create access in the environment. Opens the `New automation` form with the container's name filled in |
-| `Add this container to an automation` | A list of the enabled automations of the container's environment that the viewer may edit and that name containers, and `Add to automation`. Shown to users with create access in the environment and write access to the container. Opens a confirmation page; confirming adds the container's name and leaves the automation enabled |
+| `Add to new automation` | Under the heading `Add this container to a new automation`. Shown to users with create access in the environment. Opens the `New automation` form with the container's name filled in |
+| `Add this container to an existing automation` | A list of the enabled automations of the container's environment that the viewer may edit and that name containers, and `Add to automation`. Shown to users with create access in the environment and write access to the container. Opens a confirmation page; confirming adds the container's name and leaves the automation enabled |
 | A container of a Compose stack | `container-updater` and `webhook-receiver` automations are not listed; a line points to the stack's Automation tab |
 | A Swarm task container | No list; a line points to the Automation tab of its service |
 | After `Pause` or `Resume` | The browser returns to the Automation tab |

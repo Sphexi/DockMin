@@ -193,7 +193,7 @@ async def test_the_panel_names_a_rule_to_its_owner_and_administrators_and_hides_
     assert "Automation" in as_user.text and OTHER_USERS_RULE in as_user.text
     assert "Admins" not in as_user.text and f"/automation/rules/{theirs}" not in as_user.text
     assert f"/automation/rules/{mine}" in as_user.text and "Mine" in as_user.text
-    assert "Add automation" in as_user.text
+    assert "Add to new automation" in as_user.text
     assert f"container:{DB}" in as_user.text
     assert (
         "Admins &lt;b&gt;rule&lt;/b&gt;" in as_admin.text and OTHER_USERS_RULE not in as_admin.text
@@ -281,7 +281,7 @@ async def test_the_stack_page_shows_its_rules_and_a_panel_button_returns_to_it(
     )
 
     assert "Restart blog" in page.text and "Stack blog" in page.text
-    assert "Add automation" in page.text and "stack:blog" in page.text
+    assert "Add to new automation" in page.text and "stack:blog" in page.text
     assert "stopped and then started" in confirmation.text.replace("\n", " ")
     assert "automation-panel" not in swapped.text
     assert location(paused) == f"{stacks_path(world)}/blog?tab=automation"
