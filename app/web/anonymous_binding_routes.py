@@ -1,7 +1,7 @@
 """Bind unbound images anonymously: the review job, the review, and the confirmed apply."""
 
 import re
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, Response
@@ -26,6 +26,7 @@ from app.web.identifiers import PathId
 from app.web.image_helpers import JobId
 from app.web.object_pages import (
     Failure,
+    fragment_response,
     page_response,
     problem_page,
     redirect,
@@ -33,6 +34,7 @@ from app.web.object_pages import (
     unavailable_page,
 )
 from app.web.results import show_result
+from app.web.templating import is_htmx_request
 
 router = APIRouter(
     prefix="/environments/{environment_id}/images/anonymous-binding",
@@ -41,6 +43,8 @@ router = APIRouter(
 )
 
 HEADING: Final = "Bind unbound images anonymously"
+JOB_TEMPLATE: Final = "images/anonymous_binding_job.html"
+PANEL_TEMPLATE: Final = "images/_anonymous_binding_job.html"
 DIGEST_MAX: Final = 64
 ADDRESS_MAX: Final = 262
 MAX_REGISTRIES: Final = 50
@@ -164,22 +168,25 @@ async def job_page(
     environment = (await environments.environments.get(actor, environment_id)).summary
     _, job = _own_job(request, actor, environment_id, job_id)
     token = None if job.outcome is None else job.outcome.flags.get("review")
+    review_href = None if token is None else _review_href(request, environment_id, token)
+    panel: dict[str, Any] = {
+        "environment": environment,
+        "job": job,
+        "review_href": review_href,
+        "job_href": _job_href(request, environment_id, job_id),
+        "cancel_href": route(
+            request,
+            "anonymous_binding_job_cancel",
+            environment_id=environment_id,
+            job_id=job_id,
+        ),
+    }
+    if is_htmx_request(request):
+        if review_href is not None:
+            return redirect(request, review_href)
+        return fragment_response(request, PANEL_TEMPLATE, "job_panel", **panel)
     return page_response(
-        request,
-        "images/anonymous_binding_job.html",
-        {
-            "environment": environment,
-            "job": job,
-            "review_href": None if token is None else _review_href(request, environment_id, token),
-            "job_href": _job_href(request, environment_id, job_id),
-            "cancel_href": route(
-                request,
-                "anonymous_binding_job_cancel",
-                environment_id=environment_id,
-                job_id=job_id,
-            ),
-            "images_href": _images_href(request, environment_id),
-        },
+        request, JOB_TEMPLATE, {**panel, "images_href": _images_href(request, environment_id)}
     )
 
 

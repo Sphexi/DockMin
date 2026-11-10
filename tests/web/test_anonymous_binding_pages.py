@@ -31,7 +31,10 @@ from tests.web.environment_support import World
 from tests.web.flash_support import location
 from tests.web.registry_support import visible_text
 
-OK, SEE_OTHER, NOT_FOUND, CONFLICT, UNAVAILABLE = 200, 303, 404, 409, 503
+OK, NO_CONTENT, SEE_OTHER, NOT_FOUND, CONFLICT, UNAVAILABLE = 200, 204, 303, 404, 409, 503
+HTMX = {"HX-Request": "true"}
+NOSCRIPT_REFRESH = '<noscript><meta http-equiv="refresh" content="5"></noscript>'
+POLL_EVERY = 'hx-trigger="every 2s"'
 LOCAL = digest(1)
 OTHER_LOCAL = digest(2)
 HUB_IMAGE = "busybox:1"
@@ -394,6 +397,27 @@ async def test_a_review_job_that_fails_says_so_and_offers_no_review(
     assert "The review failed." in text_of(page)
     assert "The transfer failed." not in text_of(page)
     assert TOKEN_IN_LINK.search(page.text) is None
+
+
+async def test_a_running_review_polls_its_panel_and_the_poll_opens_the_finished_review(
+    admin_client: AsyncClient, world: World, hub: ScriptedManifests
+) -> None:
+    hub.gate = asyncio.Event()
+    job_id = await start_job(admin_client, world)
+    await asyncio.wait_for(hub.entered.wait(), timeout=30)
+    job_path = f"{base(world)}/jobs/{job_id}"
+
+    page = await admin_client.get(job_path)
+    polled = await admin_client.get(job_path, headers=HTMX)
+    hub.gate.set()
+    await settle(world.app, job_id)
+    finished = await admin_client.get(job_path, headers=HTMX)
+
+    assert NOSCRIPT_REFRESH in page.text
+    assert "<html" not in polled.text and POLL_EVERY in polled.text
+    assert f'hx-get="{job_path}"' in polled.text
+    assert finished.status_code == NO_CONTENT
+    assert TOKEN_IN_LINK.search(finished.headers["HX-Redirect"]) is not None
 
 
 async def test_an_owner_cancelling_a_running_review_ends_it_with_nothing_written(

@@ -1,41 +1,18 @@
 {% extends "base.html" %}
-{% from "partials/badge.html" import badge %}
+{% from "images/_anonymous_binding_job.html" import job_panel with context %}
 {% from "partials/page_header.html" import page_header %}
 {% block title %}Bind unbound images on {{ environment.name }} - dockmin{% endblock %}
 {% set crumb_page = "Bind unbound images anonymously" %}
+
+{% block head_extra %}
+{% if job.running %}
+<noscript><meta http-equiv="refresh" content="5"></noscript>
+{% endif %}
+{% endblock %}
 {% block content %}
-{% set tones = {"running": "info", "succeeded": "ok", "failed": "danger", "cancelled": "warn"} %}
 {% call page_header("Bind unbound images anonymously", environment.name) %}
 <a class="btn" href="{{ images_href }}">Back to the images</a>
 {% endcall %}
 
-<section id="job-panel" class="panel job-panel" aria-label="Review progress">
-  <div class="job" data-state="{{ job.state }}">
-    <div class="job__head">
-      {{ badge(job.state|capitalize, tones[job.state]) }}
-      <span class="mono cell-wrap">{{ environment.name }}</span>
-    </div>
-    {% if job.running %}
-    <progress class="progress-panel__bar" aria-label="Review progress">Working</progress>
-    <p class="job__summary" role="status">
-      {% if job.progress.stages %}Sending one manifest HEAD request for each unbound image{% else %}Starting{% endif %}.
-    </p>
-    {% endif %}
-    {% if job.outcome %}
-    <div class="job__outcome" role="{{ 'status' if job.outcome.ok else 'alert' }}">
-      <p><strong>{{ job.outcome.message }}</strong></p>
-    </div>
-    {% endif %}
-  </div>
-  <p>The review reads the host's image list and sends HEAD requests only. Nothing is pulled and nothing is written until you confirm a registry.</p>
-  {% if job.running %}
-  <p class="job__refresh"><a class="btn" href="{{ job_href }}">Refresh status</a></p>
-  <form class="inline-form" method="post" action="{{ cancel_href }}" data-submit-once>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="btn btn--danger">Cancel the review</button>
-  </form>
-  {% elif review_href %}
-  <p class="row-actions"><a class="btn btn--primary" href="{{ review_href }}">Open the review</a></p>
-  {% endif %}
-</section>
+{{ job_panel(environment, job, job_href, cancel_href, review_href) }}
 {% endblock %}

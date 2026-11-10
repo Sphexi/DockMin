@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 - The Automation tab of a container, Compose stack, Swarm stack and Swarm service labels its list `Add this <object> to an existing automation`, with `Add to automation` below the list. A new automation now sits under its own heading, `Add this <object> to a new automation`, and the button is renamed from `Add automation` to `Add to new automation`: [Per-object panel](https://github.com/Sphexi/DockMin/wiki/Operations-Automation#per-object-panel).
 
+### Fixed
+
+- The review progress pages of `Bind unbound images anonymously` and `Adopt everything on this host` update themselves while the review runs and open the review when it is ready; without JavaScript they reload every 5 seconds. They used to change only when reloaded: [Bind unbound images anonymously](https://github.com/Sphexi/DockMin/wiki/Usage-Images#bind-unbound-images-anonymously).
+
 ## 0.4.0 - 2026-11-10
 
 ### Added

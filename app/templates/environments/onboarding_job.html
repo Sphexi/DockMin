@@ -1,46 +1,18 @@
 {% extends "base.html" %}
-{% from "partials/badge.html" import badge %}
+{% from "environments/_onboarding_job.html" import job_panel with context %}
 {% from "partials/page_header.html" import page_header %}
 {% block title %}Adopt everything on {{ environment.name }} - dockmin{% endblock %}
 {% set crumb_page = "Adopt everything on this host" %}
+
+{% block head_extra %}
+{% if job.running %}
+<noscript><meta http-equiv="refresh" content="5"></noscript>
+{% endif %}
+{% endblock %}
 {% block content %}
-{% set stage_labels = {
-  "reading_stacks": "Reading the files of every unmanaged project and namespace",
-  "checking_images": "Checking unbound images against their registries",
-  "scanning_objects": "Listing the objects without access settings",
-} %}
-{% set tones = {"running": "info", "succeeded": "ok", "failed": "danger", "cancelled": "warn"} %}
 {% call page_header("Adopt everything on this host", environment.name) %}
 <a class="btn" href="{{ environment_href }}">Back to the environment</a>
 {% endcall %}
 
-<section id="job-panel" class="panel job-panel" aria-label="Review progress">
-  <div class="job" data-state="{{ job.state }}">
-    <div class="job__head">
-      {{ badge(job.state|capitalize, tones[job.state]) }}
-      <span class="mono cell-wrap">{{ environment.name }}</span>
-    </div>
-    {% if job.running %}
-    <progress class="progress-panel__bar" aria-label="Review progress">Working</progress>
-    <p class="job__summary" role="status">
-      {% if job.progress.stages %}{{ stage_labels.get(job.progress.stages[-1], "Working") }}{% else %}Starting{% endif %}.
-    </p>
-    {% endif %}
-    {% if job.outcome %}
-    <div class="job__outcome" role="{{ 'status' if job.outcome.ok else 'alert' }}">
-      <p><strong>{{ job.outcome.message }}</strong></p>
-    </div>
-    {% endif %}
-  </div>
-  <p>The review reads the host and writes nothing. Nothing is pulled, redeployed or restarted.</p>
-  {% if job.running %}
-  <p class="job__refresh"><a class="btn" href="{{ job_href }}">Refresh status</a></p>
-  <form class="inline-form" method="post" action="{{ cancel_href }}" data-submit-once>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="btn btn--danger">Cancel the review</button>
-  </form>
-  {% elif review_href %}
-  <p class="row-actions"><a class="btn btn--primary" href="{{ review_href }}">Open the review</a></p>
-  {% endif %}
-</section>
+{{ job_panel(environment, job, job_href, cancel_href, review_href) }}
 {% endblock %}

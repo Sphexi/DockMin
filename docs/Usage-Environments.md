@@ -759,7 +759,7 @@ All paths are under `/environments/{id}/onboarding`.
 |---|---|
 | Kind | `onboarding_review`. It shares the limits of pull, push and container jobs: 2 running per user and 8 in the process. Over a limit: `429`, `Too many jobs are running`, with the message of the limit. A cancelled review ends with `The review was cancelled. Nothing was written.` and an unexpected failure with `The review failed.` |
 | Stages | `Reading the files of every unmanaged project and namespace`, `Checking unbound images against their registries`, `Listing the objects without access settings` |
-| Page | The state, the stage, `Refresh status` and `Cancel the review` while running; `Open the review` once it succeeded. The page has no live stream: it changes when reloaded |
+| Page | The state, the stage, `Refresh status` and `Cancel the review` while running; `Open the review` once it succeeded. While the review runs, the panel is fetched again every 2 seconds and the poll that finds the review ready opens it (`HX-Redirect`). Without JavaScript the page reloads every 5 seconds |
 | Visible to | The administrator who started it. Another administrator receives `404` |
 | Finished job | Kept for 15 minutes ([Pull and push jobs](Usage-Images#pull-and-push-jobs)) |
 | Failure | The job ends `failed` with a message when the host cannot be read in full |

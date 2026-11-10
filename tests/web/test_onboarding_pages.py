@@ -21,7 +21,13 @@ from app.db.repositories.resource_control import (
 from app.docker_engine.registry import EngineClientRegistry
 from app.services.image_jobs import JobProgress, JobResult
 from app.services.onboarding_plan import OnboardingReview
-from tests.auth_support import ADMIN_ID, STANDARD_ID, STANDARD_USERNAME, csrf_form
+from tests.auth_support import (
+    ADMIN_ID,
+    ADMIN_USERNAME,
+    STANDARD_ID,
+    STANDARD_USERNAME,
+    csrf_form,
+)
 from tests.host_read_support import ReaderEngine, add_project_container, compose_labels
 from tests.stack_files_support import FILES_COMPOSE
 from tests.stack_support import PROJECT_LABEL, SCRIPTED_COMPOSE, stopped_stack_jobs  # noqa: F401
@@ -31,7 +37,12 @@ from tests.web.registry_support import visible_text
 
 pytestmark = pytest.mark.usefixtures("stopped_stack_jobs")
 
-OK, SEE_OTHER, NOT_FOUND, CONFLICT = 200, 303, 404, 409
+OK, NO_CONTENT, SEE_OTHER, NOT_FOUND, CONFLICT = 200, 204, 303, 404, 409
+HTMX = {"HX-Request": "true"}
+NOSCRIPT_REFRESH = '<noscript><meta http-equiv="refresh" content="5"></noscript>'
+POLL_EVERY = 'hx-trigger="every 2s"'
+REVIEW_TOKEN = "A" * 22
+ADMIN = Principal(ADMIN_ID, ADMIN_USERNAME, "administrator")
 PROJECT = "shop"
 GHOST = "ghost"
 VOLUME = "data"
@@ -174,6 +185,33 @@ async def test_a_review_job_and_its_review_are_visible_only_to_the_administrator
     assert job.status_code == NOT_FOUND
     assert (review.status_code, confirm.status_code) == (CONFLICT, CONFLICT)
     assert "has expired" in text_of(review) and "has expired" in text_of(confirm)
+
+
+async def test_a_running_review_polls_its_panel_and_the_poll_opens_the_finished_review(
+    admin_client: AsyncClient, world: World
+) -> None:
+    release = asyncio.Event()
+
+    async def run(progress: JobProgress) -> JobResult:
+        await release.wait()
+        return JobResult("done", flags={"review": REVIEW_TOKEN})
+
+    job_id = world.app.state.engine.image_jobs.start(
+        "onboarding_review", ADMIN, world.remote_id, "review", run
+    )
+    job_path = f"{base(world)}/jobs/{job_id}"
+
+    page = await admin_client.get(job_path)
+    polled = await admin_client.get(job_path, headers=HTMX)
+    release.set()
+    await settle(world.app, job_id)
+    finished = await admin_client.get(job_path, headers=HTMX)
+
+    assert NOSCRIPT_REFRESH in page.text
+    assert "<html" not in polled.text and POLL_EVERY in polled.text
+    assert f'hx-get="{job_path}"' in polled.text
+    assert finished.status_code == NO_CONTENT
+    assert finished.headers["HX-Redirect"].endswith(f"/onboarding/reviews/{REVIEW_TOKEN}")
 
 
 async def test_the_review_confirmation_and_apply_pages_adopt_what_was_ticked_and_nothing_else(

@@ -1,0 +1,37 @@
+{% from "partials/badge.html" import badge %}
+
+{# Also rendered alone for the poll; a finished panel carries no polling attributes, which stops the loop. #}
+{% macro job_panel(environment, job, job_href, cancel_href, review_href) %}
+{% set tones = {"running": "info", "succeeded": "ok", "failed": "danger", "cancelled": "warn"} %}
+<section id="job-panel" class="panel job-panel" aria-label="Review progress"
+         {%- if job.running %} hx-get="{{ job_href }}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <div class="job" data-state="{{ job.state }}">
+    <div class="job__head">
+      {{ badge(job.state|capitalize, tones[job.state]) }}
+      <span class="mono cell-wrap">{{ environment.name }}</span>
+    </div>
+    {% if job.running %}
+    <progress class="progress-panel__bar" aria-label="Review progress">Working</progress>
+    <p class="job__summary" role="status">
+      {% if job.progress.stages %}Sending one manifest HEAD request for each unbound image{% else %}Starting{% endif %}.
+    </p>
+    {% endif %}
+    {% if job.outcome %}
+    <div class="job__outcome" role="{{ 'status' if job.outcome.ok else 'alert' }}">
+      <p><strong>{{ job.outcome.message }}</strong></p>
+    </div>
+    {% endif %}
+  </div>
+  <p>The review reads the host's image list and sends HEAD requests only. Nothing is pulled and nothing is written until you confirm a registry.</p>
+  {% if job.running %}
+  <p class="field__help">This page updates itself while the review runs, and opens the review when it is ready. Without script it reloads every few seconds.</p>
+  <p class="job__refresh"><a class="btn" href="{{ job_href }}">Refresh status</a></p>
+  <form class="inline-form" method="post" action="{{ cancel_href }}" data-submit-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn--danger">Cancel the review</button>
+  </form>
+  {% elif review_href %}
+  <p class="row-actions"><a class="btn btn--primary" href="{{ review_href }}">Open the review</a></p>
+  {% endif %}
+</section>
+{% endmacro %}

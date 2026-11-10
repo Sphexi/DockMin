@@ -1,7 +1,7 @@
 """Adopt everything on this host: the review job, the review, its confirmation and the apply."""
 
 import re
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, Response
@@ -22,6 +22,7 @@ from app.web.identifiers import PathId
 from app.web.image_helpers import JobId
 from app.web.object_pages import (
     Failure,
+    fragment_response,
     page_response,
     problem_page,
     redirect,
@@ -38,6 +39,7 @@ from app.web.onboarding_pages import (
 from app.web.problems import unreachable_copy
 from app.web.results import show_result
 from app.web.stack_read_pages import SOURCES
+from app.web.templating import is_htmx_request
 
 router = APIRouter(
     prefix="/environments/{environment_id}/onboarding",
@@ -47,6 +49,8 @@ router = APIRouter(
 
 DIGEST_MAX: Final = 64
 HEADING: Final = "Adopt everything on this host"
+JOB_TEMPLATE: Final = "environments/onboarding_job.html"
+PANEL_TEMPLATE: Final = "environments/_onboarding_job.html"
 UNAVAILABLE: Final = (EnvironmentUnavailable, ObjectTooLarge)
 EXPIRED: Final = Failure(
     409,
@@ -180,27 +184,32 @@ async def job_page(
     environment = (await environments.environments.get(actor, environment_id)).summary
     _, job = _own_job(request, actor, environment_id, job_id)
     token = None if job.outcome is None else job.outcome.flags.get("review")
+    review_href = None if token is None else _review_href(request, environment_id, token)
+    panel: dict[str, Any] = {
+        "environment": environment,
+        "job": job,
+        "review_href": review_href,
+        "job_href": route(
+            request,
+            "environment_onboarding_job",
+            environment_id=environment_id,
+            job_id=job_id,
+        ),
+        "cancel_href": route(
+            request,
+            "environment_onboarding_job_cancel",
+            environment_id=environment_id,
+            job_id=job_id,
+        ),
+    }
+    if is_htmx_request(request):
+        if review_href is not None:
+            return redirect(request, review_href)
+        return fragment_response(request, PANEL_TEMPLATE, "job_panel", **panel)
     return page_response(
         request,
-        "environments/onboarding_job.html",
-        {
-            "environment": environment,
-            "job": job,
-            "review_href": None if token is None else _review_href(request, environment_id, token),
-            "job_href": route(
-                request,
-                "environment_onboarding_job",
-                environment_id=environment_id,
-                job_id=job_id,
-            ),
-            "cancel_href": route(
-                request,
-                "environment_onboarding_job_cancel",
-                environment_id=environment_id,
-                job_id=job_id,
-            ),
-            "environment_href": _environment_href(request, environment_id),
-        },
+        JOB_TEMPLATE,
+        {**panel, "environment_href": _environment_href(request, environment_id)},
     )
 
 
