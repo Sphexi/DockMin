@@ -90,6 +90,11 @@ _MESSAGES: Final = {
 }
 
 
+def check_message(kind: ManifestCheckKind) -> str:
+    """Return the product-written text for a failed check."""
+    return _MESSAGES[kind]
+
+
 class ManifestCheckFailed(RegistryClientError):
     """A digest that could not be read; `message` is product-written and safe to show."""
 

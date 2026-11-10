@@ -10,11 +10,19 @@ from httpx import AsyncClient, Response
 
 from app.auth.principal import Principal
 from app.db.repositories.registry_access import RegistryAccessRepository
+from app.registry_client.manifests import ManifestCheckKind, check_message
 from app.registry_client.probe import RegistryTarget
 from app.registry_client.references import ImageReference
-from app.services.anonymous_binding_plan import AnonymousBindingReview
+from app.services.anonymous_binding_plan import (
+    AnonymousBindingReview,
+    LeftOutImage,
+    RegistryGroup,
+    UnmatchedImage,
+)
+from app.services.anonymous_bindings import AnonymousBindingService
+from app.services.image_bindings import ImageBindingService
 from app.services.image_jobs import JobProgress, JobResult
-from tests.auth_support import csrf_form
+from tests.auth_support import ADMIN_ID, csrf_form
 from tests.docker_engine.container_engine import ContainerEngine
 from tests.image_support import ScriptedManifests, digest, full_id
 from tests.job_support import rows
@@ -23,7 +31,7 @@ from tests.web.environment_support import World
 from tests.web.flash_support import location
 from tests.web.registry_support import visible_text
 
-OK, SEE_OTHER, NOT_FOUND, CONFLICT = 200, 303, 404, 409
+OK, SEE_OTHER, NOT_FOUND, CONFLICT, UNAVAILABLE = 200, 303, 404, 409, 503
 LOCAL = digest(1)
 OTHER_LOCAL = digest(2)
 HUB_IMAGE = "busybox:1"
@@ -224,7 +232,9 @@ async def test_a_review_that_is_not_the_signed_in_users_reads_as_expired(
         "anonymous_binding_review", STRANGER, world.remote_id, "someone else's", run
     )
     foreign = engine.anonymous_binding_reviews.put(
-        STRANGER.user_id, world.remote_id, AnonymousBindingReview(world.remote_id, "x", (), (), 0)
+        STRANGER.user_id,
+        world.remote_id,
+        AnonymousBindingReview(world.remote_id, "x", (), (), 0, 0),
     )
     await settle(world.app, foreign_job)
 
@@ -264,3 +274,142 @@ async def test_the_registries_page_labels_the_defaults(
 
     assert text_of(page).count("Added with this instance") == 2
     assert "Added with this instance" in text_of(detail)
+
+
+async def test_the_review_page_states_the_unchecked_count_and_shows_the_clients_messages(
+    admin_client: AsyncClient, world: World, hub: ScriptedManifests
+) -> None:
+    group = RegistryGroup(
+        address="docker.io",
+        entries=("Docker Hub (anonymous)",),
+        authenticated_sets=0,
+        matched=(),
+        unmatched=(
+            UnmatchedImage(
+                "docker.io/library/x:1",
+                "x:1",
+                "no_digest",
+                check_message(ManifestCheckKind.NO_DIGEST),
+            ),
+        ),
+        unmatched_total=1,
+    )
+    left = LeftOutImage("custom.example/y:1", "custom.example/y:1", "entry_tls_settings")
+    held = AnonymousBindingReview(world.remote_id, "x", (group,), (left,), 1, 7)
+    token = world.app.state.engine.anonymous_binding_reviews.put(ADMIN_ID, world.remote_id, held)
+
+    page = text_of(await admin_client.get(f"{base(world)}/reviews/{token}"))
+
+    assert "7 not checked; start another review to check the next ones." in page
+    assert check_message(ManifestCheckKind.NO_DIGEST) in page
+    assert "uses its own certificate settings" in page
+
+
+async def test_a_review_that_is_being_applied_answers_a_second_apply_as_busy(
+    admin_client: AsyncClient, world: World, hub: ScriptedManifests
+) -> None:
+    _, token = await reviewed(admin_client, world)
+    plan = EXPECTED_PLAN.search((await admin_client.get(f"{base(world)}/reviews/{token}")).text)
+    assert plan is not None
+    reviews = world.app.state.engine.anonymous_binding_reviews
+    assert reviews.begin_apply(token, ADMIN_ID, world.remote_id)
+
+    busy = await admin_client.post(
+        f"{base(world)}/reviews/{token}/apply",
+        data=csrf_form(admin_client, registry="docker.io", expected_plan=plan.group(1)),
+    )
+
+    assert busy.status_code == CONFLICT
+    assert "Already being applied" in text_of(busy)
+    assert await stored_bindings(world) == []
+
+
+async def test_apply_on_an_unreachable_environment_shows_the_unavailable_page_and_writes_nothing(
+    admin_client: AsyncClient,
+    world: World,
+    hub: ScriptedManifests,
+    container_host: ContainerEngine,
+) -> None:
+    _, token = await reviewed(admin_client, world)
+    plan = EXPECTED_PLAN.search((await admin_client.get(f"{base(world)}/reviews/{token}")).text)
+    assert plan is not None
+    container_host.fail("image_list", 500)
+
+    refused = await admin_client.post(
+        f"{base(world)}/reviews/{token}/apply",
+        data=csrf_form(admin_client, registry="docker.io", expected_plan=plan.group(1)),
+    )
+
+    assert refused.status_code == UNAVAILABLE
+    assert "Bind unbound images anonymously" in text_of(refused)
+    assert await stored_bindings(world) == []
+
+
+async def test_a_binding_the_write_refuses_reads_failed_on_the_result_page(
+    admin_client: AsyncClient, world: World, hub: ScriptedManifests, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, token = await reviewed(admin_client, world)
+    plan = EXPECTED_PLAN.search((await admin_client.get(f"{base(world)}/reviews/{token}")).text)
+    assert plan is not None
+    real = ImageBindingService.bind_verified
+
+    async def withdrawn(self: ImageBindingService, *args: object, **kwargs: object) -> str:
+        async with world.app.state.database.session() as db:
+            await db.execute("DELETE FROM registry_environment_access")
+        return await real(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ImageBindingService, "bind_verified", withdrawn)
+
+    applied = await admin_client.post(
+        f"{base(world)}/reviews/{token}/apply",
+        data=csrf_form(admin_client, registry="docker.io", expected_plan=plan.group(1)),
+    )
+    result = text_of(await admin_client.get(location(applied)))
+
+    assert applied.status_code == SEE_OTHER
+    assert "0 bound, 0 skipped, 1 failed at docker.io" in result
+    assert "Failed" in result
+    assert await stored_bindings(world) == []
+
+
+async def start_job(client: AsyncClient, world: World) -> str:
+    started = await client.post(base(world), data=csrf_form(client))
+    found = JOB_IN_LINK.search(location(started))
+    assert found is not None
+    return found.group(1)
+
+
+async def test_a_review_job_that_fails_says_so_and_offers_no_review(
+    admin_client: AsyncClient, world: World, hub: ScriptedManifests, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def crash(*args: object, **kwargs: object) -> AnonymousBindingReview:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(AnonymousBindingService, "review", crash)
+    job_id = await start_job(admin_client, world)
+    await settle(world.app, job_id)
+
+    page = await admin_client.get(f"{base(world)}/jobs/{job_id}")
+
+    assert "The review failed." in text_of(page)
+    assert "The transfer failed." not in text_of(page)
+    assert TOKEN_IN_LINK.search(page.text) is None
+
+
+async def test_an_owner_cancelling_a_running_review_ends_it_with_nothing_written(
+    admin_client: AsyncClient, world: World, hub: ScriptedManifests
+) -> None:
+    hub.gate = asyncio.Event()
+    job_id = await start_job(admin_client, world)
+    await asyncio.wait_for(hub.entered.wait(), timeout=30)
+
+    cancelled = await admin_client.post(
+        f"{base(world)}/jobs/{job_id}/cancel", data=csrf_form(admin_client)
+    )
+    await settle(world.app, job_id)
+    page = await admin_client.get(f"{base(world)}/jobs/{job_id}")
+
+    assert cancelled.status_code == SEE_OTHER
+    assert "The review was cancelled. Nothing was written." in text_of(page)
+    assert TOKEN_IN_LINK.search(page.text) is None
+    assert await stored_bindings(world) == []

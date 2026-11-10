@@ -4,28 +4,21 @@
 {% block title %}Bind unbound images on {{ environment.name }} - dockmin{% endblock %}
 {% set crumb_page = "Bind unbound images anonymously" %}
 {% block content %}
-{% set reasons = {
-  "mismatch": "The registry holds a different digest for this tag.",
-  "not_found": "The registry has no such tag.",
-  "authentication": "The registry refused an anonymous read.",
-  "rate_limited": "The registry is limiting how often it answers.",
-  "timeout": "The registry did not answer in time.",
-  "not_checked": "Not checked: the limit on references or the time budget was reached.",
-  "dns": "The registry's name could not be resolved.",
-  "tcp": "This server could not connect to the registry.",
-  "tls": "The TLS handshake with the registry failed.",
-  "certificate": "The registry's certificate could not be verified.",
-  "address_refused": "The registry is on a network this server may not contact.",
-} %}
 {% set left_out_reasons = {
   "pinned": "Pinned by digest.",
   "no_local_digest": "The image has no recorded registry digest.",
   "no_anonymous_entry": "No registry entry without authentication is granted for this address.",
+  "entry_tls_settings": "This address's entry uses its own certificate settings; bind its images from the adoption review or a pull.",
 } %}
 {% call page_header("Bind unbound images anonymously", environment.name) %}
 <a class="btn" href="{{ images_href }}">Back to the images</a>
 {% endcall %}
 
+{% if review.not_checked_total %}
+<div class="panel panel--notice" role="note">
+  <p>{{ review.not_checked_total }} not checked; start another review to check the next ones.</p>
+</div>
+{% endif %}
 <p>Each image below is unbound, and the registry reported the digest the host holds when asked anonymously. Confirming a registry binds its images with no credentials. Nothing is pulled and nothing on the host changes.</p>
 
 {% for group in review.groups %}
@@ -66,7 +59,10 @@
   <p>No image at this address matched.</p>
   {% endif %}
   {% if group.unmatched %}
-  <h3>Not matched ({{ group.unmatched|length }})</h3>
+  <h3>Not matched ({{ group.unmatched_total }})</h3>
+  {% if group.unmatched_total > group.unmatched|length %}
+  <p class="field__help">The first {{ group.unmatched|length }} are listed.</p>
+  {% endif %}
   <div class="data-table__scroll" role="region" aria-label="Images at {{ group.address }} that did not match" tabindex="0">
     <table class="table">
       <caption class="visually-hidden">Images that cannot be bound anonymously</caption>
@@ -77,7 +73,7 @@
         {% for item in group.unmatched %}
         <tr>
           <th scope="row" class="cell-wrap mono">{{ item.display }}</th>
-          <td>{{ reasons.get(item.reason, "The check failed.") }}</td>
+          <td>{{ item.message }}</td>
         </tr>
         {% endfor %}
       </tbody>

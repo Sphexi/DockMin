@@ -94,7 +94,8 @@ _STAGES: Final[Mapping[str, LayerStage]] = {
 }
 _MOUNTED_PREFIX: Final = "Mounted from"
 _CONTAINER_KINDS: Final = frozenset({"container_create", "container_recreate"})
-_FRESH_CONTEXT_KINDS: Final = _CONTAINER_KINDS | {"onboarding_review", "anonymous_binding_review"}
+_REVIEW_KINDS: Final = frozenset({"onboarding_review", "anonymous_binding_review"})
+_FRESH_CONTEXT_KINDS: Final = _CONTAINER_KINDS | _REVIEW_KINDS
 _PULL_STAGE: Final = "pull"
 _DONE: Final = frozenset({"complete", "exists", "pushed", "mounted"})
 _TRANSFERRING: Final = frozenset({"downloading", "pushing"})
@@ -103,14 +104,14 @@ _TRANSFERRING: Final = frozenset({"downloading", "pushing"})
 class TooManyJobs(ProductError):
     """A user or the process has no free job slot; the message names the limit reached."""
 
-    def __init__(self, scope: Literal["user", "process"]) -> None:
+    def __init__(self, scope: Literal["user", "process"], noun: str = "transfers") -> None:
         if scope == "user":
             super().__init__(
-                f"You have {MAX_JOBS_PER_USER} transfers running. Wait for one to finish."
+                f"You have {MAX_JOBS_PER_USER} {noun} running. Wait for one to finish."
             )
         else:
             super().__init__(
-                "This server is running as many transfers as it allows. Try again shortly."
+                f"This server is running as many {noun} as it allows. Try again shortly."
             )
         self.scope = scope
 
@@ -184,6 +185,9 @@ _CANCELLED: Final = JobOutcome(
     False,
     "The transfer was cancelled. What it left on the host is not known.",
     "outcome_unknown",
+)
+_REVIEW_CANCELLED: Final = JobOutcome(
+    False, "The review was cancelled. Nothing was written.", "cancelled"
 )
 
 
@@ -309,7 +313,7 @@ class _Job:
     state_version: int = 0
 
 
-def outcome_of(error: Exception) -> JobOutcome:
+def outcome_of(error: Exception, kind: JobKind | None = None) -> JobOutcome:
     """Turn the exception that ended a job into its outcome; every message is product-written."""
     match error:
         case ImagePullFailed() | ImagePushFailed():
@@ -350,7 +354,12 @@ def outcome_of(error: Exception) -> JobOutcome:
             return JobOutcome(False, str(error), "failed")
         case _:
             logger.error("image_job_crashed", extra={"error": type(error).__name__})
-            return JobOutcome(False, "The transfer failed.", "failed")
+            text = "The review failed." if kind in _REVIEW_KINDS else "The transfer failed."
+            return JobOutcome(False, text, "failed")
+
+
+def _cancelled_for(job: _Job) -> JobOutcome:
+    return _REVIEW_CANCELLED if job.kind in _REVIEW_KINDS else _CANCELLED
 
 
 class ImageJobRegistry:
@@ -403,12 +412,13 @@ class ImageJobRegistry:
         if self._closed:
             raise RuntimeError("the job registry is closed")
         self._evict()
+        noun = "jobs" if kind in _REVIEW_KINDS else "transfers"
         running = [job for job in self._jobs.values() if job.state == "running"]
         reserved = 0 if owner.is_administrator else 1
         if len(running) >= max(self._per_process - reserved, 0):
-            raise TooManyJobs("process")
+            raise TooManyJobs("process", noun)
         if sum(1 for job in running if job.owner_user_id == owner.user_id) >= self._per_user:
-            raise TooManyJobs("user")
+            raise TooManyJobs("user", noun)
         job_id = secrets.token_urlsafe(JOB_ID_BYTES)
         job = _Job(
             job_id,
@@ -479,7 +489,7 @@ class ImageJobRegistry:
         try:
             result = await run(job.progress)
         except asyncio.CancelledError:
-            self._finish(job, "cancelled", _CANCELLED)
+            self._finish(job, "cancelled", _cancelled_for(job))
         except JobCancelled as cancelled:
             self._finish(job, "cancelled", JobOutcome(False, str(cancelled), "cancelled"))
         except Exception as error:
@@ -497,7 +507,7 @@ class ImageJobRegistry:
             self._finish(job, "succeeded", outcome)
 
     def _failure_of(self, job: _Job, error: Exception) -> JobOutcome:
-        outcome = outcome_of(error)
+        outcome = outcome_of(error, job.kind)
         if job.kind in _CONTAINER_KINDS and outcome.reason == "not_found":
             outcome = replace(outcome, message="The container or environment was not found.")
         detail = getattr(error, "engine_detail", None)
@@ -508,7 +518,7 @@ class ImageJobRegistry:
     def _ended(self, job: _Job, task: asyncio.Task[None]) -> None:
         """Settle a job whose task was cancelled before its body ever ran."""
         if job.state == "running":
-            self._finish(job, "cancelled", _CANCELLED)
+            self._finish(job, "cancelled", _cancelled_for(job))
 
     def _finish(self, job: _Job, state: JobState, outcome: JobOutcome) -> None:
         job.outcome = outcome

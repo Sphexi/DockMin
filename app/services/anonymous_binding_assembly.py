@@ -28,7 +28,7 @@ from app.services.assembly import (
 )
 from app.services.authorisation import ObjectInspector
 from app.services.engine_setup import EngineRuntime
-from app.services.image_jobs import ImageJobRegistry, JobProgress, JobResult
+from app.services.image_jobs import JobProgress, JobResult
 from app.services.object_inspector import EngineObjectInspector
 from app.services.registry_setup import RegistryRuntime
 
@@ -37,10 +37,9 @@ REVIEW_JOB_LABEL = "Bind unbound images anonymously"
 
 @dataclass(frozen=True, slots=True)
 class AnonymousBindingServices:
-    """The bulk binding service for one request, the registry of running reviews, and held ones."""
+    """The bulk binding service for one request and the store of held reviews."""
 
     service: AnonymousBindingService
-    jobs: ImageJobRegistry
     reviews: AnonymousBindingReviewStore
 
 
@@ -67,7 +66,7 @@ def build_anonymous_binding_services(
         access=RegistryAccessRepository(db),
         reviews=engine.anonymous_binding_reviews,
     )
-    return AnonymousBindingServices(service, engine.image_jobs, engine.anonymous_binding_reviews)
+    return AnonymousBindingServices(service, engine.anonymous_binding_reviews)
 
 
 @asynccontextmanager

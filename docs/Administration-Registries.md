@@ -287,6 +287,13 @@ An entry reads as anonymous when authentication is off, certificate verification
 | Reads as anonymous | Enables the one anonymous candidate. It is not counted as a second match | Not listed beside `Anonymous (no credentials)`, unless an existing binding names it. That binding keeps it listed and preselected | Anonymous, unless another set fits ([Images](Usage-Images#which-set-a-pull-uses)) |
 | Authentication off with a CA bundle or with verification off | Tried as itself | Listed, with `no authentication` | Tried as itself, as any set at the address |
 
+| Instance with | Pull with no explicit choice | Before |
+|---|---|---|
+| An entry that reads as anonymous beside one credential set at the address | Uses that set | Asked for a choice |
+| An entry that reads as anonymous, no set with authentication on | Binds anonymously | Bound to the entry |
+
+The bulk review at an address whose only credential-free entries have a CA bundle or verification off lists its references as `entry_tls_settings` and offers none ([Images](Usage-Images#bind-unbound-images-anonymously)).
+
 ## Entries a new instance starts with
 
 A new instance holds two entries with authentication off.

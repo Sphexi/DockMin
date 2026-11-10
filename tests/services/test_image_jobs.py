@@ -741,3 +741,41 @@ async def test_a_container_job_reports_the_container_and_the_flags_of_its_result
         {"created": "started"},
     )
     assert view.progress.stages == ("create",)
+
+
+REVIEW_KINDS: tuple[JobKind, ...] = ("onboarding_review", "anonymous_binding_review")
+
+
+@pytest.mark.parametrize("kind", REVIEW_KINDS)
+async def test_a_review_job_ends_with_its_own_cancelled_and_failed_texts(kind: JobKind) -> None:
+    registry = ImageJobRegistry()
+    cancelled = registry.start(kind, STANDARD, ENV_A, "x", blocked_on(asyncio.Event()))
+    await asyncio.sleep(0)
+    failed = registry.start(kind, STANDARD, ENV_A, "x", failing(RuntimeError(ENGINE_TEXT)))
+
+    registry.cancel(cancelled, STANDARD)
+    await settle(registry, cancelled)
+    await settle(registry, failed)
+
+    assert registry.view(cancelled, STANDARD).outcome == JobOutcome(
+        False, "The review was cancelled. Nothing was written.", "cancelled"
+    )
+    assert registry.view(failed, STANDARD).outcome == JobOutcome(
+        False, "The review failed.", "failed"
+    )
+
+
+@pytest.mark.parametrize("kind", REVIEW_KINDS)
+async def test_a_review_started_at_the_limit_is_refused_as_jobs_not_transfers(
+    kind: JobKind,
+) -> None:
+    registry = ImageJobRegistry(per_user=1, per_process=3)
+    gate = asyncio.Event()
+    registry.start("pull", STANDARD, ENV_A, "x", blocked_on(gate))
+
+    with pytest.raises(TooManyJobs) as refused:
+        registry.start(kind, STANDARD, ENV_A, "x", blocked_on(gate))
+    gate.set()
+
+    assert "transfers" not in str(refused.value)
+    assert "jobs running" in str(refused.value)

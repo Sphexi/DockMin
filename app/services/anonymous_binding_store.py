@@ -9,9 +9,12 @@ from typing import Final
 
 from app.services.anonymous_binding_plan import AnonymousBindingReview
 
+type ResumePoint = tuple[int, str]
+
 LIFETIME_SECONDS: Final = 1800.0
 CAPACITY: Final = 16
 PER_USER: Final = 2
+RESUME_CAPACITY: Final = 64
 _TOKEN_BYTES: Final = 16
 
 
@@ -28,12 +31,14 @@ class AnonymousBindingReviewStore:
     """In-memory reviews, each usable only by the user and environment that started it.
 
     A review expires 30 minutes after it was kept. Each user keeps at most two and the process
-    sixteen; the oldest is dropped first.
+    sixteen; the oldest is dropped first. The position a review stopped at is kept for each user
+    and environment until a review checks everything.
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._held: OrderedDict[str, _Held] = OrderedDict()
+        self._resume: OrderedDict[tuple[int, int], ResumePoint] = OrderedDict()
 
     def put(self, user_id: int, environment_id: int, review: AnonymousBindingReview) -> str:
         """Hold a review and return the token that names it."""
@@ -75,6 +80,22 @@ class AnonymousBindingReviewStore:
         held = self._held.get(token)
         if held is not None:
             held.applying = False
+
+    def resume_point(self, user_id: int, environment_id: int) -> ResumePoint | None:
+        """Return where the user's previous review of the environment stopped, if it did."""
+        return self._resume.get((user_id, environment_id))
+
+    def set_resume_point(
+        self, user_id: int, environment_id: int, point: ResumePoint | None
+    ) -> None:
+        """Remember the last position a review checked; None forgets it. At most 64 are kept."""
+        slot = (user_id, environment_id)
+        self._resume.pop(slot, None)
+        if point is None:
+            return
+        self._resume[slot] = point
+        while len(self._resume) > RESUME_CAPACITY:
+            self._resume.popitem(last=False)
 
     def _find(self, token: str, user_id: int, environment_id: int) -> _Held | None:
         self._expire()

@@ -72,7 +72,7 @@ class OfferedCredentialSet:
     verify_tls: bool
     secret_kind: SecretKind
     is_default_for_host: bool
-    has_ca_bundle: bool = False
+    has_ca_bundle: bool
 
     @property
     def reads_as_anonymous(self) -> bool:

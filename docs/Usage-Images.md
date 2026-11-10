@@ -464,7 +464,7 @@ A reference is `not_checked` as a whole when any of its candidates was not check
 | Start | `Bind unbound images anonymously` on the image list, shown while the stored status is `reachable`. Not reachable: `409`, `The environment is not reachable`: `Test the connection, then start the review again.` |
 | Flow | Review job, review page, one confirmation for each registry, result page |
 | Contacted before the start | Nothing |
-| Job | Kind `anonymous_binding_review`. It shares the limits of pull, push and container jobs: 2 running per user and 8 in the process. Over a limit: `429`, `Too many transfers are running`. The job page has `Refresh status` and `Cancel the review` while running and `Open the review` once it succeeded. Visible to the administrator who started it |
+| Job | Kind `anonymous_binding_review`. It shares the limits of pull, push and container jobs: 2 running per user and 8 in the process. Over a limit: `429`, `Too many jobs are running`. A cancelled review ends with `The review was cancelled. Nothing was written.` and an unexpected failure with `The review failed.` The job page has `Refresh status` and `Cancel the review` while running and `Open the review` once it succeeded. Visible to the administrator who started it |
 | Held review | In memory, for 30 minutes, for the user and the environment that started it. 2 for each user and 16 in all; the oldest is dropped first. Gone: `409`, `The review has expired` |
 | Applied twice | While an apply runs, a second apply is refused: `409`, `Already being applied` |
 
@@ -474,13 +474,13 @@ A reference is `not_checked` as a whole when any of its candidates was not check
 |---|---|
 | References | Every tag of every image on the host that has no binding row, in any state. A binding that is `credential_missing` counts as bound |
 | Not read | Swarm services |
-| Checked | A reference at an address where a credential set with authentication off is granted to the environment, whatever that entry's TLS settings. Up to 200 such entries are read |
-| Credential sets at the address | A set with authentication on does not stop the offer. The review notes how many are granted at the address, and that confirming binds anonymously |
+| Checked | A reference at an address where a credential set with authentication off that [reads as anonymous](Administration-Registries#anonymous-entries) is granted to the environment. Up to 200 granted entries are read |
+| Credential sets at the address | A set with authentication on does not stop the offer. The review notes how many are granted at the address, and that confirming binds anonymously. A confirmation is refused with `409` when that number differs from the review's |
 | Request | One anonymous manifest `HEAD` for each reference, as in [Registry request](#registry-request). No login, no `GET` of a manifest, no pull, no Engine write |
 
 | Bound | Value |
 |---|---|
-| References checked | 200 for each review. The rest are `not_checked` |
+| References checked | 200 for each review. The rest are not checked, counted on the review page, and not listed individually |
 | Requests in flight | 5 |
 | One request | 10 s, or the time left of the 120 s |
 | Whole review | 120 s. A reference not started by then is `not_checked` |
@@ -492,8 +492,19 @@ A reference is `not_checked` as a whole when any of its candidates was not check
 | `pinned` | The reference names a digest. No request is sent |
 | `no_local_digest` | The image has no recorded registry digest. No request is sent |
 | `no_anonymous_entry` | No entry with authentication off is granted to the environment at the address. No request is sent |
+| `entry_tls_settings` | Every entry with authentication off granted at the address has a CA bundle or verification off. `This address's entry uses its own certificate settings; bind its images from the adoption review or a pull.` No request is sent, since the request verifies against the operating system's roots only |
 
 The review lists the first 200 left-out references with their total.
+
+#### Order and resume point
+
+| Item | Behaviour |
+|---|---|
+| Order | References used by a container first, then the rest, each in reference order |
+| Resume point | The review starts after the last reference checked by the same user's previous review of the environment, and continues from the start of the order when it reaches the end. Held in memory; lost at a restart |
+| Cleared | A review that leaves nothing unchecked |
+| Page | `{N} not checked; start another review to check the next ones.` while any reference was not checked |
+| Not matched rows | At most 200 for each registry, with the total |
 
 | Not matched | Cause |
 |---|---|
@@ -502,16 +513,17 @@ The review lists the first 200 left-out references with their total.
 | `authentication` | The registry refused an anonymous read |
 | `rate_limited` | The registry answered `429`. Not retried |
 | `timeout` | The registry did not answer in time |
-| `not_checked` | The reference limit or the time limit was reached |
+| `not_checked` | The time limit was reached before the request started |
+| `no_digest`, `protocol` | The registry's reply carried no digest, or was not a valid registry response |
 | `dns`, `tcp`, `tls`, `certificate`, `address_refused` | The connection stage that failed ([Results](#results)) |
 
 #### Review page
 
 | Part | Content |
 |---|---|
-| Group | One for each registry address: the entries that make it configured, the number of credential sets granted there with authentication on, the matched references with their digests, and the references not matched with the reason |
+| Group | One for each registry address: the entries that make it configured, the number of credential sets granted there with authentication on, the matched references with their digests, and the references not matched with the reason. The text of each reason is the registry client's text for the failure |
 | Confirmation | One form for each group with a match: `Bind these {N} images at {address} anonymously`. The form carries the address and the plan |
-| Not checked | The left-out references with the reason |
+| Not checked | The left-out references with the reason, and the count of references that were not checked |
 | No group | `No unbound image can be checked anonymously.` |
 
 #### Apply
@@ -520,11 +532,11 @@ The review lists the first 200 left-out references with their total.
 |---|---|
 | Confirmed | One or more registries. None: `400`, `Confirm at least one registry.` An address that is not in the review: `That registry is not in the review.` |
 | Plan | The SHA-256 of the sorted lines `image <reference> anonymous <digest>` of the confirmed registries |
-| Before any write | The plan is recomputed from the host's image list and the binding rows. No request goes to a registry. A difference answers `409`, `The host changed`: `The host or the bindings changed since the review. Start a new review to see the current list.` Nothing is written |
+| Before any write | The plan is recomputed from the host's image list and the binding rows, and the number of granted sets with authentication on at each confirmed address is compared with the review's. No request goes to a registry. A difference in either answers `409`, `The host changed`: `The host or the bindings changed since the review. Start a new review to see the current list.` Nothing is written |
 | Write | Each reference is bound anonymously as its own operation, with the digest that matched. The checks are those of [Binding](#binding) |
 | Bound after the review | Before the write, the recomputed plan differs, so the request is refused as above. Between the recomputation and the write, the reference is `Skipped`: `It was bound in the meantime.` |
-| One fails | `Failed`, with the product message. The others proceed |
-| Held review | The confirmed groups leave it. It is dropped when no group is left |
+| One fails | `Failed`, with the product message, or `The operation failed.` for an error that is not a product error; the error's type name is logged. The others proceed |
+| Held review | The confirmed groups leave it once the writes have been attempted, whatever their results. It is dropped when no group is left |
 | Result | `303` to `/results/{token}`. Title `Anonymous binding result`; `{N} bound, {N} skipped, {N} failed at {registries}.` and a table of `Reference`, `Result` and `Detail`. Done detail: `Bound anonymously; nothing was pulled.` |
 | Recorded | One `image_bound` row for each binding, with `bulk` `true` ([Recorded actions](#recorded-actions)). Starting the review, the confirmation and a refused apply write no row. The rows of one apply share a request id ([Request id](Administration-Activity#request-id)) |
 

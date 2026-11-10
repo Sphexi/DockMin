@@ -757,7 +757,7 @@ All paths are under `/environments/{id}/onboarding`.
 
 | Item | Value |
 |---|---|
-| Kind | `onboarding_review`. It shares the limits of pull, push and container jobs: 2 running per user and 8 in the process. Over a limit: `429`, `Too many transfers are running`, with the message of the limit |
+| Kind | `onboarding_review`. It shares the limits of pull, push and container jobs: 2 running per user and 8 in the process. Over a limit: `429`, `Too many jobs are running`, with the message of the limit. A cancelled review ends with `The review was cancelled. Nothing was written.` and an unexpected failure with `The review failed.` |
 | Stages | `Reading the files of every unmanaged project and namespace`, `Checking unbound images against their registries`, `Listing the objects without access settings` |
 | Page | The state, the stage, `Refresh status` and `Cancel the review` while running; `Open the review` once it succeeded. The page has no live stream: it changes when reloaded |
 | Visible to | The administrator who started it. Another administrator receives `404` |

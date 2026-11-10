@@ -21,6 +21,7 @@ from tests.web.environment_support import local_form
 
 SEE_OTHER = 303
 OK = 200
+HOST_UNAVAILABLE = 503
 SETUP = "/setup"
 DEFAULT_ADDRESSES = ["docker.io", "ghcr.io"]
 
@@ -113,12 +114,15 @@ async def test_a_new_instance_holds_the_defaults_and_the_first_environment_is_gr
         "SELECT detail FROM activity_event WHERE action = 'environment_created'",
     )
     assert json.loads(event["detail"])["registry_grants"] == ",".join(str(e["id"]) for e in entries)
+    environment_path = created.headers["location"]
     pages = [
         "/",
         "/registries",
         f"/registries/{entries[0]['id']}",
-        created.headers["location"],
+        environment_path,
     ]
     statuses = [(await client.get(path)).status_code for path in pages]
+    images = await client.get(f"{environment_path}/images")
     assert statuses == [OK] * len(pages)
+    assert images.status_code == HOST_UNAVAILABLE
     assert registry_contacts == []

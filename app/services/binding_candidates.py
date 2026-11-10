@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Callable, Collection, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -199,21 +199,31 @@ class BindingCandidateScanner:
         )
         return UnboundImageScan(environment_id, outcomes, complete)
 
+    @property
+    def check_limit(self) -> int:
+        """Return how many references one scan checks."""
+        return self._limits.references
+
     async def check_anonymously(
         self,
         principal: Principal,
         environment_id: int,
         references: Sequence[tuple[ImageReference, tuple[str, ...]]],
+        addresses: Collection[str],
     ) -> tuple[ReferenceOutcome, ...]:
-        """Send one anonymous manifest HEAD for each reference, within the scan's bounds.
+        """Send one anonymous manifest HEAD for each reference at a permitted address.
 
-        References past the cap, and those the time budget does not reach, come back
+        Administrators only. A reference at an address outside `addresses` is dropped and never
+        contacted. References past the cap, and those the time budget does not reach, come back
         `not_checked`. Raises RuntimeError inside a write transaction. No credential set is read.
         """
         if self._bindings.in_transaction:
             raise RuntimeError("registry checks run outside a write transaction")
+        await self._authoriser.require_environment(principal, environment_id)
+        require_administrator(principal)
         limits = self._limits
-        selected, left = references[: limits.references], references[limits.references :]
+        permitted = [item for item in references if item[0].registry_address in addresses]
+        selected, left = permitted[: limits.references], permitted[limits.references :]
         run = _Run(
             principal,
             environment_id,

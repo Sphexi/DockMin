@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ### Changed
 
+- On an instance with an entry that reads as anonymous beside one credential set at the same address, a pull with no explicit choice now uses that set, where it used to ask for a choice. A pull with no explicit choice that used to bind to such an entry now binds anonymously: [Anonymous entries](https://github.com/Sphexi/DockMin/wiki/Administration-Registries#anonymous-entries).
+- The bulk anonymous binding review checks references used by containers first and resumes after the last reference the previous review checked, lists references at an address whose credential-free entries have their own certificate settings as `entry_tls_settings`, caps the rows it lists for each registry, refuses a confirmation when the number of credential sets granted at the address changed, reports a write that fails for one image on that image, and uses review wording on its job and on the adoption review job: [Bind unbound images anonymously](https://github.com/Sphexi/DockMin/wiki/Usage-Images#bind-unbound-images-anonymously).
 - An entry with authentication off, certificate verification on and no CA bundle enables the anonymous candidate in the adoption review instead of counting as a second match, and is left out of the pull picker unless an image is bound to it: [Anonymous entries](https://github.com/Sphexi/DockMin/wiki/Administration-Registries#anonymous-entries).
 
 ## 0.3.0 - 2026-11-09

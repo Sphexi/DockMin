@@ -10,7 +10,9 @@ CHANGED_MESSAGE: Final = (
 )
 MAX_LEFT_OUT_SHOWN: Final = 200
 
-type LeftOutReason = Literal["pinned", "no_local_digest", "no_anonymous_entry"]
+type LeftOutReason = Literal[
+    "pinned", "no_local_digest", "no_anonymous_entry", "entry_tls_settings"
+]
 type ItemStatus = Literal["bound", "skipped", "failed"]
 
 
@@ -25,11 +27,15 @@ class MatchedImage:
 
 @dataclass(frozen=True, slots=True)
 class UnmatchedImage:
-    """A reference checked anonymously that cannot be bound; `reason` is a stable identifier."""
+    """A reference checked anonymously that cannot be bound.
+
+    `reason` is a stable identifier and `message` the text the page shows for it.
+    """
 
     reference: str
     display: str
     reason: str
+    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,8 +51,9 @@ class LeftOutImage:
 class RegistryGroup:
     """The references at one registry address, as one confirmation covers them.
 
-    `entries` are the names of the granted entries with authentication off; `authenticated_sets`
-    counts the granted sets at the address that have it on.
+    `entries` are the names of the granted entries with authentication off that read as
+    anonymous; `authenticated_sets` counts the granted sets at the address that have it on.
+    `unmatched` holds at most `MAX_LEFT_OUT_SHOWN` rows of `unmatched_total`.
     """
 
     address: str
@@ -54,17 +61,23 @@ class RegistryGroup:
     authenticated_sets: int
     matched: tuple[MatchedImage, ...]
     unmatched: tuple[UnmatchedImage, ...]
+    unmatched_total: int
 
 
 @dataclass(frozen=True, slots=True)
 class AnonymousBindingReview:
-    """What one review found on an environment; it writes nothing."""
+    """What one review found on an environment; it writes nothing.
+
+    `not_checked_total` counts the references that could have been checked and were not, because
+    of the cap or the time budget.
+    """
 
     environment_id: int
     environment_name: str
     groups: tuple[RegistryGroup, ...]
     left_out: tuple[LeftOutImage, ...]
     left_out_total: int
+    not_checked_total: int
 
     def group(self, address: str) -> RegistryGroup | None:
         """Return the group at the address."""
@@ -74,7 +87,7 @@ class AnonymousBindingReview:
         """Return the sorted `image <reference> anonymous <digest>` lines of the named groups."""
         return tuple(
             sorted(
-                f"image {item.reference} anonymous {item.digest}"
+                plan_line(item.reference, item.digest)
                 for group in self.groups
                 if group.address in addresses
                 for item in group.matched
@@ -113,6 +126,11 @@ class AnonymousBindingResult:
     def count(self, status: ItemStatus) -> int:
         """Return how many references ended with the status."""
         return sum(1 for item in self.items if item.status == status)
+
+
+def plan_line(reference: str, digest: str) -> str:
+    """Return the plan line that names one anonymous binding."""
+    return f"image {reference} anonymous {digest}"
 
 
 def plan_digest(lines: tuple[str, ...]) -> str:
