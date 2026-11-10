@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, get_args
 from urllib.parse import urlencode
 
-from app.db.repositories.pagination import Page, decode_cursor, validate_limit
+from app.db.repositories.pagination import Page, decode_any_cursor, validate_limit
 
 Direction = Literal["asc", "desc"]
 ColumnWidth = Literal[
@@ -76,7 +76,7 @@ class PageView:
             raise ValueError("direction must be 'asc' or 'desc'")
         for token in (self.cursor, self.next_cursor):
             if token is not None:
-                decode_cursor(token)
+                decode_any_cursor(token)
 
     @classmethod
     def of(
