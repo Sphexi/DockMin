@@ -480,6 +480,54 @@ class ActivityEventRepository(ClockedRepository[ActivityEvent]):
             )
         return None if row is None or row["at"] is None else str(row["at"])
 
+    async def recent_lifecycle_targets(
+        self, since: str, *, limit: int, actions: Collection[str], excluding: str
+    ) -> list[tuple[int | None, str, str | None, str]]:
+        """List (environment, target type, target id, time) of lifecycle events since a stored time.
+
+        Only successful events of the given actions count, and none by the excluded subsystem.
+        Newest first, so a cut at limit keeps the most recent.
+        """
+        marks = ", ".join("?" for _ in actions)
+        rows = await self._session.fetch_limited(
+            "SELECT environment_id, target_type, target_id, occurred_at FROM activity_event "
+            f"WHERE action IN ({marks}) AND result = 'success' AND occurred_at >= ? "
+            "AND (actor_subsystem IS NULL OR actor_subsystem != ?) "
+            "ORDER BY occurred_at DESC, id DESC LIMIT ?",
+            (*actions, since, excluding, limit),
+            limit=limit,
+        )
+        return [
+            (row["environment_id"], row["target_type"], row["target_id"], row["occurred_at"])
+            for row in rows
+        ]
+
+    async def latest_lifecycle_action(
+        self,
+        environment_id: int,
+        target_type: str,
+        target_id: str,
+        since: str,
+        *,
+        actions: Collection[str],
+        excluding: str,
+    ) -> str | None:
+        """Return the stored time of the newest lifecycle event on one object since a stored time.
+
+        A stack is matched with case folded, as its controls are.
+        """
+        marks = ", ".join("?" for _ in actions)
+        match = "lower(target_id) = lower(?)" if target_type == "stack" else "target_id = ?"
+        row = await self._session.fetch_one(
+            "SELECT max(occurred_at) AS at FROM activity_event "
+            f"WHERE action IN ({marks}) AND result = 'success' AND occurred_at >= ? "
+            "AND environment_id = ? "
+            f"AND target_type = ? AND {match} "
+            "AND (actor_subsystem IS NULL OR actor_subsystem != ?)",
+            (*actions, since, environment_id, target_type, target_id, excluding),
+        )
+        return None if row is None or row["at"] is None else str(row["at"])
+
     async def count_subsystem_actions(
         self,
         environment_id: int,

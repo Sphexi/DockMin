@@ -248,6 +248,9 @@ async def test_start_stop_and_restart_report_the_result_and_the_state_after_and_
         "name": "job",
         "state": "running",
         "health": None,
+        "joiners": [],
+        "joiners_omitted": 0,
+        "joiners_unlisted": False,
     }
     assert (again.json()["result"], again.json()["state"]) == ("unchanged", "running")
     assert (stopped.json()["result"], stopped.json()["state"]) == ("done", "exited")
@@ -390,6 +393,8 @@ RECREATE_KEYS = {
     "kept_as",
     "control_moved",
     "old_control_kept",
+    "joiners",
+    "joiners_omitted",
 }
 BODY_FAULTS: dict[str, dict[str, Any]] = {
     "name missing": {},
@@ -431,6 +436,8 @@ async def test_recreate_answers_what_happened_and_nothing_of_the_configuration(
         "kept_as": None,
         "control_moved": True,
         "old_control_kept": False,
+        "joiners": [],
+        "joiners_omitted": 0,
     }
     assert "APP=1" not in reply.text and IMAGE not in reply.text
 
@@ -796,3 +803,25 @@ async def test_a_recreate_that_would_change_a_credential_binding_is_403_with_the
     assert reply.json()["error"]["reason"] == "restricted"
     assert reply.json()["error"]["message"] == REBIND_REFUSED
     assert recreatable.verbs() == []
+
+
+async def test_a_restart_lists_the_containers_sharing_its_network_and_what_became_of_each(
+    admin_api: AsyncClient, world: World, container_host: ContainerEngine
+) -> None:
+    satellite = f"{0xEA:064x}"
+    container_host.add(satellite, "satellite", host_config={"NetworkMode": f"container:{JOB}"})
+
+    reply = await admin_api.post(f"{base(world)}/{JOB}/restart")
+
+    assert reply.status_code == OK
+    body = reply.json()
+    assert body["joiners"] == [
+        {
+            "id": satellite,
+            "name": "satellite",
+            "status": "done",
+            "reason": None,
+            "message": "Done.",
+        }
+    ]
+    assert (body["joiners_omitted"], body["joiners_unlisted"]) == (0, False)

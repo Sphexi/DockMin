@@ -2,9 +2,10 @@
 
 import asyncio
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Literal
 
@@ -29,12 +30,19 @@ from app.docker_engine.errors import (
     NotFound,
     RequestOutcomeUnknown,
 )
+from app.docker_engine.models import ContainerSummary
 from app.docker_engine.timeouts import Timeouts
 from app.logging import DEFAULT_SCRUBBER, get_logger
 from app.scheduler.model import RunSkipped
 from app.self_identity import SelfIdentitySource, no_identity
 from app.services.access import ResourceKey, is_canonical_id, stack_of
-from app.services.acting import Acting, AutomationAuthority, actor_of, holder_label
+from app.services.acting import (
+    Acting,
+    AutomationAuthority,
+    actor_of,
+    holder_label,
+    is_administrator,
+)
 from app.services.activity import (
     ActivityRecorder,
     Arguments,
@@ -52,10 +60,17 @@ from app.services.containers import (
     display_name,
     short_id,
 )
+from app.services.network_joiners import (
+    MAX_JOINER_CHAIN,
+    JoinerLink,
+    joiner_owners,
+    walk_joiners,
+)
 from app.services.object_inspector import (
     ContainerTooLarge,
     EngineObjectInspector,
     EnvironmentUnavailable,
+    unavailable_from,
 )
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey, ObjectLockRegistry
 from app.services.resource_controls import ResourceControlService
@@ -69,6 +84,21 @@ MAX_DISPLAYED_NAME = 128
 ENGINE_DETAIL_READ = 4096
 ENGINE_DETAIL_CHARS = 300
 SETTLE_MARGIN_SECONDS = 50.0
+JOINER_WAIT_SECONDS = 90.0
+JOINER_POLL_SECONDS = 2.0
+MAX_JOINER_NAMES = 25
+JOINERS_NOT_PERMITTED = "Not restarted: restarting it is not permitted."
+JOINERS_UNLISTED = "The containers sharing its network could not be listed, so none were restarted."
+OWNER_NOT_RUNNING = "owner_not_running"
+OWNER_NOT_RESTARTED = "owner_not_restarted"
+NOT_CONFIRMED = "not_confirmed"
+WAIT_EXPIRED = "wait_expired"
+_JOINER_REFUSALS: Mapping[str, str] = {
+    OWNER_NOT_RUNNING: "Not restarted: the container it shares a network with is not running.",
+    OWNER_NOT_RESTARTED: "Not restarted: the container it shares a network with was not restarted.",
+    NOT_CONFIRMED: "Not restarted: it joined this network after the confirmation was shown.",
+    WAIT_EXPIRED: "Not restarted: the time allowed for waiting ran out.",
+}
 LOCK_BYPASSED_BY_KILL = frozenset({"stop", "restart"})
 ANONYMOUS_VOLUME_LABEL = "com.docker.volume.anonymous"
 FORCEABLE_STATES = frozenset({"running", "paused", "restarting"})
@@ -171,17 +201,6 @@ class EngineRefused(ProductError):
 
 
 @dataclass(frozen=True, slots=True)
-class ActionOutcome:
-    """What one action did; unchanged means the container was already in the requested state."""
-
-    action: ContainerAction
-    environment_id: int
-    container_id: str
-    name: str
-    result: ActionResult
-
-
-@dataclass(frozen=True, slots=True)
 class BusyView:
     """Who holds a contended container and for how long, as the viewer may be told."""
 
@@ -201,14 +220,39 @@ class BatchItem:
     status: BatchStatus
     message: str
     holder: BusyView | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ActionOutcome:
+    """What one action did; unchanged means the container was already in the requested state.
+
+    joiners is one item for each container that shares the restarted container's network, down
+    the chain of containers that share theirs. joiners_omitted counts those the chain limit left
+    out, and joiners_unlisted is set when the containers on the host could not be listed.
+    """
+
+    action: ContainerAction
+    environment_id: int
+    container_id: str
+    name: str
+    result: ActionResult
+    joiners: tuple[BatchItem, ...] = ()
+    joiners_omitted: int = 0
+    joiners_unlisted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class BatchResult:
-    """One item per distinct submitted id, in submitted order."""
+    """One item per distinct submitted id, in submitted order.
+
+    joiners holds the containers outside the selection that restarted with their owners.
+    """
 
     action: ContainerAction
     items: tuple[BatchItem, ...]
+    joiners: tuple[BatchItem, ...] = ()
+    joiners_omitted: int = 0
 
     @property
     def succeeded(self) -> int:
@@ -231,8 +275,24 @@ class VolumeMount:
 
 
 @dataclass(frozen=True, slots=True)
+class JoinerTarget:
+    """A container that shares the network of one a confirmation names."""
+
+    container_id: str
+    short_id: str
+    name: str
+    state: str
+
+
+@dataclass(frozen=True, slots=True)
 class ActionConfirmation:
-    """Everything a confirmation names before an action runs."""
+    """Everything a confirmation names before an action runs.
+
+    joiners are restarted after the container, down the chain of those that share their networks;
+    joiners_refused are named for a viewer who can read them and may not restart them,
+    joiners_hidden counts those the viewer cannot see, and joiners_omitted those the chain limit
+    left out.
+    """
 
     action: ContainerAction
     environment_id: int
@@ -246,6 +306,10 @@ class ActionConfirmation:
     can_force: bool
     volumes: tuple[VolumeMount, ...]
     volumes_hidden: int
+    joiners: tuple[JoinerTarget, ...] = ()
+    joiners_refused: tuple[JoinerTarget, ...] = ()
+    joiners_hidden: int = 0
+    joiners_omitted: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +324,10 @@ class BatchTarget:
 
 @dataclass(frozen=True, slots=True)
 class BatchConfirmation:
-    """The targets of a batch the caller may act on; unavailable counts the rest."""
+    """The targets of a batch the caller may act on; unavailable counts the rest.
+
+    A restart also names the joiners outside the selection that restart with their owners.
+    """
 
     action: ContainerAction
     environment_id: int
@@ -269,6 +336,46 @@ class BatchConfirmation:
     targets: tuple[BatchTarget, ...]
     unavailable: int
     can_force: bool
+    joiners: tuple[JoinerTarget, ...] = ()
+    joiners_refused: tuple[JoinerTarget, ...] = ()
+    joiners_hidden: int = 0
+    joiners_omitted: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class JoinerRefusal:
+    """Why the containers sharing a container's network cannot follow its restart."""
+
+    reason: str
+    message: str
+
+
+@dataclass(slots=True)
+class WaitBudget:
+    """The time left for waiting on containers to come up, shared by the restarts that hold it."""
+
+    expires: datetime
+    clock: Clock
+
+    def spent(self) -> bool:
+        """Report whether the time has run out."""
+        return self.clock() >= self.expires
+
+
+@dataclass(frozen=True, slots=True)
+class _JoinerPlan:
+    restart: tuple[JoinerLink, ...] = ()
+    refused: tuple[ContainerSummary, ...] = ()
+    hidden: int = 0
+    omitted: int = 0
+    unlisted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerRestart:
+    outcome: ActionOutcome
+    client: EngineClient
+    plan: _JoinerPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +413,40 @@ def retrieve_exception(future: asyncio.Future[Any]) -> None:
     """Mark a future's exception as retrieved so an abandoned task does not log it."""
     if not future.cancelled():
         future.exception()
+
+
+def _joiner_target(row: ContainerSummary) -> JoinerTarget:
+    return JoinerTarget(row.id, short_id(row.id), display_name(row.names, row.id), row.state)
+
+
+def _joined_item(joined: BatchItem, owner_name: str) -> BatchItem:
+    if joined.status != "done":
+        return joined
+    return replace(joined, message=f"Restarted with {owner_name[:MAX_DISPLAYED_NAME]}.")
+
+
+def _refusal(reason: str) -> JoinerRefusal:
+    return JoinerRefusal(reason, _JOINER_REFUSALS[reason])
+
+
+def _restart_order(owners: Mapping[str, str], container_ids: list[str]) -> list[str]:
+    """Return the ids with every container after the one whose network it joins."""
+
+    def depth(container_id: str) -> int:
+        seen = {container_id}
+        while (owner := owners.get(container_id)) is not None and owner not in seen:
+            seen.add(owner)
+            container_id = owner
+        return len(seen) - 1
+
+    return sorted(container_ids, key=depth)
+
+
+def _names_text(rows: Sequence[ContainerSummary]) -> str:
+    names = [display_name(row.names, row.id) for row in rows]
+    shown = ", ".join(name[:MAX_DISPLAYED_NAME] for name in names[:MAX_JOINER_NAMES])
+    more = len(names) - MAX_JOINER_NAMES
+    return shown if more <= 0 else f"{shown} and {more} more"
 
 
 def _changed(changed: bool) -> Mapping[str, DetailValue]:
@@ -367,6 +508,7 @@ class ContainerActionService:
         activity: ActivityRecorder,
         clock: Clock,
         self_identity: SelfIdentitySource | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._db = db
         self._database = database
@@ -378,6 +520,7 @@ class ContainerActionService:
         self._activity = activity
         self._clock = clock
         self._self_identity = self_identity or no_identity
+        self._sleep = sleep
 
     @audited(
         action="container_started",
@@ -419,12 +562,6 @@ class ContainerActionService:
         current_audit().detail["changed"] = changed
         return self._finish(target, "done" if changed else "unchanged")
 
-    @audited(
-        action="container_restarted",
-        target_type="container",
-        target_id=_target_id,
-        environment_id=environment_argument,
-    )
     async def restart(
         self,
         actor: Acting,
@@ -433,11 +570,72 @@ class ContainerActionService:
         *,
         batch: bool = False,
         note: Mapping[str, DetailValue] | None = None,
+        chain: frozenset[str] = frozenset(),
+        joiners: Collection[str] | None = None,
+        wait: WaitBudget | None = None,
+        listed: Sequence[ContainerSummary] | None = None,
+        limit: int = MAX_JOINER_CHAIN,
     ) -> ActionOutcome:
-        """Restart a container; `note` adds detail to the event."""
+        """Restart a container, then the running containers that share its network.
+
+        `note` adds detail to the event. The joiners, and the containers that join them in turn,
+        are restarted once the one they follow is running, and healthy when it has a healthcheck,
+        each as its own audited restart by the same actor. One the actor may not restart, one the
+        chain limit left out and one that did not restart is reported in the outcome and gets its
+        own failed event. `chain` holds ids never restarted as joiners. `joiners` binds the call
+        to the containers a confirmation named: any other is reported and left alone. `wait` is
+        the time the restarts sharing it may spend waiting, and `listed` the host's containers
+        when the caller already read them.
+        """
+        budget = wait or self.wait_budget()
+        owner = await self.restart_owner(
+            actor,
+            environment_id,
+            container_id,
+            batch=batch,
+            note=note,
+            follow=True,
+            chain=chain,
+            listed=listed,
+            limit=limit,
+        )
+        plan = owner.plan
+        outcome = replace(
+            owner.outcome, joiners_omitted=plan.omitted, joiners_unlisted=plan.unlisted
+        )
+        if not plan.restart and not plan.refused:
+            return outcome
+        items = [await self._refused_item(actor, outcome, row, note) for row in plan.refused]
+        items.extend(await self._restart_chain(actor, owner, joiners, budget, note))
+        return replace(outcome, joiners=tuple(items))
+
+    @audited(
+        action="container_restarted",
+        target_type="container",
+        target_id=_target_id,
+        environment_id=environment_argument,
+    )
+    async def restart_owner(
+        self,
+        actor: Acting,
+        environment_id: int,
+        container_id: str,
+        *,
+        batch: bool,
+        note: Mapping[str, DetailValue] | None,
+        follow: bool,
+        chain: frozenset[str],
+        listed: Sequence[ContainerSummary] | None,
+        limit: int = MAX_JOINER_CHAIN,
+    ) -> OwnerRestart:
+        """Restart one container and plan its joiners; the audited step of `restart`."""
+        audit = current_audit()
         if note is not None:
-            current_audit().detail.update(note)
+            audit.detail.update(note)
         target = await self._prepare(actor, environment_id, container_id, "restart", batch=batch)
+        plan = _JoinerPlan()
+        if follow:
+            plan = await self._plan_restart(actor, target, {container_id, *chain}, listed, limit)
         async with self._locked(target):
             await self._engine(
                 target,
@@ -445,7 +643,41 @@ class ContainerActionService:
                     container_id, daemon_wait_seconds=target.stop_wait
                 ),
             )
-        return self._finish(target, "done")
+        if plan.restart:
+            audit.detail["joiners"] = _names_text([link.row for link in plan.restart])
+        if plan.refused:
+            audit.detail["joiners_refused"] = _names_text(plan.refused)
+        if plan.hidden:
+            audit.detail["joiners_hidden"] = plan.hidden
+        if plan.omitted:
+            audit.detail["joiners_omitted"] = plan.omitted
+        if plan.unlisted:
+            audit.detail["joiners_unlisted"] = True
+        return OwnerRestart(self._finish(target, "done"), target.client, plan)
+
+    async def _plan_restart(
+        self,
+        actor: Acting,
+        target: _Target,
+        skip: set[str] | frozenset[str],
+        listed: Sequence[ContainerSummary] | None,
+        limit: int,
+    ) -> _JoinerPlan:
+        try:
+            rows = listed if listed is not None else await target.client.containers.list()
+            return await self._plan_joiners(
+                actor,
+                target.environment_id,
+                rows,
+                [(target.container_id, target.name)],
+                skip,
+                limit,
+            )
+        except (EngineError, EnvironmentUnavailable):
+            logger.warning(
+                "container_joiners_unlisted", extra={"environment_id": target.environment_id}
+            )
+            return _JoinerPlan(unlisted=True)
 
     @audited(
         action="container_killed",
@@ -566,19 +798,33 @@ class ContainerActionService:
         reviewed_names: Mapping[str, str] | None = None,
         force: bool = False,
         volumes: bool = False,
+        joiners: Collection[str] | None = None,
     ) -> BatchResult:
         """Apply one action to up to 25 containers in order, each its own audited operation.
 
         Not atomic and never stopped early; a refusal on one item is that item's result.
         ValidationFailed only when the selection itself is empty or over the limit.
         `reviewed_names` are the names the confirmation showed. They label an item the action
-        could not name, and are never used to find a container.
+        could not name, and are never used to find a container. A restart reads the host's
+        containers once, waits within one shared time, and with `joiners` restarts only the
+        containers the confirmation named besides the selection.
         """
         unique = _distinct(container_ids)
         names = expected_names or {}
         shown = reviewed_names or {}
-        items = [
-            await self._batch_item(
+        listed = await self._try_listed(environment_id) if action == "restart" else None
+        order = unique
+        if listed is not None:
+            order = _restart_order(joiner_owners(listed), unique)
+        budget = self.wait_budget()
+        confirmed = None if joiners is None else {*joiners, *unique}
+        settled: dict[str, BatchItem] = {}
+        outside: list[BatchItem] = []
+        omitted = 0
+        for container_id in order:
+            if container_id in settled:
+                continue
+            item, outcome = await self._batch_item(
                 actor,
                 environment_id,
                 action,
@@ -587,10 +833,25 @@ class ContainerActionService:
                 shown,
                 force=force,
                 volumes=volumes,
+                joiners=confirmed,
+                wait=budget,
+                listed=listed,
             )
-            for container_id in unique
-        ]
-        return BatchResult(action, tuple(items))
+            settled[container_id] = item
+            if outcome is None:
+                continue
+            omitted += outcome.joiners_omitted
+            for joined in outcome.joiners:
+                if joined.container_id not in unique:
+                    outside.append(_joined_item(joined, outcome.name))
+                elif joined.container_id not in settled:
+                    settled[joined.container_id] = _joined_item(joined, outcome.name)
+        return BatchResult(
+            action,
+            tuple(settled[container_id] for container_id in unique),
+            tuple(outside),
+            omitted,
+        )
 
     def describe_busy(self, busy: ObjectBusy, viewer: Principal) -> BusyView:
         """Describe the lock holder to a viewer: names only for administrators and subsystems."""
@@ -631,6 +892,16 @@ class ContainerActionService:
                 VolumeMount(m.name or "", m.destination, mark)
                 for m, mark in zip(shown, marks, strict=True)
             )
+        name = display_name([inspected.name], inspected.id)
+        plan = _JoinerPlan()
+        if action == "restart":
+            plan = await self._plan_joiners(
+                actor,
+                environment_id,
+                await self._listed(environment_id),
+                [(inspected.id, name)],
+                {inspected.id},
+            )
         return ActionConfirmation(
             action=action,
             environment_id=environment_id,
@@ -638,12 +909,16 @@ class ContainerActionService:
             is_local=environment.connection_kind == "unix_socket",
             container_id=inspected.id,
             short_id=short_id(inspected.id),
-            name=display_name([inspected.name], inspected.id),
+            name=name,
             image=inspected.config.image or inspected.image,
             state=inspected.state.status,
             can_force=inspected.state.status in FORCEABLE_STATES,
             volumes=volume_mounts,
             volumes_hidden=hidden,
+            joiners=tuple(_joiner_target(link.row) for link in plan.restart),
+            joiners_refused=tuple(_joiner_target(row) for row in plan.refused),
+            joiners_hidden=plan.hidden,
+            joiners_omitted=plan.omitted,
         )
 
     async def batch_confirmation(
@@ -676,6 +951,15 @@ class ContainerActionService:
                     inspected.state.status,
                 )
             )
+        plan = _JoinerPlan()
+        if action == "restart" and targets:
+            plan = await self._plan_joiners(
+                actor,
+                environment_id,
+                await self._listed(environment_id),
+                [(target.container_id, target.name) for target in targets],
+                {target.container_id for target in targets},
+            )
         return BatchConfirmation(
             action=action,
             environment_id=environment_id,
@@ -684,6 +968,10 @@ class ContainerActionService:
             targets=tuple(targets),
             unavailable=unavailable,
             can_force=any(t.state in FORCEABLE_STATES for t in targets),
+            joiners=tuple(_joiner_target(link.row) for link in plan.restart),
+            joiners_refused=tuple(_joiner_target(row) for row in plan.refused),
+            joiners_hidden=plan.hidden,
+            joiners_omitted=plan.omitted,
         )
 
     async def _batch_item(
@@ -697,15 +985,19 @@ class ContainerActionService:
         *,
         force: bool,
         volumes: bool,
-    ) -> BatchItem:
-        shown = container_id[:MAX_DISPLAYED_ID]
+        joiners: Collection[str] | None = None,
+        wait: WaitBudget | None = None,
+        listed: Sequence[ContainerSummary] | None = None,
+    ) -> tuple[BatchItem, ActionOutcome | None]:
         name = (names.get(container_id) or reviewed.get(container_id, ""))[:MAX_DISPLAYED_NAME]
-
-        def item(status: BatchStatus, message: str, holder: BusyView | None = None) -> BatchItem:
-            return BatchItem(shown, short_id(shown), name or None, status, message, holder)
-
-        try:
-            outcome = await self._invoke(
+        return await self._attempt(
+            actor,
+            environment_id,
+            action,
+            container_id,
+            name,
+            partial(
+                self._invoke,
                 actor,
                 environment_id,
                 container_id,
@@ -714,7 +1006,34 @@ class ContainerActionService:
                 force=force,
                 volumes=volumes,
                 batch=True,
-            )
+                joiners=joiners,
+                wait=wait,
+                listed=listed,
+            ),
+        )
+
+    async def _attempt(
+        self,
+        actor: Acting,
+        environment_id: int,
+        action: ContainerAction,
+        container_id: str,
+        name: str,
+        call: Callable[[], Awaitable[ActionOutcome]],
+    ) -> tuple[BatchItem, ActionOutcome | None]:
+        shown = container_id[:MAX_DISPLAYED_ID]
+
+        def item(
+            status: BatchStatus,
+            message: str,
+            holder: BusyView | None = None,
+            reason: str | None = None,
+        ) -> tuple[BatchItem, None]:
+            built = BatchItem(shown, short_id(shown), name or None, status, message, holder, reason)
+            return built, None
+
+        try:
+            outcome = await call()
         except (ResourceNotFound, ContainerGone):
             return item("not_found", "Not found, or already removed.")
         except PermissionDenied:
@@ -725,8 +1044,11 @@ class ContainerActionService:
             return item(
                 "busy",
                 "Another action on this container is in progress.",
-                self.describe_busy(busy, actor),
+                None if isinstance(actor, AutomationAuthority) else self.describe_busy(busy, actor),
+                "object_busy",
             )
+        except RunSkipped as skipped:
+            return item("busy", str(skipped), None, skipped.reason)
         except (ContainerStateConflict, ValidationFailed) as error:
             return item("conflict", str(error))
         except EnvironmentUnavailable as error:
@@ -744,10 +1066,13 @@ class ContainerActionService:
                 },
             )
             return item("failed", "The action could not be completed.")
-        name = outcome.name[:MAX_DISPLAYED_NAME] or name
-        if outcome.result == "unchanged":
-            return item("unchanged", "No change was needed.")
-        return item("done", "Done.")
+        shown_name = outcome.name[:MAX_DISPLAYED_NAME] or name
+        status: BatchStatus = "unchanged" if outcome.result == "unchanged" else "done"
+        message = "No change was needed." if status == "unchanged" else "Done."
+        return (
+            BatchItem(shown, short_id(shown), shown_name or None, status, message),
+            outcome,
+        )
 
     async def perform(
         self,
@@ -759,10 +1084,13 @@ class ContainerActionService:
         expected_name: str | None = None,
         force: bool = False,
         volumes: bool = False,
+        joiners: Collection[str] | None = None,
     ) -> ActionOutcome:
         """Run one action as its own audited operation; remove needs the name the caller reviewed.
 
-        ValidationFailed, with no event recorded, when a remove carries no expected_name.
+        ValidationFailed, with no event recorded, when a remove carries no expected_name. A
+        restart with `joiners` restarts only the containers sharing its network that the
+        confirmation named.
         """
         if action == "remove" and expected_name is None:
             raise ValidationFailed({"name": CHANGED_SINCE_REVIEW})
@@ -775,6 +1103,7 @@ class ContainerActionService:
             force=force,
             volumes=volumes,
             batch=False,
+            joiners=joiners,
         )
 
     async def _invoke(
@@ -788,6 +1117,9 @@ class ContainerActionService:
         force: bool,
         volumes: bool,
         batch: bool,
+        joiners: Collection[str] | None = None,
+        wait: WaitBudget | None = None,
+        listed: Sequence[ContainerSummary] | None = None,
     ) -> ActionOutcome:
         match action:
             case "start":
@@ -795,7 +1127,15 @@ class ContainerActionService:
             case "stop":
                 return await self.stop(actor, environment_id, container_id, batch=batch)
             case "restart":
-                return await self.restart(actor, environment_id, container_id, batch=batch)
+                return await self.restart(
+                    actor,
+                    environment_id,
+                    container_id,
+                    batch=batch,
+                    joiners=joiners,
+                    wait=wait,
+                    listed=listed,
+                )
             case "kill":
                 return await self.kill(actor, environment_id, container_id, batch=batch)
             case "pause":
@@ -812,6 +1152,260 @@ class ContainerActionService:
                     volumes=volumes,
                     batch=batch,
                 )
+
+    async def _listed(self, environment_id: int) -> list[ContainerSummary]:
+        client = await self._hosts.client(environment_id)
+        try:
+            return await client.containers.list()
+        except EngineError as error:
+            raise unavailable_from(error) from None
+
+    async def _try_listed(self, environment_id: int) -> list[ContainerSummary] | None:
+        try:
+            return await self._listed(environment_id)
+        except EnvironmentUnavailable:
+            logger.warning(
+                "container_restart_order_unread", extra={"environment_id": environment_id}
+            )
+            return None
+
+    async def _plan_joiners(
+        self,
+        actor: Acting,
+        environment_id: int,
+        rows: Sequence[ContainerSummary],
+        owners: Sequence[tuple[str, str]],
+        skip: set[str] | frozenset[str],
+        limit: int = MAX_JOINER_CHAIN,
+    ) -> _JoinerPlan:
+        """Walk the chain of joiners of the owners, sorting each into restartable or not.
+
+        A joiner the actor may not restart, or cannot see, ends its branch of the chain.
+        """
+        standing: dict[str, str] = {}
+
+        async def descend(link: JoinerLink) -> bool:
+            row = link.row
+            found = await self.joiner_standing(actor, environment_id, row.id)
+            if found == "writable" and self._self_identity().protects_container(row.id):
+                found = "readonly"
+            standing[row.id] = found
+            return found == "writable"
+
+        walk = await walk_joiners(rows, owners, skip, descend, limit=limit)
+        restart: list[JoinerLink] = []
+        refused: list[ContainerSummary] = []
+        hidden = 0
+        for link in walk.links:
+            match standing[link.row.id]:
+                case "hidden":
+                    hidden += 1
+                case "readonly":
+                    refused.append(link.row)
+                case _:
+                    restart.append(link)
+        return _JoinerPlan(tuple(restart), tuple(refused), hidden, walk.omitted)
+
+    async def joiner_standing(
+        self, actor: Acting, environment_id: int, container_id: str
+    ) -> Literal["writable", "readonly", "hidden"]:
+        try:
+            if isinstance(actor, AutomationAuthority):
+                await actor.authorise(ObjectKey(environment_id, "container", container_id))
+            else:
+                key = ResourceKey(environment_id, "container", container_id)
+                await self._authoriser.require_access(actor, key, "write")
+        except ResourceNotFound:
+            return "hidden"
+        except ContainerTooLarge:
+            return "readonly" if is_administrator(actor) else "hidden"
+        except PermissionDenied:
+            return "readonly"
+        return "writable"
+
+    async def _refused_item(
+        self,
+        actor: Acting,
+        owner: ActionOutcome,
+        row: ContainerSummary,
+        note: Mapping[str, DetailValue] | None,
+    ) -> BatchItem:
+        name = display_name(row.names, row.id)
+        if self._self_identity().protects_container(row.id):
+            reason, message = SELF_PROTECTED_REASON, str(SelfProtected.container())
+            status: BatchStatus = "protected"
+        else:
+            reason, message, status = "permission_denied", JOINERS_NOT_PERMITTED, "forbidden"
+        await self._record_unrestarted(
+            actor, owner.environment_id, owner.name, row.id, name, reason, message, note
+        )
+        return BatchItem(row.id, short_id(row.id), name, status, message, None, reason)
+
+    async def _record_unrestarted(
+        self,
+        actor: Acting,
+        environment_id: int,
+        joined: str,
+        container_id: str,
+        name: str,
+        reason: str,
+        message: str,
+        note: Mapping[str, DetailValue] | None,
+    ) -> None:
+        await self._activity.record_failure(
+            actor_of(actor),
+            action="container_restarted",
+            target_type="container",
+            target_id=container_id,
+            environment_id=environment_id,
+            reason=reason,
+            detail={**(note or {}), "name": name, "joined": joined},
+            message=message,
+        )
+
+    async def _restart_chain(
+        self,
+        actor: Acting,
+        owner: OwnerRestart,
+        confirmed: Collection[str] | None,
+        budget: WaitBudget,
+        note: Mapping[str, DetailValue] | None,
+    ) -> list[BatchItem]:
+        """Restart each planned joiner after the container it follows, in the order planned."""
+        root = owner.outcome
+        names = {root.container_id: root.name}
+        restarted = {root.container_id}
+        readiness: dict[str, JoinerRefusal | None] = {}
+        items: list[BatchItem] = []
+        for link in owner.plan.restart:
+            row = link.row
+            name = display_name(row.names, row.id)
+            names[row.id] = name
+            follows = names[link.owner_id]
+            refusal: JoinerRefusal | None
+            if confirmed is not None and row.id not in confirmed:
+                refusal = _refusal(NOT_CONFIRMED)
+            elif link.owner_id not in restarted:
+                refusal = _refusal(OWNER_NOT_RESTARTED)
+            else:
+                if link.owner_id not in readiness:
+                    readiness[link.owner_id] = await self.owner_ready(
+                        owner.client, link.owner_id, budget
+                    )
+                refusal = readiness[link.owner_id]
+            if refusal is not None:
+                logger.warning(
+                    "container_joiner_not_restarted",
+                    extra={"environment_id": root.environment_id, "reason": refusal.reason},
+                )
+                await self._record_unrestarted(
+                    actor,
+                    root.environment_id,
+                    follows,
+                    row.id,
+                    name,
+                    refusal.reason,
+                    refusal.message,
+                    note,
+                )
+                status: BatchStatus = "conflict" if refusal.reason == NOT_CONFIRMED else "failed"
+                items.append(
+                    BatchItem(
+                        row.id,
+                        short_id(row.id),
+                        name,
+                        status,
+                        refusal.message,
+                        None,
+                        refusal.reason,
+                    )
+                )
+                continue
+            item, _ = await self._attempt(
+                actor,
+                root.environment_id,
+                "restart",
+                row.id,
+                name,
+                partial(
+                    self._restart_member,
+                    actor,
+                    root.environment_id,
+                    row.id,
+                    {**(note or {}), "joined": follows},
+                ),
+            )
+            if item.status == "done":
+                restarted.add(row.id)
+            elif item.status == "busy" and isinstance(actor, AutomationAuthority):
+                await self._record_unrestarted(
+                    actor,
+                    root.environment_id,
+                    follows,
+                    row.id,
+                    name,
+                    item.reason or "object_busy",
+                    item.message,
+                    note,
+                )
+            items.append(item)
+        return items
+
+    async def _restart_member(
+        self,
+        actor: Acting,
+        environment_id: int,
+        container_id: str,
+        note: Mapping[str, DetailValue],
+    ) -> ActionOutcome:
+        owner = await self.restart_owner(
+            actor,
+            environment_id,
+            container_id,
+            batch=False,
+            note=note,
+            follow=False,
+            chain=frozenset(),
+            listed=None,
+        )
+        return owner.outcome
+
+    def wait_budget(self, seconds: float = JOINER_WAIT_SECONDS) -> WaitBudget:
+        """Start a budget of waiting time for the restarts that share it."""
+        return WaitBudget(self._clock() + timedelta(seconds=seconds), self._clock)
+
+    async def owner_ready(
+        self, client: EngineClient, container_id: str, budget: WaitBudget | None = None
+    ) -> JoinerRefusal | None:
+        """Wait for the container to run, and to be healthy when it has a healthcheck.
+
+        Returns why its joiners cannot follow, or None to restart them. One owner is waited on for
+        at most JOINER_WAIT_SECONDS and never past the budget when one is given. A container that
+        runs but is still not healthy when the wait ends already holds the namespace they join;
+        one that is not running when the budget has run out leaves them for the next run.
+        """
+        deadline = self._clock() + timedelta(seconds=JOINER_WAIT_SECONDS)
+        if budget is not None:
+            deadline = min(deadline, budget.expires)
+        while True:
+            try:
+                state = (await client.containers.inspect(container_id)).state
+            except NotFound:
+                return JoinerRefusal(OWNER_NOT_RUNNING, str(ContainerGone()))
+            except EngineError as error:
+                return JoinerRefusal("unreachable", str(unavailable_from(error)))
+            running = state.status == "running"
+            if running and (state.health is None or state.health.status == "healthy"):
+                return None
+            if state.status in ("exited", "dead"):
+                return _refusal(OWNER_NOT_RUNNING)
+            if self._clock() >= deadline:
+                if running:
+                    return None
+                return _refusal(
+                    WAIT_EXPIRED if budget is not None and budget.spent() else OWNER_NOT_RUNNING
+                )
+            await self._sleep(JOINER_POLL_SECONDS)
 
     async def _prepare(
         self,
@@ -887,10 +1481,8 @@ class ContainerActionService:
             # A kill has to cut short a stop or restart that is waiting out its grace period.
             current = self._locks.holder_of(target.key)
             if current is not None and current.action in LOCK_BYPASSED_BY_KILL:
-                try:
-                    yield
-                finally:
-                    self._locks.note(target.key, target.holder)
+                yield
+                self._locks.note(target.key, target.holder)
                 return
         try:
             async with self._locks.hold(target.key, target.holder):

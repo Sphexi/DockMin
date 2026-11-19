@@ -12,6 +12,7 @@
 {% from "partials/badge.html" import badge %}
 {% from "partials/container_state_badge.html" import container_state_badge %}
 {% from "partials/disclosure.html" import disclosure with context %}
+{% from "partials/stale_network.html" import stale_network_text %}
 {% from "partials/ports.html" import port_list %}
 {% from "partials/error_state.html" import error_state %}
 {% from "partials/name_field.html" import name_field %}
@@ -30,6 +31,9 @@
     {% if detail.is_self %}
     <p class="summary__note" role="note">This is the container dockmin runs in. It cannot be stopped, restarted, killed, paused, removed or recreated from here.
       {%- if instance_href %} Restart it from <a href="{{ instance_href }}">Administration &gt; Instance</a>.{% endif %}</p>
+    {% endif %}
+    {% if detail.stale_network %}
+    <p class="summary__note" role="note"><strong>Stale network.</strong> {{ stale_network_text(detail.stale_network) }}</p>
     {% endif %}
   </div>
 </section>

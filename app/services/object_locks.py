@@ -153,7 +153,7 @@ class ObjectLockRegistry:
         return self._clock()
 
     def set_observer(self, observer: LockObserver | None) -> None:
-        """Replace the callback told of every release and every note."""
+        """Replace the callback told of every completed hold and every note."""
         self._observer = observer
 
     def note(self, key: ObjectKey, holder: LockHolder) -> None:
@@ -166,7 +166,7 @@ class ObjectLockRegistry:
         """Hold the object for the body; raise ObjectBusy if it is not free within `wait` seconds.
 
         A zero wait fails at once without yielding to the event loop. The lock is released on
-        every exit, cancellation included.
+        every exit, cancellation included, and the observer hears only of a body that returned.
         """
         return self._held_for_body(key, holder, wait)
 
@@ -175,10 +175,12 @@ class ObjectLockRegistry:
         self, key: ObjectKey, holder: LockHolder, wait: float
     ) -> AsyncIterator[None]:
         entry = await self._acquire(key, holder, wait)
+        completed = False
         try:
             yield
+            completed = True
         finally:
-            self._drop(key, entry)
+            self._drop(key, entry, completed)
 
     async def wait_free(self, key: ObjectKey, timeout: float) -> LockHolder | None:  # noqa: ASYNC109
         """Wait up to `timeout` seconds for the object to be free, claiming nothing.
@@ -210,11 +212,12 @@ class ObjectLockRegistry:
                 continue
         return None
 
-    def _drop(self, key: ObjectKey, entry: _Entry) -> None:
+    def _drop(self, key: ObjectKey, entry: _Entry, completed: bool) -> None:
         if self._held.get(key) is entry:
             del self._held[key]
         entry.released.set()
-        self._notify(key, entry.holder)
+        if completed:
+            self._notify(key, entry.holder)
 
     def _notify(self, key: ObjectKey, holder: LockHolder) -> None:
         if self._observer is None:

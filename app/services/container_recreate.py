@@ -97,7 +97,7 @@ from app.services.pull_credentials import (
 )
 from app.services.registry_resolution import CredentialSetUnavailable
 
-__all__ = ["INTERRUPTED_FAILURE", "PARKED_INFIX", "ContainerRecreateService"]
+__all__ = ["INTERRUPTED_FAILURE", "PARKED_INFIX", "ContainerRecreateService", "RecreatedHook"]
 
 logger = get_logger(__name__)
 
@@ -144,6 +144,8 @@ VERIFICATION_INTERRUPTED: Final = (
 )
 
 INTERRUPTED_FAILURE: Final = "interrupted"
+
+type RecreatedHook = Callable[[str, str], Awaitable[Mapping[str, DetailValue]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +227,14 @@ def _crash_verdict(found: ContainerInspect, baseline_restarts: int) -> _Verdict 
     if not state.running or state.paused or state.status != "running":
         return _Verdict("not_running")
     return None
+
+
+def _with_network_mode(body: dict[str, Any], mode: str) -> dict[str, Any]:
+    host = body.get("HostConfig")
+    return {
+        **body,
+        "HostConfig": {**(host if isinstance(host, Mapping) else {}), "NetworkMode": mode},
+    }
 
 
 def _control_step(old: ResourceKey, new: ResourceKey, *, old_removed: bool) -> Transfer | Copy:
@@ -325,6 +335,8 @@ class ContainerRecreateService(ProvisioningBase):
         verify: VerifyPolicy | None = None,
         note: Mapping[str, DetailValue] | None = None,
         on_rolled_back: RolledBack | None = None,
+        network_mode: str | None = None,
+        on_recreated: RecreatedHook | None = None,
         progress: ProvisionFeed | None = None,
     ) -> RecreateOutcome:
         """Replace a container with a new one built from its own configuration.
@@ -344,6 +356,11 @@ class ContainerRecreateService(ProvisioningBase):
         `on_rolled_back`, which needs `verify`, is called at most once with the failure and a
         fresh recorder when an interrupted request's sequence ends rolled back, after the
         interrupted row; its own failure is logged and dropped.
+
+        `network_mode` replaces the network mode of the new container, for one that shares the
+        network of a container that was itself recreated. `on_recreated` is awaited once, with the
+        old id and the name, after the sequence completes and before the access control
+        moves; the detail it returns is merged into the row, and it must not raise.
 
         With `progress`, the pull reports its layers and the steps to it, and a cancel during the
         pull stops the pull and records the failure `cancelled`, or `interrupted` when the process
@@ -377,6 +394,7 @@ class ContainerRecreateService(ProvisioningBase):
                 credential_choice,
                 held,
                 verify,
+                network_mode,
             )
             plan = replace(plan, on_rolled_back=on_rolled_back)
             run = RecreateRun(feed=progress)
@@ -393,6 +411,8 @@ class ContainerRecreateService(ProvisioningBase):
             new_id = run.new_id
             if new_id is None:
                 raise RuntimeError("the recreate sequence ended without a container")
+            if on_recreated is not None:
+                audit.detail.update(await on_recreated(container_id, plan.name))
             new_key = ResourceKey(environment_id, "container", new_id)
             step = _control_step(old_key, new_key, old_removed=run.old_removed)
             bind = (
@@ -414,7 +434,8 @@ class ContainerRecreateService(ProvisioningBase):
                 )
                 raise
         self._inspector.forget(environment_id, container_id)
-        return RecreateOutcome(
+        self._locks.note(ObjectKey(environment_id, "container", new_id), holder)
+        outcome = RecreateOutcome(
             environment_id=environment_id,
             old_id=container_id,
             new_id=new_id,
@@ -431,6 +452,7 @@ class ContainerRecreateService(ProvisioningBase):
             old_control_kept=old_control_kept,
             verified=run.verified,
         )
+        return outcome
 
     @audited(
         action="container_recreated",
@@ -496,6 +518,7 @@ class ContainerRecreateService(ProvisioningBase):
         choice: CredentialChoice | None,
         held: AsyncExitStack,
         verify: VerifyPolicy | None,
+        network_mode: str | None = None,
     ) -> _RecreatePlan:
         audit = current_audit()
         try:
@@ -509,6 +532,7 @@ class ContainerRecreateService(ProvisioningBase):
                 choice,
                 held,
                 verify,
+                network_mode,
             )
         except SubmissionRejected as rejected:
             audit.reason = rejected.reason
@@ -538,6 +562,7 @@ class ContainerRecreateService(ProvisioningBase):
         choice: CredentialChoice | None,
         held: AsyncExitStack,
         verify: VerifyPolicy | None,
+        network_mode: str | None = None,
     ) -> _RecreatePlan:
         audit = current_audit()
         client = await self._hosts.client(environment_id)
@@ -572,6 +597,8 @@ class ContainerRecreateService(ProvisioningBase):
                 defaults=defaults,
             )
         )
+        if network_mode is not None:
+            derivation = replace(derivation, body=_with_network_mode(derivation.body, network_mode))
         audit.detail["image"] = derivation.image
         if derivation.image_defaults_kept:
             audit.detail["image_defaults_kept"] = True

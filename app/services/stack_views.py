@@ -274,7 +274,10 @@ class ContextView:
 
 @dataclass(frozen=True, slots=True)
 class ContainerEntry:
-    """A container of a stack, named only when the viewer may see it."""
+    """A container of a stack, named only when the viewer may see it.
+
+    stale_network is the reason the network it joins is stale, when it is.
+    """
 
     id: str
     short_id: str
@@ -283,6 +286,7 @@ class ContainerEntry:
     status: str
     image: str
     service: str | None
+    stale_network: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

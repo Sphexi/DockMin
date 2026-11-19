@@ -41,6 +41,7 @@ from app.db.repositories.stack_dismissal import StackDismissalRepository, Stored
 from app.db.repositories.team import TeamRepository
 from app.db.repositories.user import UserRepository
 from app.docker_engine.client import EngineClient
+from app.docker_engine.errors import EngineError
 from app.docker_engine.models import ContainerSummary, Network, Volume
 from app.self_identity import SelfIdentitySource, no_identity
 from app.services.access import (
@@ -63,6 +64,7 @@ from app.services.host_objects import (
 )
 from app.services.image_bindings import CredentialOffer, ImageBindingService
 from app.services.list_order import ListOrder, Ordering, text_key
+from app.services.network_joiners import StaleNetwork, stale_networks
 from app.services.object_inspector import (
     EngineObjectInspector,
     EnvironmentUnavailable,
@@ -278,7 +280,10 @@ def _row_of(item: StackSummary | StoredStack) -> StackRow:
     )
 
 
-def _entry_of(container: ContainerSummary) -> ContainerEntry:
+def _entry_of(
+    container: ContainerSummary, stale: Mapping[str, StaleNetwork] | None = None
+) -> ContainerEntry:
+    found = None if stale is None else stale.get(container.id)
     return ContainerEntry(
         id=container.id,
         short_id=short_id(container.id),
@@ -287,6 +292,7 @@ def _entry_of(container: ContainerSummary) -> ContainerEntry:
         status=container.status[:MAX_NAME_CHARS],
         image=container.image[:MAX_NAME_CHARS],
         service=(container.labels.get(SERVICE_LABEL) or None),
+        stale_network=None if found is None else found.reason,
     )
 
 
@@ -1532,6 +1538,15 @@ class StackQueryService:
             return False
         return True
 
+    async def _stale(
+        self, environment_id: int, members: Sequence[ContainerSummary]
+    ) -> dict[str, StaleNetwork]:
+        try:
+            client = await self._hosts.client(environment_id)
+            return await stale_networks(client, members)
+        except (EnvironmentUnavailable, EngineError):
+            return {}
+
     async def _services(
         self, actor: Principal, stack: StoredStack, declared: Mapping[str, str | None]
     ) -> tuple[tuple[ServiceView, ...], int, bool]:
@@ -1547,6 +1562,7 @@ class StackQueryService:
         except (EnvironmentUnavailable, ObjectTooLarge):
             available = False
         permitted = await permitted_container_ids(self._authoriser, actor, environment_id, members)
+        stale = await self._stale(environment_id, [c for c in members if c.id in permitted])
         by_service: dict[str, list[ContainerSummary]] = {}
         for container in members:
             by_service.setdefault(container.labels.get(SERVICE_LABEL) or "", []).append(container)
@@ -1560,7 +1576,7 @@ class StackQueryService:
                     name=service_name or "(unknown)",
                     image=image,
                     declared=service_name in declared,
-                    containers=tuple(_entry_of(c) for c in seen[:MAX_SHOWN_CONTAINERS]),
+                    containers=tuple(_entry_of(c, stale) for c in seen[:MAX_SHOWN_CONTAINERS]),
                     hidden=len(group) - len(seen),
                 )
             )

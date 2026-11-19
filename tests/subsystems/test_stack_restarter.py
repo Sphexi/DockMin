@@ -444,6 +444,8 @@ async def test_a_standard_owner_is_refused_a_stack_with_a_member_they_may_not_ch
     assert (result.outcome, result.reason) == ("failure", "permission_denied")
     assert read_records(record) == []
     assert restarter.subsystem_events() == []
+    stack_key = ObjectKey(ENV_A, "stack", canonical_stack_key(SHOP))
+    assert await restarter.suppressions.lookup_lifecycle(stack_key, restarter.rig.db) is None
 
 
 async def test_an_unreachable_host_skips_the_run(restarter: Subject) -> None:
@@ -608,3 +610,25 @@ async def test_every_name_missing_fails_the_run_as_target_missing(restarter: Sub
 
     assert (result.outcome, result.reason) == ("failure", "target_missing")
     assert restarter.host.mutations() == []
+
+
+async def test_a_container_target_that_leaves_a_joiner_behind_fails_it_with_its_own_row(
+    restarter: Subject,
+) -> None:
+    restarter.host.add(WEB_ID, "web")
+    restarter.host.add(DB_ID, "db", host_config={"NetworkMode": "container:web"})
+    restarter.host.add(CACHE_ID, "cache", host_config={"NetworkMode": "container:web"})
+    restarter.subsystem.lock_wait = 0.05  # type: ignore[misc]
+    _, job = await restarter.rule(container("web"))
+    holder = LockHolder(UserActor.of(ADMIN), "admin-user", "stop")
+
+    async with restarter.rig.engine.locks.hold(ObjectKey(ENV_A, "container", DB_ID), holder):
+        result = await restarter.run(job)
+
+    detail = counts(result)
+    assert (result.outcome, result.reason) == ("partial", "object_busy")
+    assert (detail["restarted"], detail["failed"], detail["joiners_restarted"]) == (1, 1, 1)
+    rows = {row["target_id"]: row for row in restarter.events(RESTARTED)}
+    assert set(rows) == {WEB_ID, DB_ID, CACHE_ID}
+    assert (rows[DB_ID]["result"], detail_of(rows[DB_ID])["reason"]) == ("failure", "object_busy")
+    assert rows[CACHE_ID]["result"] == "success"

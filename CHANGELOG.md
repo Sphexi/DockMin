@@ -2,6 +2,27 @@
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- A restart of a single container also restarts the running containers that join its network (`network_mode: container:<id>`, `container:<name>` or an id prefix of 12 or more characters, which Compose's `network_mode: service:` becomes), and the containers that join those. Each follows the container it joins once that is running and, when it has a healthcheck, healthy. The waits share 90 s per web request, batch or API call and 600 s per automation run; a joiner not restarted when the budget runs out is reported as `wait_expired`. The chain stops at 50 joiners and 8 levels, and what it leaves out is reported. This covers the container page, batch restart, the JSON API, `stack-restarter` with a container target and `container-health-checker`. The confirmation names the whole chain and only confirmed joiners are restarted; one that joined later is reported `not_confirmed`. When the host's containers cannot be listed the owner restarts alone and the outcome sets `joiners_unlisted`. The owner's `container_restarted` row carries `joiners`, `joiners_refused`, `joiners_hidden`, `joiners_omitted` and `joiners_unlisted`, each joiner's row carries `joined`, and a joiner not restarted has a failure row: [Containers that share a network](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#containers-that-share-a-network).
+- The JSON restart response gains `joiners`, `joiners_omitted` and `joiners_unlisted`, and the recreate response gains `joiners` and `joiners_omitted`: [Action fields](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#action-fields).
+- A recreate from the container page or the JSON API brings the containers that join the network onto the new container, as `container-updater` does: a joiner using `container:<old id>` is recreated pointing at the new container, and one using `container:<name>` is restarted. A standard user's recreate of a joiner that uses `container:` mode fails with `restricted_option`: [Joiners of a recreated container](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#joiners-of-a-recreated-container).
+- `container-health-checker` parameter `grace_seconds` (0 to 3600, default 120) and run skip `start_grace`. A container that started less than `grace_seconds` ago, by the daemon's time, is left alone: [What it restarts](https://github.com/Sphexi/DockMin/wiki/Operations-Automation#what-it-restarts).
+- Stale network: a running container whose network owner is not running, started after it or no longer exists is marked `Stale network` on the container page and the stack page. `container-health-checker` restarts a container whose owner is running and started after it, with trigger `stale_network`. It never starts an owner that is not running: such a joiner is skipped as `owner_not_running`, and one whose owner is gone as `owner_missing`: [Stale network](https://github.com/Sphexi/DockMin/wiki/Operations-Automation#stale-network).
+- The activity list shows the name an event recorded beside the target id for containers, services, configs, secrets and networks, and the event page shows it when the target is deleted: [Recorded names](https://github.com/Sphexi/DockMin/wiki/Administration-Activity#recorded-names).
+- `container-updater` recreates the containers that join a recreated container's network, and the containers that join those, within the same limits: [Recreate](https://github.com/Sphexi/DockMin/wiki/Operations-Automation#recreate).
+
+### Changed
+
+- `container-health-checker` stands back from a container, for its suppression window, after a restart, start, stop, redeploy, recreate or update of the container or its Compose stack by a user or by another automation, and from the new container after a recreate. Only a completed action counts; a refused or failed attempt records nothing. Other subsystems still stand back for user actions only. The skip message for such a run reads `The object was acted on recently.`: [Standing back](https://github.com/Sphexi/DockMin/wiki/Operations-Automation#standing-back).
+- A batch restart restarts each container after the container whose network it joins: [Batch actions](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#batch-actions).
+
+### Fixed
+
+- A single restart or update of a container no longer leaves the containers that share its network without a network: [Containers that share a network](https://github.com/Sphexi/DockMin/wiki/Usage-Containers#containers-that-share-a-network).
+
 ## 0.4.1 - 2026-11-10
 
 ### Changed

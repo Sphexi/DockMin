@@ -3,6 +3,8 @@
 {% from "partials/activity_panel.html" import activity_panel with context %}
 {% from "partials/automation_panel.html" import automation_panel with context %}
 {% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/badge.html" import badge %}
+{% from "partials/stale_network.html" import stale_reason_text %}
 {% from "partials/stack_logs.html" import stack_logs %}
 {% from "partials/stack_variable_row.html" import stack_variable_row with context %}
 {% from "stacks/_contexts.html" import contexts_section with context %}
@@ -99,7 +101,7 @@
           {% if service.containers %}
           <ul class="stack-containers">
             {% for container in service.containers %}
-            <li>{{ container_link(container, row.environment_id, here) }} {{ container_state_badge(container.state) }} <span class="cell-note">{{ container.status }}</span> <a href="{{ with_origin(route_path('environment_container_detail', environment_id=row.environment_id, container_id=container.id) ~ '?tab=logs', here) }}" aria-label="Logs of {{ container.name }}">Logs</a></li>
+            <li>{{ container_link(container, row.environment_id, here) }} {{ container_state_badge(container.state) }} {% if container.stale_network %}{{ badge("Stale network", "warn") }} <span class="cell-note">{{ stale_reason_text(container.stale_network)|capitalize }}.</span> {% endif %}<span class="cell-note">{{ container.status }}</span> <a href="{{ with_origin(route_path('environment_container_detail', environment_id=row.environment_id, container_id=container.id) ~ '?tab=logs', here) }}" aria-label="Logs of {{ container.name }}">Logs</a></li>
             {% endfor %}
           </ul>
           {% elif not service.hidden %}

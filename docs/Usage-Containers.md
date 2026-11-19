@@ -701,7 +701,7 @@ dockmin finds the container it runs in at start ([Instance](Administration-Insta
 |---|---|---|---|
 | `start` | Starts the container with its saved configuration | `created`, `exited` | Already running |
 | `stop` | Sends the stop signal, then kills the process if it has not exited when the container's stop timeout ends. The Engine's default applies when the container sets none | `running`, `restarting`, `paused` | Already stopped |
-| `restart` | Stops the container, then starts it | `running`, `exited`, `paused` | None |
+| `restart` | Stops the container, then starts it, then restarts the running containers that share its network ([Containers that share a network](#containers-that-share-a-network)) | `running`, `exited`, `paused` | None |
 | `kill` | Sends `SIGKILL` at once. The process cannot shut down | `running`, `paused`, `restarting` | None |
 | `pause` | Freezes every process | `running` | None |
 | `unpause` | Resumes the processes | `paused` | None |
@@ -744,6 +744,61 @@ With JavaScript the confirmation opens in place and the row or summary updates a
 - Both confirmations list the volumes mounted in the container (20 at most, then `and N more not listed`), each marked `anonymous`, `named, always kept` or `kind not known`.
 - The confirmation binds the container's name. If the name differs when the action runs, nothing is removed: `This container changed since you reviewed it; nothing was removed.` (`409`). The refusal is recorded with the reason `name_changed`.
 - Removing deletes the container's resource control in the same operation as the success row. If the control cannot be deleted, the removal stands and the row carries `control_released` as `false`.
+
+### Containers that share a network
+
+A container whose network mode is `container:<id or name>` joins the network of that container (its owner). Compose's `network_mode: service:<name>` becomes that mode. A restart of the owner gives it a new network, and each container that joined the old one has no network until it is restarted.
+
+| Item | Behaviour |
+|---|---|
+| Applies to | `restart` from the container page, a batch, the JSON API route, `stack-restarter` with a container target, and `container-health-checker` |
+| Joiners | The running containers on the same host whose network mode is `container:<id>` with the full id, `container:<name>`, or `container:<id prefix>` with an id prefix of at least 12 characters that no other listed container shares. Containers that are stopped are not restarted |
+| Chain | The joiners of a joiner are restarted too, after it. A container is restarted once. At most 50 joiners and 8 levels; the rest are counted as omitted and not restarted |
+| Order | The owner is restarted first. Each joiner is restarted after the container it follows is running, and healthy when it has a healthcheck |
+| Wait | Per container, up to 90 s, read every 2 s. All waits of one web request, batch, API call or restart share a budget of 90 s. An automation run shares 600 s |
+| Wait ends | The container runs but is not healthy: its joiners are restarted. The container is not running, or exits during the wait, or no longer exists: `owner_not_running`. The budget ran out while it was not running: `wait_expired` |
+| Each joiner | Its own restart, by the same actor, recorded as `container_restarted` with the `joined` detail key |
+| Access | Each joiner is checked as the owner is: write access for a user, the automation owner's access for an automation |
+| Confirmation | Names the whole chain under `Restarted with it`, with short ids: `This container shares its network, or the network of one that does, so it is also restarted, once the container it follows is running. Only this container will be restarted.` (`These containers share ...`). The confirmation of a batch names those outside the selection |
+| Confirmed set | Only the joiners the confirmation named are restarted. One that joined the network after the confirmation is not restarted: `not_confirmed`. The JSON API has no confirmation and restarts every joiner it finds |
+| Listing fails | The owner restarts alone. The outcome sets `joiners_unlisted` and the notice reads `The containers sharing its network could not be listed, so none were restarted.` |
+| Result | The notice adds `Also restarted, as they share its network: <names>.` and, for the rest, `Not restarted: <names>.`, and `<N> more sharing its network were not restarted, because the chain is limited.` for the omitted. The result page lists `Containers sharing its network`, each `Restarted` or `Not restarted` with its message |
+
+| Joiner outcome | Reason | Message |
+|---|---|---|
+| Restarted | | `Done.` A joiner restarted in a batch reads `Restarted with <owner name>.` |
+| The actor may read it and not change it | `permission_denied` | `Not restarted: restarting it is not permitted.` The confirmation reads `Not restarted, because you may not change it: <names>. It keeps a network that no longer exists until someone who may restart it does.` |
+| It is the container dockmin runs in | `self_protected` | The refusal text of [dockmin's own container](#dockmins-own-container) |
+| The container it follows is not running | `owner_not_running` | `Not restarted: the container it shares a network with is not running.` |
+| The wait budget ran out | `wait_expired` | `Not restarted: the time allowed for waiting ran out.` |
+| The container it follows was not restarted | `owner_not_restarted` | `Not restarted: the container it shares a network with was not restarted.` |
+| It joined after the confirmation | `not_confirmed` | `Not restarted: it joined this network after the confirmation was shown.` |
+| Its restart failed or was refused | The reason of [Failures](#failures) | The message of [Failures](#failures) |
+
+- A joiner the actor cannot see is not named. The confirmation counts them: `<N> more containers share its network and are not shown to you and will not be restarted.`
+- Joiners the chain limit leaves out are counted in the confirmation: `<N> more containers share its network and are not listed here, because the list is limited. They are not restarted.`
+- A joiner that is refused or fails does not undo the owner's restart, and its own joiners are not restarted. Each joiner not restarted has a `failure` row.
+- A batch holding an owner and its joiners restarts the owners first, and each container once. A joiner that is in the selection is reported with the message `Restarted with <owner name>.`
+- Joiner names read from the host are capped at 25 in a row's detail; the rest are counted as `and N more`.
+- Joiners in a different Compose stack than the owner are restarted the same way.
+- A stack restart, start or redeploy does not run this step; Compose orders the services of the stack ([Stacks](Usage-Stacks#restart)).
+- A recreate brings joiners onto the new container ([Joiners of a recreated container](#joiners-of-a-recreated-container)).
+
+### Stale network
+
+A running container has a stale network when its network mode is `container:<id or name>` and the container it joins is not running, started after it did, or no longer exists.
+
+| Reason | Condition | Shown as |
+|---|---|---|
+| `owner_not_running` | The owner is not running | `Its network belongs to <owner>, which is not running, so this container has no network. Restart <owner> to restore it; this container is restarted with it.` |
+| `owner_restarted` | The owner is running or paused and started after this container | `<Owner> was restarted after this container started, so this container is attached to a network that no longer exists. Restart this container, or restart <owner>, which restarts this container with it.` |
+| `owner_missing` | The owner does not exist | `The container whose network this one shares (<owner>) no longer exists. Recreate this container so it joins a current one.` |
+
+- The container page shows the note `Stale network.` with the text above, in the summary above the tabs. The stack page marks the container ([Stacks](Usage-Stacks#stale-network)).
+- A paused owner counts as running.
+- A viewer who may not read the owner sees `the container it shares a network with` in place of its name.
+- A start time that cannot be read never marks a container stale. A host that cannot be read shows no note.
+- `container-health-checker` restarts a container whose reason is `owner_restarted` ([Automation](Operations-Automation#stale-network)).
 
 ### Failures
 
@@ -825,8 +880,8 @@ Nothing changes until the review is confirmed.
 |---|---|
 | Limit | 1 to 25 distinct containers. Duplicates are collapsed. Outside the limit: `400` |
 | Actions | The seven actions |
-| Order | Submitted order, one after another |
-| Isolation | Each container is its own operation and its own recorded action, with `batch` set |
+| Order | Submitted order, one after another. A restart puts every container after the container whose network it joins ([Containers that share a network](#containers-that-share-a-network)) |
+| Isolation | Each container is its own operation and its own recorded action, with `batch` set. A joiner restarted with its owner is recorded without `batch`. All waits of the batch share 90 s |
 | Failure | Never stops the batch. Nothing is rolled back |
 | State | Not checked. An action the state does not allow reports `Conflict` |
 | Remove | The review binds each container's name. `Force remove` is a separate review ([Batch remove](#batch-remove)) |
@@ -1387,6 +1442,40 @@ A successful recreate redirects (`303`) to the new container with these notices.
 
 Only category names are recorded and shown. No value is.
 
+### Joiners of a recreated container
+
+A recreate gives the container a new id, so each container that joined its network follows it. This applies to a recreate from the container page, the JSON API and `container-updater`.
+
+| Joiner | Handling |
+|---|---|
+| Network mode `container:<old id>` (full id, or a prefix of at least 12 characters) | Recreated with its network mode `container:<new id>`. One that was stopped is recreated and left stopped |
+| Network mode `container:<name>` | Restarted when running. A stopped one is left alone |
+| Managed by Compose (`com.docker.compose.project` label) | Not recreated: `compose_managed`. Its stack is updated instead |
+| Joiner of a recreated joiner | Followed the same way, after it, to 50 joiners and 8 levels. The rest are counted as omitted and not changed |
+
+| Item | Behaviour |
+|---|---|
+| Access | Each joiner is checked as the recreated container is: write access for a user, the automation owner's access for an automation. A joiner the actor cannot see is skipped unnamed |
+| Restrictions | A standard user's recreate of a joiner whose network mode is `container:` fails: reason `restricted_option`. The container page and the JSON API recreate joiners with the same restrictions as any recreate |
+| Order | Joiners are changed after the new container exists. A running joiner waits until the container it follows is running, and healthy when it has a healthcheck; the wait is 90 s for a web request or API call and 600 s for an automation run |
+| Confirmation | Lists the chain under `Containers sharing its network`: `is recreated on the new container`, `is restarted`, or `is not changed, because Compose manages it`. A joiner the user may not change is named under `Not changed, because you may not change it`; hidden and omitted joiners are counted. Only the joiners listed are changed. One that joined later is `not_confirmed` |
+| JSON API | No confirmation. Every joiner found is followed |
+| Failure | A joiner that cannot be changed is reported and does not undo the recreate. Its own joiners are not followed |
+| Notices | `Containers sharing its network: <N> recreated, <M> restarted.` and `<N> sharing its network could not be brought onto it and <M> more were left out because the chain is limited. The activity log lists each.` |
+| Rows | The recreated container's `container_recreated` row lists `joiners_recreate`, `joiners_restart`, `joiners_refused` and `joiners_hidden`. Each joiner has its own `container_recreated` or `container_restarted` row with `joined`. A joiner not changed has a `failure` row with `name` and `joined` |
+
+| Joiner not changed | Reason | Message |
+|---|---|---|
+| Managed by Compose | `compose_managed` | `Compose manages this container; update its stack to recreate it.` |
+| The container it follows is not running | `owner_not_running` | `The container it shares a network with is not running.` |
+| The wait budget ran out | `wait_expired` | `The time allowed for waiting on the container it follows ran out.` |
+| It joined after the confirmation | `not_confirmed` | `It joined this network after the confirmation was shown.` |
+| The actor may read it and not change it | `permission_denied` | `Changing it is not permitted.` |
+| The host could not be reached to wait | `unreachable` | `The host could not be reached to wait for the container it follows.` |
+| The joiners could not be listed | `joiners_unread` | None. The container whose joiners could not be read is reported as failed in the response |
+| Another action holds it | `object_busy` | None. For an automation the row reads the run's skip |
+| Its recreate or restart failed | The reason of [Failures and rollback](#failures-and-rollback) | |
+
 ### Recreate by container-updater
 
 `container-updater` recreates a container through the same operation, with these differences ([Automation](Operations-Automation#standalone-containers)).
@@ -1396,6 +1485,7 @@ Only category names are recorded and shown. No value is.
 | Actor | The subsystem, with the automation and the run. Category `automation` |
 | Access | The automation owner's: write access to the container, checked again at the recreate. The owner's role selects the restrictions ([Options restricted to administrators](#options-restricted-to-administrators)) and the [volume and network checks](#volumes-and-networks) |
 | Pull | Never. The image already on the host is used |
+| Joiners | [Joiners of a recreated container](#joiners-of-a-recreated-container). A joiner recreated by the updater is verified as the updater verifies its own recreate. A joiner that cannot be changed fails the object and is reported |
 | Name binding | The name read when the container was examined |
 | Container state | Only a `running` container. Any other state is refused before anything changes, and no row is written |
 | Verification | Between step 6 and step 7. The original is removed only if the new container passes ([Verification](Operations-Automation#verification)) |
@@ -2265,8 +2355,16 @@ Every action records one activity row, for success and for failure, with the ful
 | `control_released` | `remove` only, and `false` only when the resource control could not be deleted |
 | `interrupted` | The request ended before the Engine answered. The row is written when the Engine call settles, or as `outcome_unknown` if it does not settle |
 | `holder_action` | Failure row for a busy container |
-| `trigger` | `container_restarted` written by an automation: `unhealthy` (`container-health-checker`) or `schedule` (`stack-restarter`) |
-| `failing_streak`, `restarts_in_window` | `container_restarted` written by `container-health-checker`: consecutive failed health checks read just before the restart, and restarts in the budget window including this one |
+| `trigger` | `container_restarted` written by an automation: `unhealthy` or `stale_network` (`container-health-checker`), or `schedule` (`stack-restarter`) |
+| `failing_streak`, `restarts_in_window` | `container_restarted` written by `container-health-checker`: consecutive failed health checks read just before the restart (absent for trigger `stale_network`), and restarts in the budget window including this one |
+| `joiners` | `container_restarted` of an owner: the names of the containers planned to restart with it, comma-separated, at most 25 and then `and N more` |
+| `joiners_refused` | `container_restarted` of an owner: the names of the joiners the actor may not restart, in the same form |
+| `joiners_hidden` | `container_restarted` of an owner: the number of joiners the actor cannot see |
+| `joiners_omitted` | `container_restarted` of an owner: the number of joiners the chain limit left out |
+| `joiners_unlisted` | `container_restarted` of an owner: `true` when the containers on the host could not be listed |
+| `joined` | `container_restarted` or `container_recreated` of a joiner, success or failure: the name of the owner it follows. A joiner's row also carries the `trigger`, `failing_streak` and `restarts_in_window` of the owner's row when an automation wrote it |
+| `joiners_recreate`, `joiners_restart` | `container_recreated` of an owner: the names of the joiners to be recreated on the new container and to be restarted, in the same form |
+| `joiners_refused`, `joiners_hidden` | `container_recreated` of an owner: as for a restart |
 | `released` | `container_restart_budget_released`: `automatic` or `manual` |
 | `rule_id`, `rule_name` | Any row written by an automation, and a manual release |
 | `reason`, `message` | Failure rows |
@@ -2527,6 +2625,26 @@ Command, entrypoint, environment variables and isolation facts are not part of a
 | `state` | string or null | Read after the action; `null` when that read failed |
 | `health` | string or null | As above |
 
+A `restart` also restarts the running containers that share the container's network ([Containers that share a network](#containers-that-share-a-network)). Each has its own `container_restarted` row.
+
+| Field | Type | Notes |
+|---|---|---|
+| `joiners` | array | One item for each container that shares the network, down the chain of those that share theirs. Empty for other actions and when none share it |
+| `joiners_omitted` | integer | Joiners the chain limit left out; they were not restarted |
+| `joiners_unlisted` | boolean | `true` when the containers on the host could not be listed, so none were restarted |
+
+A `joiners` item:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Full container id |
+| `name` | string or null | |
+| `status` | string | `done` when restarted. Otherwise `forbidden`, `protected`, `busy`, `conflict`, `unreachable`, `not_found` or `failed` |
+| `reason` | string or null | `permission_denied`, `self_protected`, `owner_not_running`, `owner_not_restarted`, `wait_expired`, `object_busy` and the reasons of [Failures](#failures). `null` when restarted |
+| `message` | string | |
+
+A joiner that was not restarted does not change the status of the response.
+
 ### Recreate request
 
 `POST /api/v1/environments/{id}/containers/{container_id}/recreate` takes a JSON body. Access is write access to the container; the [restrictions](#options-restricted-to-administrators) apply to the token's user.
@@ -2553,6 +2671,8 @@ Command, entrypoint, environment variables and isolation facts are not part of a
 | `kept_as` | string or null | The name the original carries when it was not removed |
 | `control_moved` | boolean | The access control step completed, including when the original had no control. `false` when it failed |
 | `old_control_kept` | boolean | The original was kept and still has its control, which was copied |
+| `joiners` | array | `[{name, outcome, reason}]`, one for each container that shared the network, down the chain. `outcome` is `recreated`, `restarted` or `failed`; `reason` is set for `failed` ([Joiners of a recreated container](#joiners-of-a-recreated-container)) |
+| `joiners_omitted` | integer | Joiners the chain limit left out; they were not changed |
 
 ### Recreate responses
 

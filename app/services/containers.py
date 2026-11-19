@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Final, Literal, get_args
 
-from app.auth.errors import PermissionDenied, ProductError, ValidationFailed
+from app.auth.errors import PermissionDenied, ProductError, ResourceNotFound, ValidationFailed
 from app.auth.principal import Principal
 from app.db.repositories.pagination import (
     MAX_PAGE_SIZE,
@@ -38,9 +38,17 @@ from app.services.access import (
     stack_of,
 )
 from app.services.authorisation import Authoriser
+from app.services.container_names import display_name as display_name
+from app.services.container_names import parse_engine_time as parse_engine_time
+from app.services.container_names import short_id as short_id
 from app.services.effective_access import EffectiveAccess, EffectiveAccessService
 from app.services.grantees import GranteeDirectory, GranteeNames, HasGrantees, names_for
 from app.services.list_order import ListOrder, Ordering, number_key, rank_key, text_key
+from app.services.network_joiners import (
+    StaleNetwork,
+    joined_reference,
+    stale_network_of,
+)
 from app.services.object_inspector import ContainerTooLarge as ContainerTooLarge
 from app.services.object_inspector import (
     EngineObjectInspector,
@@ -94,7 +102,6 @@ _OFFERED_IN: Mapping[ContainerAction, frozenset[str] | None] = {
 }
 _WILDCARD_ADDRESSES = frozenset({"", "0.0.0.0", "::"})
 _PORT_KEY = re.compile(r"(\d{1,5})/([A-Za-z0-9]+)")
-_ENGINE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})")
 _IMAGE_HEX = re.compile(r"[0-9a-f]{64}")
 _EPOCH = datetime.fromtimestamp(0, UTC)
 _ZERO_YEAR = "0001-01-01"
@@ -293,7 +300,9 @@ class ContainerDetail:
     not an exit. truncated is true when a list was cut at the display bound;
     labels_truncated when labels were dropped. can_attach is true when the viewer may change the
     container and its network mode lets it join networks. is_self marks the container dockmin
-    runs in, whose destructive actions are withheld.
+    runs in, whose destructive actions are withheld. stale_network is set when the container joins
+    the network of another that is not running or started after it; the owner's name is withheld
+    from a viewer who may not read it.
     """
 
     environment_id: int
@@ -332,6 +341,7 @@ class ContainerDetail:
     oom_killed: bool = False
     ever_started: bool = True
     is_self: bool = False
+    stale_network: StaleNetwork | None = None
 
     stack_kind: StackKind | None = None
     image_id: str | None = None
@@ -437,20 +447,6 @@ def parse_action(value: str) -> ContainerAction | None:
     return next((action for action in CONTAINER_ACTIONS if action == value), None)
 
 
-def short_id(container_id: str) -> str:
-    """Return the 12-character form shown in the interface."""
-    return container_id[:12]
-
-
-def display_name(names: Sequence[str], container_id: str) -> str:
-    """Return the container's own name: the first without a link path, slash stripped."""
-    stripped = [name.removeprefix("/") for name in names]
-    for name in stripped:
-        if name and "/" not in name:
-            return name
-    return next((name for name in stripped if name), short_id(container_id))
-
-
 def _shown_names(names: Sequence[str]) -> tuple[str, ...]:
     return tuple(name.removeprefix("/") for name in names[:MAX_NAMES_SHOWN] if name)
 
@@ -536,21 +532,6 @@ def _health_view(state: ContainerState, viewer: Principal) -> HealthView:
 def _ever_started(state: ContainerState) -> bool:
     started = state.started_at.strip()
     return bool(started) and not started.startswith(_ZERO_YEAR)
-
-
-def parse_engine_time(text: str) -> datetime | None:
-    """Parse an Engine timestamp; the zero time and anything unreadable are None."""
-    match = _ENGINE_TIME.fullmatch(text.strip())
-    if match is None:
-        return None
-    base, fraction, offset = match.groups()
-    micros = (fraction or "0")[:6].ljust(6, "0")
-    zone = "+00:00" if offset == "Z" else offset
-    try:
-        moment = datetime.fromisoformat(f"{base}.{micros}{zone}")
-    except ValueError:
-        return None
-    return None if moment.year <= 1 else moment.astimezone(UTC)
 
 
 def _from_epoch(seconds: int) -> datetime:
@@ -981,7 +962,29 @@ class ContainerService:
             has_error=bool(state.error.strip()),
             oom_killed=state.oom_killed,
             ever_started=_ever_started(state),
+            stale_network=await self._stale_network(actor, environment_id, inspected),
         )
+
+    async def _stale_network(
+        self, actor: Principal, environment_id: int, inspected: ContainerInspect
+    ) -> StaleNetwork | None:
+        mode = _text(inspected.host_config, "NetworkMode")
+        started = parse_engine_time(inspected.state.started_at)
+        if inspected.state.status != "running" or joined_reference(mode) is None:
+            return None
+        try:
+            client = await self._hosts.client(environment_id)
+            found = await stale_network_of(client, mode, started)
+        except (EngineError, ProductError):
+            return None
+        if found is None or found.owner_id is None:
+            return found
+        key = ResourceKey(environment_id, "container", found.owner_id)
+        try:
+            await self._authoriser.require_access(actor, key, "read")
+        except (ResourceNotFound, PermissionDenied):
+            return replace(found, owner_name="")
+        return found
 
     async def _attachments(
         self, environment_id: int, endpoints: Sequence[tuple[str, EndpointSettings]]

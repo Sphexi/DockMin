@@ -110,7 +110,7 @@ The activity log holds one row per recorded action. Administrators read it on th
 | Time | UTC to the second. Links to the [event page](#event-page) |
 | Actor | Username; subsystem with `Automation: <name>` beneath; `Anonymous` with the attempted username |
 | Action | The action name |
-| Target | The target id above the target type; `—` when there is no id |
+| Target | The target id above the target type; `—` when there is no id. For a `container`, `network`, `service`, `config` or `secret` target whose `detail` holds a `name` that differs from the id, the name is the link text and the id is shown beside it ([Recorded names](#recorded-names)) |
 | Environment | Name, linked; `Environment N` when the environment is gone; `—` when none |
 | Result | `Success` or `Failure` |
 
@@ -220,6 +220,16 @@ A filter left empty does not constrain. Filters combine with AND.
 
 - The run line links to the run page (`Run N`) while `job_run_id` is set.
 - The request line shows `request_id` as a link to `/activity?request_id=<id>`, or `—` when it is null.
+
+### Recorded names
+
+| Item | Behaviour |
+|---|---|
+| Target types | `container`, `network`, `service`, `config`, `secret` |
+| Source | The `name` key of `detail`, when it is a non-empty string different from the target id |
+| Log list | The name replaces the id as the text of the target, linked as the id was. The id follows in a smaller line |
+| Event page | A target found missing ([Deleted targets](#deleted-targets)) is shown as the name, then the id, with the `Deleted` badge. A target that exists is shown by its id, linked |
+| No `name` | The id alone |
 
 ### Target links
 

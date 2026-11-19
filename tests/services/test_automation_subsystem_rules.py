@@ -48,6 +48,8 @@ def arguments(world: World, subsystem: str = HEALTH, **changes: Any) -> dict[str
         ({"parameters": {"max_restarts": 21}}, "parameters"),
         ({"parameters": {"window_seconds": 299}}, "parameters"),
         ({"parameters": {"window_seconds": 86401}}, "parameters"),
+        ({"parameters": {"grace_seconds": -1}}, "parameters"),
+        ({"parameters": {"grace_seconds": 3601}}, "parameters"),
         ({"parameters": {"surprise": 1}}, "parameters"),
         ({"target_selector": "db"}, "target_selector"),
         ({"target_selector": json.dumps({"kind": "container", "name": "db"})}, "target_selector"),
@@ -94,6 +96,7 @@ async def test_the_health_checker_accepts_its_widest_target_and_the_floor_of_its
         "max_restarts": 20,
         "window_seconds": 86400,
         "auto_release": False,
+        "grace_seconds": 120,
     }
     assert rule.is_enabled is False
 

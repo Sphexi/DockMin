@@ -38,7 +38,9 @@ from app.services.acting import AutomationAuthority
 from app.services.activity import ActivityRecorder
 from app.services.assembly import build_host_clients
 from app.services.authorisation import Authoriser
+from app.services.container_actions import WaitBudget
 from app.services.container_derivation import SWARM_SERVICE_LABEL
+from app.services.container_joiners import JoinerFollower
 from app.services.container_provisioning import RecreateFailed, VerifyPolicy
 from app.services.container_recreate import INTERRUPTED_FAILURE, ContainerRecreateService
 from app.services.container_review import RecreateOutcome
@@ -69,6 +71,7 @@ from app.services.stack_deploy import StackRejected, in_project
 from app.services.stack_queries import read_project_containers
 from app.services.swarm_stack_plan import StackCredentialsRefused
 from app.subsystems.acting_run import (
+    JOINER_RUN_WAIT_SECONDS,
     NAMES_LISTING_LIMIT,
     PERMISSION_DENIED,
     ObjectStatus,
@@ -461,6 +464,7 @@ class _Pass:
     charged: set[str] = field(default_factory=set)
     not_checked: int = 0
     pruning: PruneReport | None = None
+    joiner_wait: WaitBudget | None = None
 
     @property
     def explicit(self) -> bool:
@@ -771,6 +775,9 @@ class _Pass:
             "rolled_back",
             "rollback_failed",
             "refused",
+            "joiners_recreated",
+            "joiners_restarted",
+            "joiners_omitted",
         ):
             extras.append((name, counts[name]))
         extras.append(("refreshed", self.tally.refreshed))
@@ -1368,6 +1375,20 @@ class _Pass:
                     detail=detail,
                 )
 
+            actions = self.services.container_actions
+            if self.joiner_wait is None:
+                self.joiner_wait = actions.wait_budget(JOINER_RUN_WAIT_SECONDS)
+            follower = JoinerFollower(
+                actor=authority,
+                environment_id=self.environment_id,
+                client=await self.services.hosts.client(self.environment_id),
+                recreation=self.recreation,
+                actions=actions,
+                activity=self.context.activity,
+                verify=VerifyPolicy(self.params.verify_seconds, self.params.require_healthy),
+                note=self.note(),
+                wait=self.joiner_wait,
+            )
             try:
                 outcome = await self.recreation.recreate(
                     authority,
@@ -1380,6 +1401,7 @@ class _Pass:
                     if plan.reason == "redeploy"
                     else self.note(update_reason=plan.reason, reference=plan.reference),
                     on_rolled_back=interrupted_rollback,
+                    on_recreated=follower.planned,
                 )
             except RecreateFailed as failure:
                 if failure.rolled_back:
@@ -1393,8 +1415,18 @@ class _Pass:
                     self.counts["rolled_back"] += 1
                 raise
             await self._remember_replaced(plan, outcome, image_after)
+            await self._follow_joiners(follower, outcome)
 
         return work
+
+    async def _follow_joiners(self, follower: JoinerFollower, outcome: RecreateOutcome) -> None:
+        """Bring the containers that joined the recreated one onto it, counting what fails."""
+        report = await follower.follow(outcome)
+        self.counts["joiners_recreated"] += len(report.recreated)
+        self.counts["joiners_restarted"] += len(report.restarted)
+        self.counts["joiners_omitted"] += report.omitted
+        for name, reason in report.failed:
+            self.tally.record("failed", attempted=True, name=name, reason=reason)
 
     async def _remember_replaced(
         self, plan: _Plan, outcome: RecreateOutcome, image_after: str | None

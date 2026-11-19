@@ -1,5 +1,6 @@
 """The stack-restarter subsystem: scheduled restarts of one container or one Compose stack."""
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import ClassVar, Final, Literal
@@ -16,12 +17,14 @@ from app.self_identity import SelfIdentitySource, no_identity
 from app.services.access import is_canonical_id
 from app.services.acting import AutomationAuthority
 from app.services.authorisation import Authoriser
+from app.services.container_actions import WaitBudget
 from app.services.container_derivation import SWARM_SERVICE_LABEL
 from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectKey
 from app.services.stack_deploy import in_project
 from app.services.stack_queries import SERVICE_LABEL, read_project_containers
 from app.subsystems.acting_run import (
+    JOINER_RUN_WAIT_SECONDS,
     PERMISSION_DENIED,
     ObjectTally,
     act_on,
@@ -31,6 +34,7 @@ from app.subsystems.acting_run import (
     forecast_busy,
     permitted,
     rechecking,
+    settle_joiners,
 )
 from app.subsystems.base import (
     RuleParameters,
@@ -141,6 +145,8 @@ class StackRestarter(Subsystem):
         single = len(selector.names) == 1
         tally = ObjectTally(done_name="restarted", plan_name="would_restart")
         tally.track_targets()
+        joiners: Counter[str] = Counter()
+        wait = services.container_actions.wait_budget(JOINER_RUN_WAIT_SECONDS)
         stack_services = 0
         for name in selector.names:
             tally.begin(name)
@@ -168,7 +174,9 @@ class StackRestarter(Subsystem):
                 case "suppressed":
                     tally.record("suppressed", attempted=False)
                 case "act":
-                    await self._act(context, services, environment_id, planned, tally, single)
+                    await self._act(
+                        context, services, environment_id, planned, tally, single, joiners, wait
+                    )
                 case reason:
                     tally.record("skipped", attempted=False, reason=reason)
             stack_services += planned.services
@@ -177,6 +185,7 @@ class StackRestarter(Subsystem):
         extra: dict[str, DetailValue] = {"target_kind": selector.kind}
         if isinstance(selector, StackTarget):
             extra["services"] = stack_services
+        extra.update({key: count for key, count in joiners.items() if count})
         return tally.result(dry_run=context.dry_run, extra=extra)
 
     async def _plan(
@@ -318,6 +327,8 @@ class StackRestarter(Subsystem):
         planned: _Planned,
         tally: ObjectTally,
         single: bool,
+        joiners: Counter[str],
+        wait: WaitBudget,
     ) -> None:
         stack_needs_compose = planned.kind == "stack" and self._deps.engine.compose is None
         if context.dry_run:
@@ -333,9 +344,14 @@ class StackRestarter(Subsystem):
 
         async def restart(authority: AutomationAuthority) -> None:
             if planned.kind == "container":
-                await services.container_actions.restart(
-                    authority, environment_id, planned.container_id, note={"trigger": "schedule"}
+                restarted = await services.container_actions.restart(
+                    authority,
+                    environment_id,
+                    planned.container_id,
+                    note={"trigger": "schedule"},
+                    wait=wait,
                 )
+                settle_joiners(tally, restarted, joiners)
                 return
             if services.stacks is None:
                 raise RunFailed("compose_unavailable", COMPOSE_UNAVAILABLE)

@@ -193,8 +193,10 @@ async def test_a_detail_lists_services_and_visible_containers_and_counts_the_hid
         ),
         expected_digest=await digest_of(rig.access, stack_key(SHOP)),
     )
-    project_box(rig.host, 1, SHOP, "web")
-    project_box(rig.host, 2, SHOP, "legacy")
+    owner_box = project_box(rig.host, 1, SHOP, "web")
+    joiner_box = project_box(rig.host, 2, SHOP, "legacy")
+    joiner_box.host_config = {"NetworkMode": f"container:{owner_box.id}"}
+    joiner_box.started_at = "2020-01-01T00:00:00.000000000Z"
     secret_box = project_box(rig.host, 3, SHOP, "web")
     await control(
         rig.access,
@@ -217,6 +219,11 @@ async def test_a_detail_lists_services_and_visible_containers_and_counts_the_hid
     }
     assert services(owner) == services(reader)
     assert services(reader)["web"] == (True, 1, 1)
+    assert {c.name: c.stale_network for service in admin.services for c in service.containers} == {
+        owner_box.name: None,
+        joiner_box.name: "owner_restarted",
+        secret_box.name: None,
+    }
     assert (reader.hidden_containers, admin.hidden_containers) == (1, 0)
     assert (owner.can_write, reader.can_write, admin.can_write) == (True, True, True)
     assert (owner.can_manage, admin.can_manage) == (False, True)

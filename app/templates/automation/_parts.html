@@ -148,7 +148,8 @@
 <li>No image is removed.</li>
 <li>Anyone holding the webhook URL can start this automation. Runs start at most once a minute.</li>
 {% elif view.rule.subsystem == "container-health-checker" %}
-<li>Each run restarts the running containers of the target that report <strong>unhealthy</strong>.</li>
+<li>Each run restarts the running containers of the target that report <strong>unhealthy</strong>, and those whose network belongs to a container that is not running or started after them. A container is left alone for {{ values.get("grace_seconds", "120") }} seconds after it starts, and for five minutes after a user, or another automation, restarted, started, stopped, redeployed or recreated it or its stack.</li>
+<li>Restarting a container also restarts the running containers that share its network, once it is running.</li>
 <li>A container is restarted at most {{ values.get("max_restarts", "3") }} {{ "time" if values.get("max_restarts", "3") == "1" else "times" }} in {{ values.get("window_seconds", "3600") }} seconds. After that it is left alone until someone acts on it or the automation is edited, and the run reports it.</li>
 <li>A restart interrupts whatever the container is doing.</li>
 {% elif view.rule.subsystem == "container-log-exporter" %}

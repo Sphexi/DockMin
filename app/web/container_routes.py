@@ -755,6 +755,8 @@ async def run_batch(
     expected_name: Annotated[list[Short] | None, Form(max_length=BATCH_PARAMS_MAX)] = None,
     expected_volumes: Annotated[list[Short] | None, Form(max_length=BATCH_PARAMS_MAX)] = None,
     display_name: Annotated[list[Short] | None, Form(max_length=BATCH_PARAMS_MAX)] = None,
+    joiner: Annotated[list[Short] | None, Form(max_length=BATCH_PARAMS_MAX)] = None,
+    joiners_reviewed: Annotated[str, Form(max_length=8)] = "",
     force: Annotated[str, Form(max_length=8)] = "",
     volumes: Annotated[str, Form(max_length=8)] = "",
     confirm_force: Annotated[str, Form(max_length=8)] = "",
@@ -800,6 +802,7 @@ async def run_batch(
             reviewed_names=dict(zip(ids, shown_names, strict=False)),
             force=force == CHECKED,
             volumes=volumes == CHECKED,
+            joiners=_confirmed_joiners(joiners_reviewed, joiner),
         )
     except ValidationFailed as invalid:
         return refused("; ".join(invalid.fields.values()))
@@ -808,6 +811,11 @@ async def run_batch(
         "containers/batch_result.html",
         {"result": result, "environment_id": environment_id},
     )
+
+
+def _confirmed_joiners(reviewed: str, joiners: list[str] | None) -> frozenset[str] | None:
+    """Return the joiners a confirmation named when it named any set, else None."""
+    return frozenset(joiners or ()) if reviewed == CHECKED_FLAG else None
 
 
 _LOG_TIMESTAMP = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z")
@@ -1443,7 +1451,13 @@ async def _updated_fragment(
     view: str,
 ) -> Response:
     """Answer an htmx action with the changed row or summary, or only the notice if it is gone."""
-    common: dict[str, Any] = {"action": outcome.action, "result": outcome.result}
+    common: dict[str, Any] = {
+        "action": outcome.action,
+        "result": outcome.result,
+        "joiners": outcome.joiners,
+        "joiners_omitted": outcome.joiners_omitted,
+        "joiners_unlisted": outcome.joiners_unlisted,
+    }
     if outcome.action == "remove":
         if view == "detail":
             return _fragment(
@@ -1517,6 +1531,8 @@ async def run_action(
     volumes: Annotated[str, Form(max_length=8)] = "",
     confirm_force: Annotated[str, Form(max_length=8)] = "",
     view: Annotated[str, Form(max_length=16)] = "list",
+    joiner: Annotated[list[Short] | None, Form(max_length=BATCH_PARAMS_MAX)] = None,
+    joiners_reviewed: Annotated[str, Form(max_length=8)] = "",
 ) -> Response:
     """Carry out one confirmed action; htmx gets the changed row, a browser a result page."""
     chosen = parse_action(action)
@@ -1534,6 +1550,7 @@ async def run_action(
             expected_name=expected_name,
             force=force == CHECKED,
             volumes=volumes == CHECKED,
+            joiners=_confirmed_joiners(joiners_reviewed, joiner),
         )
     except ACTION_ERRORS as error:
         failure = _failure_of(error, containers, actor)

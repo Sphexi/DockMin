@@ -2,6 +2,7 @@
 {% from "environments/_parts.html" import kind_badge with context %}
 {% from "partials/confirm_targets.html" import confirm_targets %}
 {% from "partials/container_state_label.html" import container_state_label %}
+{% from "partials/joiners.html" import joiner_notice %}
 
 {% macro batch_context(confirmation) %}
 <p>
@@ -23,6 +24,9 @@
 {% set _ = items.append({"name": target.name, "detail": target.short_id ~ ", " ~ container_state_label(target.state) ~ (", protected: this dockmin instance, not changed" if kept else "")}) %}
 {% endfor %}
 {{ confirm_targets(items, "container") }}
+{% if confirmation.action == "restart" %}
+{{ joiner_notice(confirmation.joiners, confirmation.joiners_refused, confirmation.joiners_hidden, confirmation.joiners_omitted) }}
+{% endif %}
 {% if protected %}
 <div class="panel panel--notice" role="note">
   <p>{{ "This container is" if protected|length == 1 else "These containers are" }} the one dockmin runs in and {{ "is" if protected|length == 1 else "are" }} left as {{ "it is" if protected|length == 1 else "they are" }}.
@@ -91,6 +95,12 @@
 <input type="hidden" name="expected_volumes" value="{{ unread_token if mounted is none else mounted.token }}">
 {% endif %}
 {% endfor %}
+{% if action == "restart" %}
+<input type="hidden" name="joiners_reviewed" value="1">
+{% for joiner in confirmation.joiners %}
+<input type="hidden" name="joiner" value="{{ joiner.container_id }}">
+{% endfor %}
+{% endif %}
 {% endmacro %}
 
 {% macro batch_noun(count) -%}

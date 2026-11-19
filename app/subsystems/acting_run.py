@@ -18,6 +18,7 @@ from app.db.repositories.job_run import MAX_RUN_DETAIL_TEXT, is_reason
 from app.logging import get_logger
 from app.scheduler.model import RunFailed, RunResult, RunSkipped, reason_of, reason_or_fallback
 from app.services.acting import AutomationAuthority
+from app.services.container_actions import ActionOutcome
 from app.services.object_inspector import EnvironmentUnavailable, ObjectTooLarge
 from app.services.object_locks import ObjectBusy, ObjectKey, ObjectLockRegistry
 from app.subsystems.base import RunContext, suppression_skip
@@ -66,6 +67,7 @@ _SIGNIFICANCE: Final = (
     "skipped",
     "done",
 )
+JOINER_RUN_WAIT_SECONDS: Final = 600.0
 UNCHANGED: Final = "unchanged"
 NOT_FOUND: Final = "not_found"
 
@@ -301,7 +303,7 @@ async def check_suppressed(
     if acted_at is None:
         return False
     if single:
-        raise suppression_skip(acted_at)
+        raise suppression_skip(acted_at, lifecycle=context.stands_back_for_lifecycle)
     _settle(tally, "suppressed", False, name, None)
     return True
 
@@ -361,6 +363,25 @@ async def act_on(
         status, reason = on_success, success_reason
     attempted = await events.count_for_run(run_id) > before
     return _settle(tally, status, attempted, name, reason)
+
+
+def settle_joiners(tally: ObjectTally, outcome: ActionOutcome, counts: Counter[str]) -> None:
+    """Count what became of the containers restarted with another: each one that was not is failed.
+
+    Every joiner that was not restarted has its own failed event, so each is an attempt.
+    """
+    for item in outcome.joiners:
+        if item.status in ("done", "unchanged"):
+            counts["joiners_restarted"] += 1
+        else:
+            tally.record(
+                "failed",
+                attempted=True,
+                name=item.name or item.short_id,
+                reason=item.reason or item.status,
+            )
+    counts["joiners_omitted"] += outcome.joiners_omitted
+    counts["joiners_unlisted"] += int(outcome.joiners_unlisted)
 
 
 def failure_reason(error: ProductError) -> str:

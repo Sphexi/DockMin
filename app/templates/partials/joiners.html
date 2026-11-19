@@ -1,0 +1,26 @@
+{# joiners: containers restarted after the one named, down the chain of those sharing their networks; refused: ones the viewer may not restart; hidden and omitted count those the viewer cannot see and those the chain limit left out. #}
+{% from "partials/confirm_targets.html" import confirm_targets %}
+{% macro joiner_notice(joiners, refused, hidden, omitted=0) %}
+{% if joiners %}
+{% set items = [] %}
+{% for joiner in joiners %}
+{% set _ = items.append({"name": joiner.name, "detail": joiner.short_id}) %}
+{% endfor %}
+<h3 class="confirm__subheading">Restarted with it</h3>
+<p class="field__help">{{ "This container shares" if joiners|length == 1 else "These containers share" }} its network, or the network of one that does, so {{ "it is" if joiners|length == 1 else "each is" }} also restarted, once the container it follows is running. Only {{ "this container" if joiners|length == 1 else "these containers" }} will be restarted.</p>
+{{ confirm_targets(items, "container") }}
+{% endif %}
+{% if refused or hidden or omitted %}
+<div class="panel panel--notice" role="note">
+  {% if refused %}
+  <p>Not restarted, because you may not change {{ "it" if refused|length == 1 else "them" }}: {% for joiner in refused %}<span class="mono">{{ joiner.name }}</span>{{ ", " if not loop.last }}{% endfor %}. {{ "It keeps" if refused|length == 1 else "They keep" }} a network that no longer exists until someone who may restart {{ "it" if refused|length == 1 else "them" }} does.</p>
+  {% endif %}
+  {% if hidden %}
+  <p>{{ hidden }} more {{ "container shares its network and is" if hidden == 1 else "containers share its network and are" }} not shown to you and will not be restarted.</p>
+  {% endif %}
+  {% if omitted %}
+  <p>{{ omitted }} more {{ "container shares" if omitted == 1 else "containers share" }} its network and {{ "is" if omitted == 1 else "are" }} not listed here, because the list is limited. {{ "It is" if omitted == 1 else "They are" }} not restarted.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

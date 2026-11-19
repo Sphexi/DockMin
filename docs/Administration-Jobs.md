@@ -341,7 +341,7 @@ Every outcome other than `success` and `partial` has a reason, a lowercase code 
 | `skipped` | `overrun`, `overrun_collapsed` | [Overrun policies](#overrun-policies) |
 | `skipped` | `queue_dropped` | A queued fire was dropped |
 | `skipped` | `object_busy` | Another action held the object's lock ([Object locks](#object-locks)) |
-| `skipped` | `suppressed` | A user acted on the object recently ([Suppression after a user acts](#suppression-after-a-user-acts)) |
+| `skipped` | `suppressed` | A user acted on the object recently; for `container-health-checker`, also another automation restarted, started, stopped, redeployed, recreated or updated it or its stack ([Suppression after a user acts](#suppression-after-a-user-acts)) |
 | `skipped` | `environment_unreachable` | The host could not be used when the run began, and no person needs to act. Detail `kind`: `unreachable`, `outcome_unknown` or `not_swarm_manager`. Not counted toward the failure threshold ([Automation](Operations-Automation#unreachable-environments)) |
 | `skipped` | `rule_disabled`, `rule_paused` | The automation was switched off or paused as the run began |
 | `skipped` | `scheduler_stopped` | The application was stopping, or the scheduler was suspended for a restore, as the run was claimed |
@@ -671,6 +671,17 @@ Automation stands back from an object a user has just acted on.
 | Effect | The object is skipped. A run that acts on that one object only is `skipped`, reason `suppressed` |
 | Memory | Entries older than 60 minutes are dropped. At most 10,000 objects are held. After an entry has been dropped for space, a lookup that finds nothing reads the activity log for the last 60 minutes |
 | After a restart | Reloaded from the user actions in the activity log of the last 60 minutes, up to 10,000 |
+
+### Lifecycle actions by other actors
+
+| Item | Behaviour |
+|---|---|
+| Stands back | `container-health-checker` only |
+| Starts when | A user or a subsystem other than `container-health-checker` starts, stops, restarts, redeploys, recreates or updates a container or a Compose stack. A rollback of an update counts |
+| Checked | Against the container and against the stack it belongs to |
+| Window, memory, reload | As above, kept separately from user actions. The reload reads `container_started`, `container_stopped`, `container_restarted`, `container_recreated`, `container_update_rolled_back`, `stack_started`, `stack_stopped`, `stack_restarted`, `stack_redeployed` and `stack_updated` |
+| Recorded | When the action completed. A refused or failed attempt records nothing. After a recreate the new container is recorded as well |
+| Effect | `suppressed`, as for a user action. The run skip reads `The object was acted on recently.` |
 
 ## Automations
 

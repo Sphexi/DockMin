@@ -2,7 +2,7 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Collection, Mapping
 from dataclasses import replace
 from typing import Final
 
@@ -14,6 +14,7 @@ from app.db.repositories.user import UserRepository
 from app.docker_engine.models import PullProgress
 from app.logging import request_id_var
 from app.services.assembly import app_container_services
+from app.services.container_joiners import joiner_flags
 from app.services.container_review import created_flags, recreated_flags
 from app.services.engine_setup import EngineRuntime
 from app.services.image_jobs import NO_LONGER_PERMITTED, JobCancelled, JobProgress, JobResult
@@ -148,11 +149,12 @@ def start_container_recreate_job(
     *,
     expected_name: str,
     credential_choice: CredentialChoice | None,
+    joiners: Collection[str] | None = None,
 ) -> str:
     """Start a recreate that pulls in the background and return its id; TooManyJobs at the limits.
 
     The recreate validates and authorises again on a session of its own, with the name the
-    caller confirmed.
+    caller confirmed. The containers sharing its network follow it, those `joiners` names.
     """
     engine = _engine_of(app)
     request_id = request_id_var.get()
@@ -164,11 +166,12 @@ def start_container_recreate_job(
             app_container_services(app) as services,
         ):
             try:
-                outcome = await services.recreation.recreate(
+                outcome, followed = await services.joiners.recreate(
                     current,
                     environment_id,
                     container_id,
                     expected_name=expected_name,
+                    confirmed=joiners,
                     pull=True,
                     credential_choice=credential_choice,
                     progress=feed,
@@ -180,7 +183,7 @@ def start_container_recreate_job(
         return JobResult(
             f"Recreated {outcome.name}.",
             container_id=outcome.new_id,
-            flags=recreated_flags(outcome),
+            flags={**recreated_flags(outcome), **joiner_flags(followed)},
         )
 
     return engine.image_jobs.start(

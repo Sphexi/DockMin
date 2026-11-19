@@ -4,6 +4,7 @@
 {% from "partials/checkbox_field.html" import checkbox_field %}
 {% from "partials/confirm_targets.html" import confirm_targets %}
 {% from "partials/container_state_badge.html" import container_state_badge %}
+{% from "partials/joiners.html" import joiner_notice %}
 
 {% macro target_facts(environment_name, is_local, name, short_id, image, state) %}
 {{ confirm_targets([{"name": name, "detail": short_id}], "container") }}
@@ -72,6 +73,12 @@
 {% if c.action == "remove" %}
 <input type="hidden" name="expected_name" value="{{ c.name }}">
 {% endif %}
+{% if c.action == "restart" %}
+<input type="hidden" name="joiners_reviewed" value="1">
+{% for joiner in c.joiners %}
+<input type="hidden" name="joiner" value="{{ joiner.container_id }}">
+{% endfor %}
+{% endif %}
 {% endmacro %}
 
 {% macro action_dialog(c, view) %}
@@ -84,6 +91,9 @@
     <div id="action-dialog-body">
       <p>{{ action_effect(c.action) }}</p>
       {{ target_facts(c.environment_name, c.is_local, c.name, c.short_id, c.image, c.state) }}
+      {% if c.action == "restart" %}
+      {{ joiner_notice(c.joiners, c.joiners_refused, c.joiners_hidden, c.joiners_omitted) }}
+      {% endif %}
       {% if c.action == "remove" %}
       {{ remove_options(c, view, true) }}
       {% endif %}
@@ -126,6 +136,9 @@
   {{ confirm_fields(c, view) }}
   <p>{{ action_effect(c.action) }}</p>
   {{ target_facts(c.environment_name, c.is_local, c.name, c.short_id, c.image, c.state) }}
+  {% if c.action == "restart" %}
+  {{ joiner_notice(c.joiners, c.joiners_refused, c.joiners_hidden, c.joiners_omitted) }}
+  {% endif %}
   {% if c.action == "remove" %}
   {{ remove_options(c, view) }}
   {% endif %}

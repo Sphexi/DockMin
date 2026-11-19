@@ -263,3 +263,106 @@ async def test_a_stack_miss_after_an_eviction_matches_the_log_with_case_folded(r
         found = await suppressions.lookup(ObjectKey(environment, "stack", "webapp"), db)
 
     assert found == at(-10)
+
+
+HEALTH_HOLDER = LockHolder(SubsystemActor("container-health-checker", 1), "checker", "restart")
+STACK = ObjectKey(1, "stack", "shop")
+VOLUME = ObjectKey(1, "volume", "data")
+
+
+@pytest.mark.parametrize(
+    ("key", "holder", "seen"),
+    [
+        (CONTAINER, USER_HOLDER, True),
+        (CONTAINER, SUBSYSTEM_HOLDER, True),
+        (STACK, SUBSYSTEM_HOLDER, True),
+        (CONTAINER, LockHolder(SubsystemActor("stack-restarter", 1), "x", "recreate"), True),
+        (CONTAINER, LockHolder(SubsystemActor("stack-restarter", 1), "x", "kill"), False),
+        (CONTAINER, HEALTH_HOLDER, False),
+        (STACK, HEALTH_HOLDER, False),
+        (VOLUME, SUBSYSTEM_HOLDER, False),
+    ],
+)
+async def test_a_lifecycle_release_by_anyone_but_the_health_checker_is_remembered_for_it(
+    rig: Rig, key: ObjectKey, holder: LockHolder, seen: bool
+) -> None:
+    suppressions, locks, _ = registry_with_observer()
+
+    async with locks.hold(key, holder):
+        pass
+
+    async with rig.database.session() as db:
+        found = await suppressions.lookup_lifecycle(key, db)
+    assert (found is not None) is seen
+    assert suppressions.last_user_action(key) is None or isinstance(holder.actor, UserActor)
+
+
+async def test_startup_seeds_lifecycle_events_of_every_actor_but_the_health_checker(
+    rig: Rig,
+) -> None:
+    environment = rig.environment()
+    rows = [
+        ("stack-restarter", "container", "a" * 64, "container_restarted", -30),
+        ("container-health-checker", "container", "b" * 64, "container_restarted", -20),
+        ("stack-restarter", "stack", "Shop", "stack_restarted", -10),
+        ("container-log-exporter", "container", "c" * 64, "container_log_exported", -15),
+        ("stack-restarter", "container", "d" * 64, "container_restarted", -4000),
+    ]
+    for subsystem, target_type, target_id, action, seconds in rows:
+        rig.sql(
+            "INSERT INTO activity_event (category, actor_type, actor_subsystem, environment_id, "
+            "target_type, target_id, action, result, occurred_at) "
+            "VALUES ('automation', 'subsystem', ?, ?, ?, ?, ?, 'success', ?)",
+            (subsystem, environment, target_type, target_id, action, stamp(at(seconds))),
+        )
+    suppressions = SuppressionRegistry(Clock(at(0)))
+
+    await suppressions.seed(rig.database)
+
+    async with rig.database.session() as db:
+        found = [
+            await suppressions.lookup_lifecycle(ObjectKey(environment, kind, name), db)
+            for kind, name in (
+                ("container", "a" * 64),
+                ("container", "b" * 64),
+                ("stack", "shop"),
+                ("container", "c" * 64),
+                ("container", "d" * 64),
+            )
+        ]
+    assert found == [at(-30), None, at(-10), None, None]
+
+
+@pytest.mark.parametrize("holder", [USER_HOLDER, SUBSYSTEM_HOLDER])
+async def test_a_hold_whose_body_failed_is_not_remembered(rig: Rig, holder: LockHolder) -> None:
+    suppressions, locks, _ = registry_with_observer()
+
+    with pytest.raises(RuntimeError):
+        async with locks.hold(CONTAINER, holder):
+            raise RuntimeError("refused after the lock was taken")
+
+    async with rig.database.session() as db:
+        assert await suppressions.lookup_lifecycle(CONTAINER, db) is None
+    assert suppressions.last_user_action(CONTAINER) is None
+
+
+async def test_startup_seeds_only_lifecycle_events_that_succeeded(rig: Rig) -> None:
+    environment = rig.environment()
+    for result, container in (("success", "a" * 64), ("failure", "b" * 64)):
+        rig.sql(
+            "INSERT INTO activity_event (category, actor_type, actor_subsystem, environment_id, "
+            "target_type, target_id, action, result, occurred_at) "
+            "VALUES ('automation', 'subsystem', 'stack-restarter', ?, 'container', ?, "
+            "'container_restarted', ?, ?)",
+            (environment, container, result, stamp(at(-10))),
+        )
+    suppressions = SuppressionRegistry(Clock(at(0)))
+
+    await suppressions.seed(rig.database)
+
+    async with rig.database.session() as db:
+        found = [
+            await suppressions.lookup_lifecycle(ObjectKey(environment, "container", name), db)
+            for name in ("a" * 64, "b" * 64)
+        ]
+    assert found == [at(-10), None]

@@ -110,11 +110,13 @@ class FallbackCursors:
             self._after[rule_id] = last_checked
 
 
-def suppression_skip(acted_at: datetime) -> RunSkipped:
-    """Return the skip a run is recorded under when a user acted on its object recently."""
+def suppression_skip(acted_at: datetime, *, lifecycle: bool = False) -> RunSkipped:
+    """Return the skip a run is recorded under when its object was acted on recently."""
     return RunSkipped(
         "suppressed",
-        "A user acted on the object recently.",
+        "The object was acted on recently."
+        if lifecycle
+        else "A user acted on the object recently.",
         {"acted_at": format_timestamp(acted_at)},
     )
 
@@ -390,6 +392,7 @@ class RunContext:
     suppression_window: timedelta
     guard: DryRunGuard | None = field(default=None, repr=False)
     owner_gate: OwnerGate | None = field(default=None, repr=False)
+    stands_back_for_lifecycle: bool = False
     fallback_checks: int = field(default=0, init=False, repr=False)
 
     def hold(self, key: ObjectKey, action: str) -> AbstractAsyncContextManager[None]:
@@ -408,7 +411,7 @@ class RunContext:
         async with self.locks.hold(key, holder, wait=self.lock_wait):
             acted_at = await self.suppressed(key)
             if acted_at is not None:
-                raise suppression_skip(acted_at)
+                raise suppression_skip(acted_at, lifecycle=self.stands_back_for_lifecycle)
             yield
 
     def authority(self) -> AutomationAuthority:
@@ -499,8 +502,17 @@ class RunContext:
         return rule, rule.environment_id
 
     async def suppressed(self, key: ObjectKey) -> datetime | None:
-        """Return when a user last acted on the object if that is inside the window, else None."""
-        at = await self.suppressions.lookup(key, self.db)
+        """Return when a user last acted on the object if that is inside the window, else None.
+
+        A subsystem that stands back for lifecycle actions also hears of a restart, start, stop,
+        redeploy or recreate by any other actor.
+        """
+        lookup = (
+            self.suppressions.lookup_lifecycle
+            if self.stands_back_for_lifecycle
+            else self.suppressions.lookup
+        )
+        at = await lookup(key, self.db)
         if at is None:
             return None
         window = self.suppression_window
@@ -525,6 +537,7 @@ class Subsystem(ABC):
     lock_wait: ClassVar[float] = 10.0
     max_concurrent_runs: ClassVar[int | None] = None
     suppression_window: ClassVar[timedelta] = timedelta(minutes=5)
+    stands_back_for_lifecycle: ClassVar[bool] = False
     failure_threshold: ClassVar[int | None] = 5
     requires_environment: ClassVar[bool] = False
     administrators_only: ClassVar[bool] = False
@@ -655,6 +668,7 @@ class Subsystem(ABC):
             suppression_window=self.suppression_window,
             guard=guard,
             owner_gate=gate,
+            stands_back_for_lifecycle=self.stands_back_for_lifecycle,
         )
 
     def _parse_parameters(self, text: str) -> RuleParameters | None:

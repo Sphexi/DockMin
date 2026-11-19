@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Path, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from pydantic import StringConstraints
 
 from app.auth.dependencies import CurrentUser, require_user
 from app.auth.errors import PermissionDenied, ResourceNotFound, SelfProtected, ValidationFailed
@@ -21,6 +22,7 @@ from app.services.container_actions import (
 from app.services.container_import_assembly import PreparedContainers
 from app.services.container_import_store import PreparedContainerStore
 from app.services.container_jobs import start_container_create_job, start_container_recreate_job
+from app.services.container_joiners import JoinerReport, joiner_flags
 from app.services.container_provisioning import (
     START_FAILED,
     CreateRefused,
@@ -94,6 +96,9 @@ SOURCE_MAX = 128
 SEGMENT_MAX = 128
 NAME_MAX = 256
 FLAG_MAX = 8
+JOINER_COUNT_DIGITS = 4
+JOINER_ID_MAX = 64
+JOINER_FIELDS_MAX = 100
 CHOICE_MAX = 20
 IMAGE_MAX = 512
 CHECKED = "on"
@@ -178,8 +183,8 @@ def _path(request: Request, name: str, **params: Any) -> str:
     return str(request.app.url_path_for(name, **params))
 
 
-def _recreated_query(outcome: RecreateOutcome) -> str:
-    return urlencode(recreated_flags(outcome), safe=",")
+def _recreated_query(outcome: RecreateOutcome, followed: JoinerReport) -> str:
+    return urlencode({**recreated_flags(outcome), **joiner_flags(followed)}, safe=",")
 
 
 def creation_notices(params: Mapping[str, str]) -> tuple[Notice, ...]:
@@ -222,6 +227,7 @@ def creation_notices(params: Mapping[str, str]) -> tuple[Notice, ...]:
                 "Check the container list.",
             )
         )
+    notices.extend(_joiner_notices(params))
     if control == CONTROL_MISSING:
         notices.append(
             Notice(
@@ -231,6 +237,33 @@ def creation_notices(params: Mapping[str, str]) -> tuple[Notice, ...]:
             )
         )
     return tuple(notices)
+
+
+def _count(params: Mapping[str, str], key: str) -> int:
+    value = params.get(key, "")
+    return int(value) if value.isdigit() and len(value) <= JOINER_COUNT_DIGITS else 0
+
+
+def _joiner_notices(params: Mapping[str, str]) -> list[Notice]:
+    notices: list[Notice] = []
+    recreated, restarted = _count(params, "joiners_recreated"), _count(params, "joiners_restarted")
+    if recreated or restarted:
+        notices.append(
+            Notice(
+                "info",
+                f"Containers sharing its network: {recreated} recreated, {restarted} restarted.",
+            )
+        )
+    failed, omitted = _count(params, "joiners_failed"), _count(params, "joiners_omitted")
+    if failed or omitted:
+        notices.append(
+            Notice(
+                "warn",
+                f"{failed} sharing its network could not be brought onto it and {omitted} more "
+                "were left out because the chain is limited. The activity log lists each.",
+            )
+        )
+    return notices
 
 
 def _unavailable_banner(error: EnvironmentUnavailable | ObjectTooLarge) -> _Banner:
@@ -847,6 +880,9 @@ async def _confirm_page(
         {
             "confirmation": confirmation,
             "offer": offer,
+            "joiners": await containers.joiners.preview(
+                actor, environment_id, confirmation.container_id, confirmation.name
+            ),
             "selected": "" if offer is None else selected_choice(offer, submitted),
             "choice_error": (fields or {}).get(CHOICE_FIELD),
             "error": error,
@@ -959,8 +995,17 @@ async def recreate_container(
     expected_name: Annotated[str, Form(max_length=NAME_MAX)] = "",
     pull: Annotated[str, Form(max_length=FLAG_MAX)] = "",
     credential_choice: Annotated[str, Form(max_length=CHOICE_MAX)] = "",
+    joiner: Annotated[
+        list[Annotated[str, StringConstraints(max_length=JOINER_ID_MAX)]] | None,
+        Form(max_length=JOINER_FIELDS_MAX),
+    ] = None,
+    joiners_reviewed: Annotated[str, Form(max_length=FLAG_MAX)] = "",
 ) -> Response:
-    """Replace the container with one built from its own configuration, then show the new one."""
+    """Replace the container with one built from its own configuration, then show the new one.
+
+    The containers sharing its network follow it, those the confirmation named.
+    """
+    confirmed = frozenset(joiner or ()) if joiners_reviewed == "1" else None
 
     async def again(status_code: int, **extra: Any) -> Response:
         return await _confirm_page(
@@ -991,6 +1036,7 @@ async def recreate_container(
                 container_id,
                 expected_name=expected_name,
                 credential_choice=choice,
+                joiners=confirmed,
             )
             return no_store(
                 redirect(
@@ -1003,11 +1049,12 @@ async def recreate_container(
                     ),
                 )
             )
-        outcome = await containers.recreation.recreate(
+        outcome, followed = await containers.joiners.recreate(
             actor,
             environment_id,
             container_id,
             expected_name=expected_name,
+            confirmed=confirmed,
             pull=False,
             credential_choice=choice,
         )
@@ -1043,4 +1090,5 @@ async def recreate_container(
         environment_id=environment_id,
         container_id=outcome.new_id,
     )
-    return no_store(RedirectResponse(f"{location}?{_recreated_query(outcome)}", status_code=303))
+    query = _recreated_query(outcome, followed)
+    return no_store(RedirectResponse(f"{location}?{query}", status_code=303))

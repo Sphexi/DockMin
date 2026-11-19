@@ -1,0 +1,17 @@
+{% macro stale_network_text(stale) -%}
+{%- set owner = stale.owner_name if stale.owner_name else "the container it shares a network with" -%}
+{%- if stale.reason == "owner_not_running" -%}
+Its network belongs to {{ owner }}, which is not running, so this container has no network. Restart {{ owner }} to restore it; this container is restarted with it.
+{%- elif stale.reason == "owner_restarted" -%}
+{{ owner|capitalize }} was restarted after this container started, so this container is attached to a network that no longer exists. Restart this container, or restart {{ owner }}, which restarts this container with it.
+{%- else -%}
+The container whose network this one shares ({{ owner }}) no longer exists. Recreate this container so it joins a current one.
+{%- endif -%}
+{%- endmacro %}
+
+{% macro stale_reason_text(reason) -%}
+{%- if reason == "owner_not_running" -%}its network owner is not running
+{%- elif reason == "owner_restarted" -%}its network owner restarted after it
+{%- else -%}its network owner no longer exists
+{%- endif -%}
+{%- endmacro %}

@@ -1298,6 +1298,9 @@ Restart stops the services of a stack that have a running container, then starts
 | Run | A job on the progress page ([Operation progress](#operation-progress)), counted against the job limits. The JSON API runs it in the request |
 | Steps | `stop {services}` then `start {services}`, with at most 256 service names. Compose stops them in reverse dependency order and starts them in dependency order |
 | Services named | Those listed by `ps` with at least one running container. A service that is stopped stays stopped. `stack-restarter` also names the services a failed earlier restart of the same rule left unstarted |
+| Order | Dependents are stopped first and services are started in dependency order, waiting for the `depends_on` conditions, `service_healthy` among them. The order comes from `depends_on` and `network_mode: service:<name>` in the stack's file |
+| Containers of other stacks | A container in another stack that joins a container's network is not ordered or restarted by Compose. A single-container restart handles it ([Containers](Usage-Containers#containers-that-share-a-network)); `container-health-checker` restarts it once its network is stale ([Automation](Operations-Automation#stale-network)) |
+| After a Docker daemon or host restart | Restart policies start the containers. dockmin takes no part in the order |
 | Stopped dependency | `start` also starts a stopped service that a named service depends on |
 | Outage | Each named service is down between the end of `stop` and the start of `start` |
 | No running container | Refused, reason `not_running`: `No container of this stack is running.` The stack-restarter counts it as `not_running` and writes no row |
@@ -1308,6 +1311,19 @@ Restart stops the services of a stack that have a running container, then starts
 | Result | `Restarted {name}.` |
 | Recorded | `stack_restarted`. By a user: the user is the actor, category `user_action`. By `stack-restarter`: the subsystem is the actor, category `automation`. `method` is `stop_start` in both |
 | Automation | A restart by a user is an action on the stack: `stack-restarter` leaves the stack alone for its suppression window |
+
+### Stale network
+
+The Overview's services table marks a container with `Stale network` and one of these notes, when its network mode is `container:<id or name>` and the container it joins is not running, started after it did, or no longer exists.
+
+| Note | Reason |
+|---|---|
+| `Its network owner is not running.` | `owner_not_running` |
+| `Its network owner restarted after it.` | `owner_restarted` |
+| `Its network owner no longer exists.` | `owner_missing` |
+
+- Only containers of the stack the viewer may see are marked. A host that cannot be read shows no mark.
+- Definition and remedies: [Containers](Usage-Containers#stale-network).
 
 ## Logs
 

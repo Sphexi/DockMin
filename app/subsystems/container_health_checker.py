@@ -1,15 +1,16 @@
 """container-health-checker: restarts running containers that report unhealthy, within a budget."""
 
+from collections import Counter
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import ClassVar, Final, Literal
 
 from pydantic import Field
 
 from app.auth.errors import SELF_PROTECTED_REASON, ProductError, ResourceNotFound, ValidationFailed
 from app.auth.principal import Principal
-from app.db.repositories.activity_event import ActivityEventRepository
+from app.db.repositories.activity_event import ActivityEventRepository, DetailValue
 from app.db.repositories.automation_rule import AutomationRule
 from app.db.repositories.clocked import format_timestamp, parse_timestamp
 from app.db.repositories.job_run import MAX_RUN_DETAIL_KEYS
@@ -21,12 +22,19 @@ from app.docker_engine.models import ContainerSummary
 from app.docker_engine.resources import Filters
 from app.scheduler.model import RunFailed, RunResult, reason_of
 from app.self_identity import SelfIdentity, SelfIdentitySource, no_identity
-from app.services.access import COMPOSE_PROJECT_LABEL, canonical_stack_key, is_canonical_id
+from app.services.access import (
+    COMPOSE_PROJECT_LABEL,
+    canonical_stack_key,
+    is_canonical_id,
+    stack_of,
+)
 from app.services.acting import AutomationAuthority
 from app.services.activity import ActivityRecorder
 from app.services.authorisation import Authoriser
+from app.services.container_actions import WaitBudget
 from app.services.container_derivation import SWARM_SERVICE_LABEL
-from app.services.containers import display_name
+from app.services.containers import display_name, parse_engine_time
+from app.services.network_joiners import StaleNetwork, joined_reference, stale_network_of
 from app.services.object_inspector import EnvironmentUnavailable, unavailable_from
 from app.services.object_locks import ObjectKey
 from app.services.restart_holds import (
@@ -42,12 +50,15 @@ from app.services.restart_holds import (
 )
 from app.services.stack_deploy import in_project
 from app.subsystems.acting_run import (
+    JOINER_RUN_WAIT_SECONDS,
     ObjectTally,
     act_on,
     check_suppressed,
     failure_reason,
     forecast_busy,
+    rechecking,
     record_unwritable,
+    settle_joiners,
 )
 from app.subsystems.base import (
     FallbackCursors,
@@ -79,10 +90,18 @@ EXHAUSTED_REASON: Final = "restart_budget_exhausted"
 EXHAUSTED_MESSAGE: Final = "The container is still unhealthy and its restart budget is used up."
 TARGET_MISSING: Final = "The automation's target was not found."
 TRIGGER: Final = "unhealthy"
+STALE_TRIGGER: Final = "stale_network"
+STALE_EXHAUSTED_MESSAGE: Final = (
+    "The container's network is still stale and its restart budget is used up."
+)
+GRACE_SKIP: Final = "start_grace"
+OWNER_SKIPS: Final = {"owner_not_running": "owner_not_running", "owner_missing": "owner_missing"}
+_JOINER_REPORTED: Final = frozenset({*OWNER_SKIPS.values(), GRACE_SKIP})
 UNHEALTHY: Final = "unhealthy"
 HEALTHY: Final = "healthy"
 MAX_RESTARTS_PER_RUN: Final = 25
 MAX_EVALUATED_PER_RUN: Final = 200
+MAX_JOINER_SETTLES: Final = 200
 
 type Kind = Literal["restart", "exhaust"]
 
@@ -90,12 +109,14 @@ type Kind = Literal["restart", "exhaust"]
 class HealthCheckerParameters(RuleParameters):
     """The restart budget: at most `max_restarts` per container in `window_seconds`.
 
-    With `auto_release`, a held container that stays healthy for a full window is released.
+    With `auto_release`, a held container that stays healthy for a full window is released. A
+    container started less than `grace_seconds` ago is left alone.
     """
 
     max_restarts: int = Field(3, ge=1, le=20)
     window_seconds: int = Field(3600, ge=300, le=86400)
     auto_release: bool = False
+    grace_seconds: int = Field(120, ge=0, le=3600)
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +144,9 @@ class _Pending:
     key: ObjectKey
     streak: int
     restarts: int
+    trigger: str = TRIGGER
+    stale: StaleNetwork | None = None
+    stack: ObjectKey | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +157,12 @@ class _Look:
     origin: str | None = None
     skip: str | None = None
     failure: str | None = None
+    stale: StaleNetwork | None = None
+    stack: ObjectKey | None = None
+
+    @property
+    def trigger(self) -> str:
+        return TRIGGER if self.health == UNHEALTHY else STALE_TRIGGER
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +194,10 @@ class _Pass:
     resolved: frozenset[str] = frozenset()
     not_checked: int = 0
     released_gone: int = 0
+    joiner_ids: frozenset[str] = frozenset()
+    joiner_counts: Counter[str] = field(default_factory=Counter)
+    skew: timedelta | None = None
+    wait: WaitBudget | None = None
 
     @property
     def rule_id(self) -> int:
@@ -221,6 +255,20 @@ class _Pass:
             if await self._classify_unlisted(held):
                 self.evaluated += 1
 
+    async def settled(self, candidates: Sequence[_Candidate]) -> list[_Candidate]:
+        """Drop the joiners that are in order, uncounted: they cost no evaluation and no tally."""
+        kept: list[_Candidate] = []
+        read = 0
+        for candidate in candidates:
+            if candidate.row.id not in self.joiner_ids or read >= MAX_JOINER_SETTLES:
+                kept.append(candidate)
+                continue
+            read += 1
+            look = await self._look(candidate.row.id)
+            if look.failure is not None or look.skip is None or look.skip in _JOINER_REPORTED:
+                kept.append(candidate)
+        return kept
+
     async def held_outside(self, listed: Collection[str]) -> list[Hold]:
         """Return the held containers in scope that the Engine's listing did not return."""
         context = self.context
@@ -257,13 +305,21 @@ class _Pass:
         budget = await self._budget(key)
         if budget.held_since is not None:
             return await self._count_held(row, key, budget.held_since)
-        if await check_suppressed(context, key, single=self.single, tally=tally):
-            return False
+        stack = self._stack_key(row.labels)
+        for acted in (key, stack):
+            if acted is not None and await check_suppressed(
+                context, acted, single=self.single, tally=tally
+            ):
+                return False
         if context.dry_run and forecast_busy(self.deps.engine.locks, [key], single=self.single):
             tally.record("busy", attempted=False)
             return False
-        await self._confirm(row, key, budget.restarts)
+        await self._confirm(row, key, budget.restarts, stack)
         return True
+
+    def _stack_key(self, labels: Mapping[str, str]) -> ObjectKey | None:
+        stack = stack_of(labels)
+        return None if stack is None else ObjectKey(self.environment_id, "stack", stack)
 
     async def _classify_unlisted(self, held: Hold) -> bool:
         """Decide what the run does about a held container the listing missed; True if inspected."""
@@ -363,16 +419,31 @@ class _Pass:
             on_success="released",
         )
 
-    async def _confirm(self, row: ContainerSummary, key: ObjectKey, restarts: int) -> None:
+    async def _confirm(
+        self, row: ContainerSummary, key: ObjectKey, restarts: int, stack: ObjectKey | None
+    ) -> None:
         look = await self._look(row.id)
         if look.skip is not None or look.failure is not None:
             self._record_look(look)
             return
-        self.unhealthy += 1
+        if look.trigger == TRIGGER:
+            self.unhealthy += 1
         kind: Kind = "exhaust" if restarts >= self.params.max_restarts else "restart"
         if kind == "restart":
             self.restarts_planned += 1
-        self.pending.append(_Pending(kind, row.id, look.name, key, look.streak, restarts))
+        self.pending.append(
+            _Pending(
+                kind,
+                row.id,
+                look.name,
+                key,
+                look.streak,
+                restarts,
+                look.trigger,
+                look.stale,
+                stack,
+            )
+        )
 
     def _record_look(self, look: _Look) -> None:
         if look.skip is not None:
@@ -406,8 +477,9 @@ class _Pass:
         if not matches(self.selector, name=name, labels=labels):
             return _Look(skip="not_matched")
         health = inspected.state.health
+        running = inspected.state.status == "running"
         if held:
-            if inspected.state.status != "running":
+            if not running:
                 return _Look(skip="not_running")
             return _Look(
                 name=name,
@@ -415,9 +487,56 @@ class _Pass:
                 health="" if health is None else health.status,
                 origin=self._named_by(labels),
             )
-        if inspected.state.status != "running" or health is None or health.status != UNHEALTHY:
+        unhealthy = health is not None and health.status == UNHEALTHY
+        stale = None
+        if running:
+            stale = await self._stale(inspected.host_config, inspected.state.started_at)
+        if not running:
             return _Look(skip="recovered")
-        return _Look(name=name, streak=health.failing_streak, health=health.status)
+        if stale is not None and stale.reason in OWNER_SKIPS:
+            return _Look(skip=OWNER_SKIPS[stale.reason])
+        if not unhealthy and stale is None:
+            return _Look(skip="recovered")
+        if await self._in_grace(inspected.state.started_at):
+            return _Look(skip=GRACE_SKIP)
+        return _Look(
+            name=name,
+            streak=0 if health is None else health.failing_streak,
+            health="" if health is None else health.status,
+            stale=stale,
+        )
+
+    async def _in_grace(self, started_at: str) -> bool:
+        started = parse_engine_time(started_at)
+        if started is None or self.params.grace_seconds == 0:
+            return False
+        grace = timedelta(seconds=self.params.grace_seconds)
+        return await self._daemon_now() - started < grace
+
+    async def _daemon_now(self) -> datetime:
+        """Return the host's clock, read once per run; this machine's when the host gives none."""
+        if self.skew is None:
+            self.skew = timedelta()
+            try:
+                client = await self.services.hosts.client(self.environment_id)
+                reported = parse_engine_time((await client.system.info()).system_time)
+            except (EngineError, ProductError):
+                reported = None
+            if reported is not None:
+                self.skew = reported - self.context.clock()
+        return self.context.clock() + self.skew
+
+    async def _stale(
+        self, host_config: Mapping[str, object], started_at: str
+    ) -> StaleNetwork | None:
+        mode = host_config.get("NetworkMode")
+        if not isinstance(mode, str) or joined_reference(mode) is None:
+            return None
+        client = await self.services.hosts.client(self.environment_id)
+        try:
+            return await stale_network_of(client, mode, parse_engine_time(started_at))
+        except EngineError as error:
+            raise unavailable_from(error) from None
 
     def _named_by(self, labels: Mapping[str, str]) -> str | None:
         selector = self.selector
@@ -480,11 +599,11 @@ class _Pass:
                 tally.record("failed", attempted=False, reason=failure_reason(error))
                 continue
             if look.skip is not None or look.failure is not None:
-                if look.skip is not None:
+                if look.skip is not None and item.trigger == TRIGGER:
                     self.unhealthy -= 1
                 self._record_look(look)
                 continue
-            item = replace(item, streak=look.streak)
+            item = replace(item, streak=look.streak, trigger=look.trigger, stale=look.stale)
             await act_on(
                 context,
                 item.key,
@@ -499,16 +618,22 @@ class _Pass:
 
     def _restart(self, item: _Pending) -> Callable[[AutomationAuthority], Awaitable[None]]:
         async def work(authority: AutomationAuthority) -> None:
-            await self.services.container_actions.restart(
-                authority,
-                self.environment_id,
-                item.id,
-                note={
-                    "trigger": TRIGGER,
-                    "failing_streak": item.streak,
-                    "restarts_in_window": item.restarts + 1,
-                },
+            actions = self.services.container_actions
+            if self.wait is None:
+                self.wait = actions.wait_budget(JOINER_RUN_WAIT_SECONDS)
+            note: dict[str, DetailValue] = {
+                "trigger": item.trigger,
+                "restarts_in_window": item.restarts + 1,
+            }
+            if item.trigger == TRIGGER:
+                note["failing_streak"] = item.streak
+            authority = rechecking(
+                self.context, authority, [] if item.stack is None else [item.stack]
             )
+            restarted = await actions.restart(
+                authority, self.environment_id, item.id, note=note, wait=self.wait
+            )
+            settle_joiners(self.tally, restarted, self.joiner_counts)
 
         return work
 
@@ -538,6 +663,7 @@ class _Pass:
                 name=item.name,
                 restarts=item.restarts,
                 params=self.params,
+                message=EXHAUSTED_MESSAGE if item.trigger == TRIGGER else STALE_EXHAUSTED_MESSAGE,
             )
 
         return work
@@ -552,6 +678,7 @@ async def record_exhaustion(
     name: str,
     restarts: int,
     params: HealthCheckerParameters,
+    message: str = EXHAUSTED_MESSAGE,
 ) -> None:
     """Write the row that holds a container whose restart budget is used up."""
     await activity.record_failure(
@@ -567,7 +694,7 @@ async def record_exhaustion(
             "max_restarts": params.max_restarts,
             "window_seconds": params.window_seconds,
         },
-        message=EXHAUSTED_MESSAGE,
+        message=message,
     )
 
 
@@ -585,6 +712,7 @@ class ContainerHealthChecker(Subsystem):
     run_timeout = timedelta(minutes=30)
     lock_wait = 10.0
     suppression_window = timedelta(minutes=5)
+    stands_back_for_lifecycle = True
     failure_threshold = 5
     requires_environment = True
     supports_dry_run = True
@@ -628,6 +756,7 @@ class ContainerHealthChecker(Subsystem):
         )
         try:
             matched = await self._matched(context, services, environment_id, selector)
+            joiners = await self._joiners(context, services, environment_id, selector, matched)
         except EnvironmentUnavailable as error:
             raise environment_outcome(error) from None
         tally = ObjectTally(done_name="restarted", plan_name="would_restart")
@@ -644,9 +773,10 @@ class ContainerHealthChecker(Subsystem):
             cursors=self._cursors,
             self_identity=self._self_identity(),
             origin=matched.origin,
+            joiner_ids=frozenset(row.id for row in joiners),
         )
         try:
-            candidates = await run.visible(matched.rows)
+            candidates = await run.settled(await run.visible([*matched.rows, *joiners]))
             unlisted = await run.held_outside({row.id for row in matched.rows})
             if isinstance(selector, ContainerTarget | StackTarget):
                 try:
@@ -668,6 +798,7 @@ class ContainerHealthChecker(Subsystem):
             ("not_checked", run.not_checked),
             ("matched", len(candidates)),
             ("unhealthy", run.unhealthy),
+            *run.joiner_counts.items(),
         )
         for key, value in extras:
             if len(detail) < MAX_RUN_DETAIL_KEYS and (value or key in ("matched", "unhealthy")):
@@ -700,14 +831,49 @@ class ContainerHealthChecker(Subsystem):
             elif name in matched.resolved:
                 tally.resolved(name)
 
+    async def _joiners(
+        self,
+        context: RunContext,
+        services: RunServices,
+        environment_id: int,
+        selector: Selector,
+        matched: _Matched,
+    ) -> list[ContainerSummary]:
+        """List the running containers the selector names that join another container's network.
+
+        Those not already matched as unhealthy; the owner's start is read only when one is
+        examined.
+        """
+        if isinstance(selector, ContainerTarget):
+            return []
+        every = await self._matched(
+            context, services, environment_id, selector, unhealthy_only=False
+        )
+        known = {row.id for row in matched.rows}
+        extra = [
+            row
+            for row in every.rows
+            if row.id not in known
+            and row.state == "running"
+            and joined_reference(row.network_mode) is not None
+        ]
+        matched.origin.update(
+            {row.id: every.origin[row.id] for row in extra if row.id in every.origin}
+        )
+        return extra
+
     async def _matched(
         self,
         context: RunContext,
         services: RunServices,
         environment_id: int,
         selector: Selector,
+        *,
+        unhealthy_only: bool = True,
     ) -> _Matched:
         """List the containers the selector names that are running and report unhealthy.
+
+        With `unhealthy_only` false, every running container the selector names.
 
         The Engine's filters narrow the list; every row is matched again here and each candidate
         is inspected before anything is done to it. A named container is listed whatever its
@@ -747,7 +913,7 @@ class ContainerHealthChecker(Subsystem):
                             continue
                         if listed is None:
                             listed = await client.containers.list(
-                                filters=_unhealthy({"label": [COMPOSE_PROJECT_LABEL]})
+                                filters=_listed(unhealthy_only, {"label": [COMPOSE_PROJECT_LABEL]})
                             )
                         found.resolved.append(name)
                         for row in listed:
@@ -757,11 +923,13 @@ class ContainerHealthChecker(Subsystem):
                     rows = found.rows
                 case LabelsTarget(labels=terms):
                     listed = await client.containers.list(
-                        filters=_unhealthy({"label": [term_text(term) for term in terms]})
+                        filters=_listed(
+                            unhealthy_only, {"label": [term_text(term) for term in terms]}
+                        )
                     )
                     rows = [row for row in listed if row.labels_truncated or _fits(selector, row)]
                 case EnvironmentTarget():
-                    rows = await client.containers.list(filters=_unhealthy({}))
+                    rows = await client.containers.list(filters=_listed(unhealthy_only, {}))
         except EngineError as error:
             raise unavailable_from(error) from None
         if isinstance(selector, ContainerTarget | StackTarget):
@@ -770,8 +938,9 @@ class ContainerHealthChecker(Subsystem):
         return _Matched(sorted(rows, key=lambda row: display_name(row.names, row.id)))
 
 
-def _unhealthy(extra: Filters) -> Filters:
-    return {"health": [UNHEALTHY], "status": ["running"], **extra}
+def _listed(unhealthy_only: bool, extra: Filters) -> Filters:
+    health: Filters = {"health": [UNHEALTHY]} if unhealthy_only else {}
+    return {**health, "status": ["running"], **extra}
 
 
 def _fits(selector: Selector, row: ContainerSummary) -> bool:

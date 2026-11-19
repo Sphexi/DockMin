@@ -4,7 +4,7 @@ An automation runs one type against its target, on a schedule or, for `webhook-r
 
 | Type | Acts on | Does |
 |---|---|---|
-| `container-health-checker` | Containers | Restarts a running container that reports unhealthy, within a restart budget ([details](#container-health-checker)) |
+| `container-health-checker` | Containers | Restarts a running container that reports unhealthy or has a stale network, within a restart budget ([details](#container-health-checker)) |
 | `stack-restarter` | Containers or Compose stacks | Restarts them on a schedule ([details](#stack-restarter)) |
 | `container-updater` | Containers, Compose stacks, Swarm services or Swarm stacks | Reports newer images at their registries. In update mode, pulls them and recreates the containers, redeploys the stack, or updates the Swarm service ([details](#container-updater)) |
 | `container-log-exporter` | Containers, Compose stacks, Swarm stacks or Swarm services. Administrators only | Copies the new log lines of the containers, or of the tasks of the services, to an object storage target as NDJSON ([details](#container-log-exporter)) |
@@ -452,7 +452,7 @@ A run checks each object before and while it acts. An object that fails a check 
 | Check | Result when it fails |
 |---|---|
 | The owner may change the object, checked when the object is matched and again when the run acts | `not_permitted`, or `permission_denied` for a named target |
-| No user acted on the object inside the suppression window, checked again once the object's lock is held | `suppressed` |
+| No user acted on the object inside the suppression window, checked again once the object's lock is held. For `container-health-checker`, no user and no other automation restarted, started, stopped, redeployed, recreated or updated the container or its stack inside the window ([Standing back](#standing-back)) | `suppressed` |
 | The object's lock is free within the lock wait | `busy` |
 | The health checker reads the container again just before restarting it | `recovered`, `gone`, `not_matched` |
 
@@ -513,7 +513,7 @@ A run does not act on the container dockmin runs in, on its Compose project, on 
 | Outcome | Reason | Meaning |
 |---|---|---|
 | `skipped` | `environment_unreachable` | The host could not be used when the run began and no person needs to act. Detail `kind`: `unreachable` (the host could not be reached), `not_swarm_manager` (the environment is not an active Swarm manager, or its swarm is locked), `outcome_unknown` (the host did not answer in time). Does not count toward the failure threshold |
-| `skipped` | `suppressed` | A user acted on the single object inside the window. Detail: `acted_at` |
+| `skipped` | `suppressed` | A user acted on the single object inside the window; for `container-health-checker`, also a restart, start, stop, redeploy, recreate or update by another automation. Detail: `acted_at` |
 | `skipped` | `object_busy` | The single object stayed locked for the lock wait. Detail: `holder_type`, `holder_label`, `holder_action`, `holder_age_seconds` |
 | `skipped` | `token_revoked` | `webhook-receiver`: the webhook URL was revoked after the call armed the run ([Rotate, revoke and delete](#rotate-revoke-and-delete)) |
 | `failure` | `owner_access_lost` | See [Owner's authority](#owners-authority) |
@@ -544,13 +544,14 @@ A run does not act on the container dockmin runs in, on its Compose project, on 
 
 ## container-health-checker
 
-Restarts a container that is running and reports unhealthy.
+Restarts a container that is running and reports unhealthy, or whose network is stale.
 
 | Setting | Values | Default |
 |---|---|---|
 | `max_restarts` (`Restarts allowed per container`) | 1 to 20 | 3 |
 | `window_seconds` (`Window in seconds`) | 300 to 86400 | 3600 |
 | `auto_release` (`Release a held container when it recovers`) | on, off | off |
+| `grace_seconds` (`Start-up grace in seconds`) | 0 to 3600. 0 turns the grace off | 120 |
 
 Targets: container, Compose stack, labels, environment. Schedule: fixed interval only.
 
@@ -558,16 +559,50 @@ Targets: container, Compose stack, labels, environment. Schedule: fixed interval
 
 | Container state | Result |
 |---|---|
-| Running and `unhealthy` | Restarted, within the budget |
-| `starting`, `healthy`, or no healthcheck | Not touched. A named container is counted `recovered` |
+| Running and `unhealthy` | Restarted, within the budget. Trigger `unhealthy` |
+| Running, joins a container that is running and started after it | Restarted, within the budget. Trigger `stale_network` ([Stale network](#stale-network)) |
+| Running, joins a container that is not running | Not touched; `owner_not_running`. The checker never starts it |
+| Running, joins a container that no longer exists | Not touched; `owner_missing` |
+| Running, started less than `grace_seconds` ago, and unhealthy or restartable for a stale network | Not touched; `start_grace` |
+| `starting`, `healthy`, or no healthcheck, and no stale network | Not touched. A named container is counted `recovered` |
 | Stopped, paused, restarting | Not touched. A named container is counted `not_running` |
 | Carries `com.docker.swarm.service.id` | Not touched; `swarm_managed` |
 
-- Each run lists the running containers that report `unhealthy` for the target. The Engine's filters narrow the list and every container is matched again by the product.
+- Each run lists the running containers that report `unhealthy` for the target. Under a Compose stack, labels or environment target it also lists the running containers whose network mode is `container:<id or name>`, to check them for a stale network. The Engine's filters narrow the list and every container is matched again by the product.
+- The grace compares `State.StartedAt` with the daemon's time, read once per run from the host's system information; this server's clock is used when the host gives none. `grace_seconds` applies to both triggers and not to a container held by an exhausted budget.
+- A running container that joins another and has a current network is not counted in `matched` and is not examined further.
 - Every container is read again immediately before it is restarted. One that is no longer running and unhealthy is not restarted: `recovered`. One that no longer matches the target is `not_matched`. One that no longer exists is `gone`.
-- The restart is the container's own restart action: stop with the container's stop timeout, then start. It is recorded as `container_restarted`.
+- The restart is the container's own restart action: stop with the container's stop timeout, then start. It is recorded as `container_restarted`. The running containers that share its network are restarted with it ([Containers that share a network](Usage-Containers#containers-that-share-a-network)).
 - Containers are handled one after another in name order.
 - Text a healthcheck printed is never copied into a row or into run detail.
+
+### Stale network
+
+A running container whose network mode is `container:<id or name>` has a stale network when the container it joins:
+
+| Reason | Condition | `container-health-checker` |
+|---|---|---|
+| `owner_not_running` | Is not running | Skips it: `owner_not_running`. It never starts a container |
+| `owner_restarted` | Is running or paused and started after the joining container did | Restarts it, trigger `stale_network` |
+| `owner_missing` | No longer exists | Skips it: `owner_missing` |
+
+- The condition is read from the host at each run and each time the container page or stack page is built. A start time that cannot be read never makes a network stale. A paused owner counts as running.
+- A restart for a stale network is under the same budget and hold as `unhealthy`. The `trigger` detail of the `container_restarted` row is `stale_network`, and `failing_streak` is absent.
+- The joining container's own joiners are restarted with it ([Containers that share a network](Usage-Containers#containers-that-share-a-network)).
+- A container with a stale network that has used its budget is held. The exhaustion row reads `The container's network is still stale and its restart budget is used up.`
+- A joiner whose owner is not running is restarted when the owner is restarted by a user or another automation ([Containers that share a network](Usage-Containers#containers-that-share-a-network)).
+- Display: [Containers](Usage-Containers#stale-network) and [Stacks](Usage-Stacks#stale-network).
+
+### Standing back
+
+| Item | Behaviour |
+|---|---|
+| Stands back for | A restart, start, stop, redeploy, recreate or update of the container, or of the Compose stack it belongs to, by a user or by any automation other than this subsystem. Also a user's other action ([Jobs](Administration-Jobs#suppression-after-a-user-acts)) |
+| Does not stand back for | Its own restarts. Other subsystems stand back for user actions only |
+| Window | `suppression_seconds`, 300 by default |
+| Recorded | Only when the action completed. A refused or failed attempt records nothing. After a recreate the new container stands back as well |
+| Result | `suppressed`; a run on one named container is `skipped`, reason `suppressed`, message `The object was acted on recently.`, detail `acted_at` |
+| Checked | Against the container and against its stack, before the restart and again once the lock is held |
 
 ### Budget and hold
 
@@ -662,15 +697,20 @@ Keys appear when above zero, except `matched`, `unhealthy` and `restarted`.
 | Key | Counts |
 |---|---|
 | `matched` | Containers of the target that the owner can read |
-| `unhealthy` | Of those, containers found unhealthy and running, held ones included |
+| `unhealthy` | Of those, containers found unhealthy and running, held ones included. A container restarted for a stale network alone is not counted |
 | `restarted` | Restarts that succeeded. A dry run has `would_restart` and `would_restart_count` instead |
-| `failed` | Restarts that failed, and containers the owner may not change under a named target |
+| `failed` | Restarts that failed, containers the owner may not change under a named target, and joiners not restarted with their owner (the reason is theirs, such as `wait_expired`) |
 | `exhausted` | Containers whose exhaustion event this run wrote |
 | `held` | Containers held by an earlier exhaustion |
 | `released` | Containers released automatically ([Automatic release](#automatic-release)). A dry run counts the releases a real run would make |
 | `released_gone` | Held containers the host no longer has, released ([A container that is gone](#a-container-that-is-gone)). A dry run has `would_release_gone` instead |
 | `not_checked` | Containers left unchecked because the allowance for own checks ended ([Owner access checks](#owner-access-checks)). Reported for an administrator-owned automation only |
 | `suppressed`, `busy` | Containers skipped for those reasons |
+| `start_grace` | Containers skipped because they started less than `grace_seconds` ago |
+| `owner_not_running`, `owner_missing` | Running containers skipped because the container whose network they join is not running or no longer exists |
+| `joiners_restarted` | Containers restarted with a restarted container because they share its network |
+| `joiners_omitted` | Joiners the chain limit left out of a restart; not restarted |
+| `joiners_unlisted` | Restarts whose joiners could not be listed, so none were restarted |
 | `not_permitted` | Containers the owner can read but not change, under a label or environment target |
 | `deferred` | Containers left for the next run |
 | `swarm_managed`, `not_running`, `unaddressable`, `gone`, `not_matched`, `recovered`, `self_protected` | Containers skipped for those reasons |
@@ -700,7 +740,7 @@ Targets: container, Compose stack. Each name is one target, handled in name orde
 
 | Target | Result of a run |
 |---|---|
-| Container, running | Restarted. Recorded as `container_restarted`, detail `trigger: schedule` |
+| Container, running | Restarted, with the running containers that share its network ([Containers that share a network](Usage-Containers#containers-that-share-a-network)). Recorded as `container_restarted`, detail `trigger: schedule` |
 | Container, not running | `success`, nothing written, counted `not_running`. A stopped container is not started |
 | Compose stack, with a running container | Restarted as below. Recorded as `stack_restarted` |
 | Compose stack, nothing running and nothing carried over | `success`, nothing written, counted `not_running` |
@@ -712,12 +752,14 @@ Targets: container, Compose stack. Each name is one target, handled in name orde
 | Step | Behaviour |
 |---|---|
 | 1 | The services with at least one running container are listed with Compose `ps` |
-| 2 | Compose `stop` of those services. Compose stops them in reverse dependency order |
-| 3 | Compose `start` of those services. Compose starts them in dependency order and waits for `service_healthy` dependencies |
+| 2 | Compose `stop` of those services. Compose stops dependents first, in reverse dependency order |
+| 3 | Compose `start` of those services. Compose starts them in dependency order and waits for `depends_on` conditions, `service_healthy` among them |
 | 4 | The stack's status and member objects are refreshed |
 
 - The stack is down between step 2 and step 3 on every run.
 - A service that was not running is not named. If a restarted service depends on a stopped service, step 3 starts that dependency too, as Compose does.
+- Order comes from `depends_on` and `network_mode: service:<name>` in the stack's file. A container in another stack that joins a container's network is neither ordered nor restarted by Compose. It is handled by the restart of a single container ([Containers that share a network](Usage-Containers#containers-that-share-a-network)) or, once its network is stale, by `container-health-checker` ([Stale network](#stale-network)).
+- Order after a Docker daemon or host restart follows the containers' restart policies. dockmin takes no part in it.
 - The operation holds the stack's lock under the action `restart`.
 - It needs the Compose binary ([Stacks](Usage-Stacks)); without it a stack target fails with `compose_unavailable`.
 - The time limit is `DOCKMIN_COMPOSE_TIMEOUT_SECONDS` ([Configuration](Reference-Configuration)), inside the run's 30 minutes.
@@ -748,7 +790,8 @@ Targets: container, Compose stack. Each name is one target, handled in name orde
 | `services` | Stack target: the number of services that are stopped and started, over all the stacks |
 | `not_running`, `swarm_managed`, `unaddressable`, `self_protected` | Targets skipped for that reason |
 | `suppressed`, `busy` | With several names, targets skipped for that reason |
-| `failed` | Targets whose restart failed, or that the owner may not change |
+| `joiners_restarted`, `joiners_omitted`, `joiners_unlisted` | Container target: as for [Health checker run detail](#health-checker-run-detail) |
+| `failed` | Targets whose restart failed or that the owner may not change, and joiners not restarted with their owner |
 | `targets`, `target_outcomes`, `not_found`, `not_found_names` | How each name fared ([Names](#names)) |
 
 ## container-updater
@@ -849,6 +892,7 @@ A container or labels target. Containers are handled in name order. The first co
 | Locks | The container's id, action `recreate`, waited for up to the lock wait. A container of a stack also waits for the stack's lock |
 | Old container | Removed after verification passes. If it cannot be removed, the original is kept ([Containers](Usage-Containers)) |
 | Failure reasons | `verification_failed`, `not_recreatable`, `restricted_option`, `name_changed`, `object_busy` and the other recreate reasons ([Containers](Usage-Containers)) |
+| Containers that join its network | Recreated pointing at the new container, or restarted, by `container:<old id>` or `container:<name>`. A joiner that cannot be changed fails the object, and the run reports it. The joiners' waits share 600 s per run ([Joiners of a recreated container](Usage-Containers#joiners-of-a-recreated-container)) |
 
 #### Verification
 
@@ -1289,13 +1333,15 @@ Keys appear when above zero, except `mode`. At most 24 keys are kept; skip reaso
 | `pulled` | References pulled |
 | `updated` | Objects recreated or redeployed, and Swarm services updated. A dry run has `would_update` and `would_update_count` instead |
 | `rolled_back` | Containers restored after a failed verification, and Swarm services rolled back |
+| `joiners_recreated`, `joiners_restarted` | Containers that joined a recreated container and were recreated on the new one or restarted |
+| `joiners_omitted` | Joiners the chain limit left out |
 | `rollback_failed` | Swarm services whose rollback was refused or failed |
 | `refused` | Refusal rows written |
 | `refreshed` | Swarm services whose stored registry credential was renewed. A dry run has `would_refresh` and `would_refresh_count` instead |
 | `pruned` | Replaced images removed ([Removal of replaced images](#removal-of-replaced-images)). Present only when `prune_replaced` is on |
 | `prune_waiting`, `prune_kept`, `prune_failed` | Replaced images left for the next run, kept for good or until nothing uses them, and not removed because a step failed |
 | `would_prune`, `would_prune_images` | Dry run: the replaced images a real run would remove at that time, at most 10, and their 12-character ids, comma-separated and cut to 256 characters ending `and N more` |
-| `failed` | Objects that failed, among them objects whose registry check reached no verdict |
+| `failed` | Objects that failed, among them objects whose registry check reached no verdict, and joiners not changed with a recreated container |
 | `held` | Objects held |
 | `suppressed`, `busy`, `not_permitted`, `deferred` | Objects skipped for those reasons |
 | `swarm_managed`, `compose_managed`, `unaddressable`, `not_running`, `partly_stopped`, `pending_changes`, `built_image`, `not_deployed`, `image_id_reference`, `pinned`, `gone`, `not_matched`, `self_protected` | Objects skipped for those reasons |
@@ -1916,7 +1962,7 @@ The Activity and Jobs pages are for administrators ([Activity](Administration-Ac
 
 | Event | Keys that explain it |
 |---|---|
-| `container_restarted` by `container-health-checker` | `trigger` is `unhealthy`; `failing_streak`; `restarts_in_window` |
+| `container_restarted` by `container-health-checker` | `trigger` is `unhealthy` or `stale_network`; `failing_streak` for `unhealthy`; `restarts_in_window` |
 | `container_restarted` or `stack_restarted` by `stack-restarter` | `trigger` is `schedule` |
 | `container_recreated`, `stack_redeployed`, `service_updated`, `image_pulled` by `container-updater` | `trigger` is `update`; `update_reason`, `reference`, `digest_before`, `digest_after` where the event carries them |
 | `container_recreated`, `stack_redeployed`, `service_updated`, `service_force_updated`, `image_pulled` by `webhook-receiver` | `trigger` is `webhook`; `webhook_action`. The run has trigger `webhook`, and its detail holds `calls` and `caller_address` ([Webhook run history](#webhook-run-history)) |

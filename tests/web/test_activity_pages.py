@@ -787,6 +787,41 @@ async def test_every_target_type_links_while_it_exists_and_shows_deleted_once_re
     assert removed == dict.fromkeys(events, (None, True))
 
 
+def target_text(html: str) -> str:
+    for facts in Page(OK, html).tags("dl"):
+        cells = [child for child in facts.children if not isinstance(child, str)]
+        for term, value in pairwise(cells):
+            if term.tag == "dt" and term.text() == "Target id":
+                return " ".join(value.text().split())
+    raise AssertionError("the page has no target id")
+
+
+async def test_a_container_that_no_longer_exists_is_shown_by_the_name_the_event_recorded(
+    admin_client: AsyncClient, world: World, app: FastAPI, container_host: ContainerEngine
+) -> None:
+    gone = "9" * 64
+    [event] = insert_events(
+        app,
+        [
+            event_row(
+                "container_restarted",
+                1,
+                environment=world.remote_id,
+                target=gone,
+                detail='{"name": "recreated-web"}',
+            )
+        ],
+    )
+
+    page = await admin_client.get(f"/activity/{event}")
+    listing = await admin_client.get("/activity")
+
+    assert target_text(page.text) == f"recreated-web {gone} Deleted"
+    row = next(r for r in Page(OK, listing.text).tags("tr") if gone in r.text())
+    assert " ".join(row.text().split()).count("recreated-web") == 1
+    assert gone in row.text()
+
+
 async def test_the_log_links_targets_with_the_log_as_origin_and_a_stack_only_once_managed(
     admin_client: AsyncClient, world: World, app: FastAPI, container_host: ContainerEngine
 ) -> None:

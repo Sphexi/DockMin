@@ -60,6 +60,25 @@
   </ol>
   <p>If the new container cannot be created or started, the original is restored.</p>
 
+  {% if joiners and (joiners.joiners or joiners.refused or joiners.hidden or joiners.omitted) %}
+  <h3 class="confirm__subheading">Containers sharing its network</h3>
+  {% if joiners.joiners %}
+  <p class="field__help">These containers share its network, or the network of one that does. Each follows the new container, and only these are changed.</p>
+  <ul>
+    {% for item in joiners.joiners %}
+    <li><span class="mono">{{ item.name }}</span> <span class="cell-note mono">{{ item.short_id }}</span> {% if item.action == "recreate" %}is recreated on the new container{% elif item.action == "restart" %}is restarted{% else %}is not changed, because Compose manages it{% endif %}.</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if joiners.refused or joiners.hidden or joiners.omitted %}
+  <div class="panel panel--notice" role="note">
+    {% if joiners.refused %}<p>Not changed, because you may not change {{ "it" if joiners.refused|length == 1 else "them" }}: {% for item in joiners.refused %}<span class="mono">{{ item.name }}</span>{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
+    {% if joiners.hidden %}<p>{{ joiners.hidden }} more {{ "container shares its network and is" if joiners.hidden == 1 else "containers share its network and are" }} not shown to you and will not be changed.</p>{% endif %}
+    {% if joiners.omitted %}<p>{{ joiners.omitted }} more {{ "container shares" if joiners.omitted == 1 else "containers share" }} its network and {{ "is" if joiners.omitted == 1 else "are" }} not listed, because the list is limited. {{ "It is" if joiners.omitted == 1 else "They are" }} not changed.</p>{% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+
   <h3 class="confirm__subheading">What is kept</h3>
   <ul>
     <li>
@@ -88,6 +107,10 @@
   <form class="form" method="post" action="{{ recreate_href }}" data-submit-once>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="expected_name" value="{{ c.name }}">
+    <input type="hidden" name="joiners_reviewed" value="1">
+    {% if joiners %}{% for item in joiners.joiners if item.action != "blocked" %}
+    <input type="hidden" name="joiner" value="{{ item.container_id }}">
+    {% endfor %}{% endif %}
     {% if c.pull_available %}
     {{ checkbox_field("pull", "Pull the image again first", help="Without this, the image already on this host is used.") }}
     {% if offer %}

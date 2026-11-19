@@ -295,6 +295,23 @@ docker compose exec dockmin /usr/local/libexec/docker/cli-plugins/docker-compose
 
 The command prints the version of the binary the image carries. For a container started with `docker run`, write `docker exec dockmin` in place of `docker compose exec dockmin`.
 
+## A container has no network after another container restarted
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A container runs but has only a loopback interface. It has `network_mode: container:<name>`, or `network_mode: service:<name>` in a Compose file, and the container it shares a network with restarted. The container page and the stack page show `Stale network` | A container that joins another's network keeps the network of the owner's previous run. The owner's restart creates a new one, and a joiner is not given it until it restarts | Restart the owner from the container page: the running containers that share its network are restarted with it ([Containers that share a network](Usage-Containers#containers-that-share-a-network)). Or restart the stale container. `container-health-checker` restarts a container whose owner started after it, once it has run for `grace_seconds`. It does not start an owner that is not running ([Stale network](Operations-Automation#stale-network)) |
+| The restart result reads `Not restarted: restarting it is not permitted.` for a container that shares the network | The user may read the container and not change it | A user who may change it restarts it. Until then it has no network |
+| The restart result reads `Not restarted: the container it shares a network with is not running.` | The owner exited, was removed, or was not running when the wait ended | Start the owner, then restart the stale container |
+| The restart result reads `Not restarted: the time allowed for waiting ran out.` | The owner was not running when the shared budget ended: 90 s for a request, batch or API call, 600 s for an automation run | Restart the stale container once the owner is running |
+| The restart result reads `Not restarted: the container it shares a network with was not restarted.` | The container it follows in the chain was not restarted | Restart the container it follows, then this one |
+| The restart result reads `Not restarted: it joined this network after the confirmation was shown.` | The container joined after the confirmation named the chain | Restart it, or restart the owner again and confirm |
+| The restart notice reads `The containers sharing its network could not be listed, so none were restarted.` | The host's container list could not be read | Restart each container that shares the network |
+| The restart notice reads `<N> more sharing its network were not restarted, because the chain is limited.` | More than 50 joiners, or joiners more than 8 levels deep | Restart the remaining containers that share the network |
+| A `container-health-checker` run counts `owner_not_running` or `owner_missing` | The container whose network the container joins is stopped or gone. The checker does not start it | Start the owner, which restarts its joiners, or recreate the joiner when the owner is gone |
+| A recreate reports a joiner `restricted_option` | A standard user may not recreate a container whose network mode is `container:` | An administrator recreates it, or the container is recreated by an automation |
+| A joiner was not restarted after the owner and a notice names it among `containers share its network and are not shown to you` | The user may not see the joiner | A user who may see and change it restarts it |
+| Stale network shown for `owner_missing` | The container it shares a network with was removed or recreated under another id | Recreate the container so that it joins a current one ([Stale network](Usage-Containers#stale-network)) |
+
 ## `credential_missing` binding
 
 | Symptom | Cause | Action |

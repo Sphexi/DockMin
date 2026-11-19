@@ -535,6 +535,7 @@ class SystemInfo(_EngineModel):
     operating_system: str = Field(default="", alias="OperatingSystem")
     os_type: str = Field(default="", alias="OSType")
     architecture: str = Field(default="", alias="Architecture")
+    system_time: str = Field(default="", alias="SystemTime")
     ncpu: int = Field(default=0, alias="NCPU")
     mem_total: int = Field(default=0, alias="MemTotal")
     containers: int = Field(default=0, alias="Containers")

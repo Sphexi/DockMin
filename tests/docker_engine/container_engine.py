@@ -177,6 +177,8 @@ class Box:
     privileged: bool = False
     restart_count: int = 0
     exit_code: int = 0
+    started_at: str | None = None
+    after_restart: str = "running"
     created_text: str | None = None
     image_id: str = "sha256:aaa"
     config: dict[str, Any] | None = None
@@ -218,7 +220,7 @@ class Box:
             "Paused": self.state == "paused",
             "Restarting": self.state == "restarting",
             "ExitCode": 0 if live else self.exit_code,
-            "StartedAt": engine_time(CREATED + 60),
+            "StartedAt": self.started_at or engine_time(CREATED + 60),
             "FinishedAt": "0001-01-01T00:00:00Z" if live else engine_time(CREATED + 120),
         }
         if self.health is not None:
@@ -342,6 +344,7 @@ class ContainerEngine(FakeEngine):
         self.push_digest: str | None = DAEMON_DIGEST
         self.push_lines: list[dict[str, Any]] = [{"status": "Preparing", "id": "aaaaaaaaaaaa"}]
         self.default_runtime = "runc"
+        self.system_time: str | None = None
         self.logging_driver = "json-file"
         self.cgroup_version = "2"
         self._gates: dict[str, Gate] = {}
@@ -998,14 +1001,15 @@ class ContainerEngine(FakeEngine):
         return json_reply(found)
 
     def _info(self) -> Reply:
-        return json_reply(
-            {
-                "ID": "daemon",
-                "DefaultRuntime": self.default_runtime,
-                "LoggingDriver": self.logging_driver,
-                "CgroupVersion": self.cgroup_version,
-            }
-        )
+        info = {
+            "ID": "daemon",
+            "DefaultRuntime": self.default_runtime,
+            "LoggingDriver": self.logging_driver,
+            "CgroupVersion": self.cgroup_version,
+        }
+        if self.system_time is not None:
+            info["SystemTime"] = self.system_time
+        return json_reply(info)
 
     async def _pull(self, scope: Scope, query: dict[str, str]) -> Reply:
         await self._pass_gate("pull")
@@ -1285,7 +1289,7 @@ def _stop(box: Box) -> Reply:
 
 
 def _restart(box: Box) -> Reply:
-    box.state = "running"
+    box.state = box.after_restart
     return Reply(204)
 
 

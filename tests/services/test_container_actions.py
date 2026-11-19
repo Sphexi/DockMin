@@ -1,6 +1,7 @@
 """Lifecycle actions: audit rows, locks, error mapping, cancellation, removal and batches."""
 
 import asyncio
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -15,21 +16,36 @@ from app.services.container_actions import (
     ContainerGone,
     ContainerStateConflict,
     EngineRefused,
+    WaitBudget,
 )
 from app.services.containers import CONTAINER_ACTIONS, ContainerAction
+from app.services.network_joiners import MAX_JOINER_CHAIN
 from app.services.object_inspector import EnvironmentUnavailable
 from app.services.object_locks import LockHolder, ObjectBusy, ObjectKey
 from app.services.resource_controls import ResourceControlService
 from tests.access_support import ADMIN, ENV_A, ENV_B, STANDARD, container_id, control
 from tests.access_support import container_key as key_of
-from tests.auth_support import ADMIN_ID, ADMIN_USERNAME, STANDARD_ID, STANDARD_USERNAME
+from tests.auth_support import ADMIN_ID, ADMIN_USERNAME, STANDARD_ID, STANDARD_USERNAME, FakeClock
 from tests.container_support import ABSENT, CACHE, JOB, STACK, STACK_LABEL, WARM, WEB, stock
 from tests.docker_engine.container_engine import ENGINE_TEXT, ContainerEngine
-from tests.docker_engine.fake_engine import Refuse, Stall
+from tests.docker_engine.fake_engine import Refuse, Reply, Stall
 from tests.environment_support import activity_rows
 from tests.services.conftest import ContainerRig
 
 SECOND_JOB = container_id(0xB1)
+OWNER = container_id(0xC1)
+BY_ID = container_id(0xC2)
+BY_NAME = container_id(0xC3)
+STOPPED = container_id(0xC4)
+READ_ONLY = container_id(0xC5)
+UNSEEN = container_id(0xC6)
+HEALTHY_AFTER_POLLS = 2
+GRANDCHILD = container_id(0xC7)
+LATE = container_id(0xC8)
+PLAIN_OWNER = container_id(0xE0)
+JOINER_BATCH_WAIT_SECONDS = 90
+JOINER_POLL = 2
+OVER_THE_CAP = {"Content-Length": "1" + "0" * 12}
 DOCKER_REFUSED = "Docker refused the action."
 NOT_RUNNING = "The container is not running."
 RUNNING_NEEDS_STOP = "The container is running. Stop it first, or choose to kill it first."
@@ -699,3 +715,312 @@ async def test_a_container_action_is_busy_while_its_stack_is_operated_on_whateve
     assert len(host.calls("POST", f"/containers/{WEB}/stop")) == 1
     assert host.calls("POST", f"/containers/{cased}/stop") == []
     assert len(stocked.locks) == 0
+
+
+def joining(owner: str) -> dict[str, Any]:
+    return {"NetworkMode": f"container:{owner}"}
+
+
+def restarted(host: ContainerEngine) -> list[str]:
+    return [r.path.split("/")[-2] for r in host.calls("POST") if r.path.endswith("/restart")]
+
+
+@pytest.fixture
+def polls() -> list[float]:
+    return []
+
+
+@pytest.fixture
+def joined(
+    stocked: ContainerRig,
+    host: ContainerEngine,
+    clock: FakeClock,
+    polls: list[float],
+    monkeypatch: pytest.MonkeyPatch,
+) -> ContainerRig:
+    """One owner that turns healthy on the second poll, with joiners of each kind."""
+    host.add(OWNER, "vpn", health="starting")
+    host.add(BY_ID, "torrent", host_config=joining(OWNER))
+    host.add(BY_NAME, "indexer", host_config=joining("vpn"))
+    host.add(STOPPED, "idle", state="exited", host_config=joining(OWNER))
+    host.add(READ_ONLY, "viewer", host_config=joining(OWNER))
+    host.add(UNSEEN, "secret", host_config=joining(OWNER))
+
+    async def sleep(seconds: float) -> None:
+        polls.append(seconds)
+        clock.advance(timedelta(seconds=seconds))
+        if len(polls) == HEALTHY_AFTER_POLLS:
+            host.boxes[OWNER].health = "healthy"
+
+    monkeypatch.setattr(stocked.services.actions, "_sleep", sleep)
+    return stocked
+
+
+async def test_restarting_an_owner_restarts_its_running_joiners_once_it_is_healthy(
+    joined: ContainerRig, host: ContainerEngine, polls: list[float]
+) -> None:
+    for joiner in (READ_ONLY, UNSEEN):
+        host.boxes[joiner].host_config = {"NetworkMode": "bridge"}
+
+    outcome = await act(joined, "restart", OWNER)
+
+    assert restarted(host) == [OWNER, BY_ID, BY_NAME]
+    assert len(polls) == HEALTHY_AFTER_POLLS
+    assert [(i.name, i.status) for i in outcome.joiners] == [
+        ("torrent", "done"),
+        ("indexer", "done"),
+    ]
+    rows = await container_rows(joined)
+    assert [r["target_id"] for r in rows] == [OWNER, BY_ID, BY_NAME]
+    assert {r["actor_user_id"] for r in rows} == {ADMIN_ID}
+    assert rows[0]["detail"] == {"name": "vpn", "joiners": "torrent, indexer"}
+    assert rows[1]["detail"] == {"name": "torrent", "joined": "vpn"}
+    assert (rows[1]["action"], rows[1]["result"]) == ("container_restarted", "success")
+
+
+async def test_a_joiner_the_user_may_not_restart_is_reported_and_left_alone(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    await control(joined.access, key_of(0xC1, ENV_A), public=True, level="write")
+    await control(joined.access, key_of(0xC2, ENV_A), public=True, level="write")
+    await control(joined.access, key_of(0xC5, ENV_A), public=True, level="read")
+
+    confirmation = await joined.services.actions.confirmation(STANDARD, ENV_A, OWNER, "restart")
+    outcome = await act(joined, "restart", OWNER, STANDARD)
+
+    assert [j.name for j in confirmation.joiners] == ["torrent"]
+    assert [j.name for j in confirmation.joiners_refused] == ["viewer"]
+    assert confirmation.joiners_hidden == 2
+    assert restarted(host) == [OWNER, BY_ID]
+    refused = next(i for i in outcome.joiners if i.name == "viewer")
+    assert refused.status == "forbidden"
+    rows = await container_rows(joined)
+    assert [r["target_id"] for r in rows] == [OWNER, READ_ONLY, BY_ID]
+    assert rows[0]["detail"] == {
+        "name": "vpn",
+        "joiners": "torrent",
+        "joiners_refused": "viewer",
+        "joiners_hidden": 2,
+    }
+    assert (rows[1]["result"], rows[1]["detail"]["reason"]) == ("failure", "permission_denied")
+    assert rows[1]["detail"]["joined"] == "vpn"
+    assert "secret" not in str(rows)
+
+
+async def test_a_batch_with_an_owner_and_its_joiner_restarts_each_once_owner_first(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    for joiner in (BY_NAME, STOPPED, READ_ONLY, UNSEEN):
+        host.boxes[joiner].host_config = {"NetworkMode": "bridge"}
+
+    confirmation = await joined.services.actions.batch_confirmation(
+        ADMIN, ENV_A, "restart", [BY_ID, OWNER]
+    )
+    result = await joined.services.actions.run_batch(ADMIN, ENV_A, "restart", [BY_ID, OWNER, WEB])
+
+    assert confirmation.joiners == ()
+    assert restarted(host) == [OWNER, BY_ID, WEB]
+    assert [(i.name, i.status) for i in result.items] == [
+        ("torrent", "done"),
+        ("vpn", "done"),
+        ("web", "done"),
+    ]
+    assert result.items[0].message == "Restarted with vpn."
+    assert [r["target_id"] for r in await container_rows(joined)] == [OWNER, BY_ID, WEB]
+
+
+def bridged(host: ContainerEngine, *containers: str) -> None:
+    for each in containers:
+        host.boxes[each].host_config = {"NetworkMode": "bridge"}
+
+
+async def test_the_chain_of_containers_sharing_a_network_is_named_and_restarted_in_order(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    bridged(host, READ_ONLY, UNSEEN, BY_NAME)
+    host.add(GRANDCHILD, "sidecar", host_config=joining(BY_ID))
+
+    confirmation = await joined.services.actions.confirmation(ADMIN, ENV_A, OWNER, "restart")
+    outcome = await act(joined, "restart", OWNER)
+
+    assert [j.name for j in confirmation.joiners] == ["torrent", "sidecar"]
+    assert restarted(host) == [OWNER, BY_ID, GRANDCHILD]
+    assert [(i.name, i.status) for i in outcome.joiners] == [
+        ("torrent", "done"),
+        ("sidecar", "done"),
+    ]
+    rows = {r["target_id"]: r for r in await container_rows(joined)}
+    assert rows[GRANDCHILD]["detail"] == {"name": "sidecar", "joined": "torrent"}
+
+
+async def test_a_joiner_that_appeared_after_the_confirmation_is_reported_and_left_alone(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    bridged(host, READ_ONLY, UNSEEN, BY_NAME)
+    confirmation = await joined.services.actions.confirmation(ADMIN, ENV_A, OWNER, "restart")
+    host.add(LATE, "late", host_config=joining(OWNER))
+
+    outcome = await act(
+        joined, "restart", OWNER, joiners=[each.container_id for each in confirmation.joiners]
+    )
+
+    assert restarted(host) == [OWNER, BY_ID]
+    late = next(item for item in outcome.joiners if item.name == "late")
+    assert (late.status, late.reason) == ("conflict", "not_confirmed")
+    failed = [r for r in await container_rows(joined) if r["result"] == "failure"]
+    assert [(r["target_id"], r["detail"]["reason"]) for r in failed] == [(LATE, "not_confirmed")]
+
+
+async def test_a_confirmed_batch_restarts_only_the_joiners_it_named(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    bridged(host, READ_ONLY, UNSEEN, BY_NAME)
+    confirmation = await joined.services.actions.batch_confirmation(
+        ADMIN, ENV_A, "restart", [OWNER, WEB]
+    )
+    host.add(LATE, "late", host_config=joining(OWNER))
+
+    result = await joined.services.actions.run_batch(
+        ADMIN,
+        ENV_A,
+        "restart",
+        [OWNER, WEB],
+        joiners=[each.container_id for each in confirmation.joiners],
+    )
+
+    assert restarted(host) == [OWNER, BY_ID, WEB]
+    assert {(i.name, i.status) for i in result.joiners} == {
+        ("torrent", "done"),
+        ("late", "conflict"),
+    }
+
+
+async def test_a_chain_longer_than_the_limit_restarts_the_limit_and_counts_the_rest(
+    stocked: ContainerRig, host: ContainerEngine
+) -> None:
+    host.add(PLAIN_OWNER, "hub")
+    extra = 2
+    for number in range(MAX_JOINER_CHAIN + extra):
+        host.add(container_id(0x1000 + number), f"j{number:03d}", host_config=joining(PLAIN_OWNER))
+
+    confirmation = await stocked.services.actions.confirmation(ADMIN, ENV_A, PLAIN_OWNER, "restart")
+    outcome = await act(stocked, "restart", PLAIN_OWNER)
+
+    assert len(confirmation.joiners) == MAX_JOINER_CHAIN
+    assert confirmation.joiners_omitted == extra
+    assert len(outcome.joiners) == MAX_JOINER_CHAIN
+    assert outcome.joiners_omitted == extra
+    assert len(restarted(host)) == MAX_JOINER_CHAIN + 1
+    [row] = [r for r in await container_rows(stocked) if r["target_id"] == PLAIN_OWNER]
+    assert row["detail"]["joiners_omitted"] == extra
+
+
+async def test_a_joiner_listing_that_fails_restarts_the_owner_alone_and_says_so(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    host.route("GET", "/containers/json", Refuse())
+
+    outcome = await act(joined, "restart", OWNER)
+
+    assert restarted(host) == [OWNER]
+    assert (outcome.result, outcome.joiners, outcome.joiners_unlisted) == ("done", (), True)
+    [row] = await container_rows(joined)
+    assert (row["result"], row["detail"]["joiners_unlisted"]) == ("success", True)
+
+
+async def test_a_joiner_too_large_to_read_is_unnamed_for_a_standard_user_and_named_for_an_admin(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    bridged(host, BY_ID, BY_NAME, STOPPED, READ_ONLY)
+    await control(joined.access, key_of(0xC1, ENV_A), public=True, level="write")
+    host.route("GET", f"/containers/{UNSEEN}/json", Reply(200, b"{}", OVER_THE_CAP))
+
+    standard = await joined.services.actions.confirmation(STANDARD, ENV_A, OWNER, "restart")
+    admin = await joined.services.actions.confirmation(ADMIN, ENV_A, OWNER, "restart")
+
+    assert (standard.joiners_hidden, standard.joiners_refused) == (1, ())
+    assert (admin.joiners_hidden, admin.joiners_refused) == (0, ())
+    assert [j.name for j in admin.joiners] == ["secret"]
+
+
+async def test_a_batch_reads_the_hosts_containers_once(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    bridged(host, READ_ONLY, UNSEEN, BY_NAME)
+
+    await joined.services.actions.run_batch(ADMIN, ENV_A, "restart", [OWNER, WEB, JOB])
+
+    assert len(host.calls("GET", "/containers/json")) == 1
+
+
+async def test_a_batch_shares_one_wait_across_its_owners(
+    joined: ContainerRig, host: ContainerEngine, polls: list[float]
+) -> None:
+    bridged(host, READ_ONLY, UNSEEN, BY_NAME)
+    second = container_id(0xC9)
+    host.add(second, "second-vpn", health="starting")
+    host.add(container_id(0xCA), "second-torrent", host_config=joining(second))
+
+    result = await joined.services.actions.run_batch(ADMIN, ENV_A, "restart", [OWNER, second])
+
+    assert [(i.name, i.status) for i in result.joiners] == [
+        ("torrent", "done"),
+        ("second-torrent", "done"),
+    ]
+    assert HEALTHY_AFTER_POLLS < len(polls) <= JOINER_BATCH_WAIT_SECONDS / JOINER_POLL
+
+
+async def client_of(rig: ContainerRig) -> Any:
+    return await rig.services.actions._hosts.client(ENV_A)
+
+
+@pytest.mark.parametrize("state", ["exited", "dead", "created", "restarting"])
+async def test_an_owner_that_is_not_running_when_its_wait_ends_leaves_its_joiners(
+    joined: ContainerRig, host: ContainerEngine, state: str
+) -> None:
+    host.boxes[OWNER].state = state
+
+    refusal = await joined.services.actions.owner_ready(await client_of(joined), OWNER)
+
+    assert refusal is not None and refusal.reason == "owner_not_running"
+
+
+async def test_an_owner_that_runs_but_stays_unhealthy_lets_its_joiners_follow_after_the_wait(
+    joined: ContainerRig, host: ContainerEngine, polls: list[float]
+) -> None:
+    async def never_healthy(seconds: float) -> None:
+        polls.append(seconds)
+        joined.services.actions._clock.advance(timedelta(seconds=seconds))
+
+    joined.services.actions._sleep = never_healthy
+
+    refusal = await joined.services.actions.owner_ready(await client_of(joined), OWNER)
+
+    assert refusal is None
+    assert sum(polls) >= 90
+
+
+async def test_an_owner_that_is_gone_or_ready_is_answered_without_waiting(
+    joined: ContainerRig, host: ContainerEngine, polls: list[float]
+) -> None:
+    client = await client_of(joined)
+    host.boxes[OWNER].health = "healthy"
+
+    ready = await joined.services.actions.owner_ready(client, OWNER)
+    missing = await joined.services.actions.owner_ready(client, ABSENT)
+
+    assert ready is None
+    assert missing is not None and missing.reason == "owner_not_running"
+    assert polls == []
+
+
+async def test_a_spent_budget_leaves_the_joiners_of_an_owner_that_is_not_running(
+    joined: ContainerRig, host: ContainerEngine
+) -> None:
+    actions = joined.services.actions
+    host.boxes[OWNER].state = "restarting"
+    spent = WaitBudget(actions._clock() - timedelta(seconds=1), actions._clock)
+
+    refusal = await actions.owner_ready(await client_of(joined), OWNER, spent)
+
+    assert refusal is not None and refusal.reason == "wait_expired"

@@ -1,13 +1,16 @@
 """container-health-checker: what it restarts, within which budget, and what it never touches."""
 
 import json
+from datetime import timedelta
 from typing import Any
 
 import pytest
 
 from app.db.repositories.automation_rule import AutomationRuleRepository
 from app.services.activity import ActivityRecorder, SubsystemActor, UserActor
+from app.services.container_actions import ContainerActionService
 from app.services.object_locks import LockHolder, ObjectKey
+from app.subsystems import acting_run
 from app.subsystems import container_health_checker as checker
 from tests.access_support import ADMIN, ENV_A, PEER_ID, STANDARD
 from tests.automation_support import HEALTH, INTERVAL_SECONDS, Subject, cid, counts, detail_of
@@ -31,6 +34,16 @@ WINDOW_SECONDS = 300
 AUTO_RELEASE = {"max_restarts": 1, "window_seconds": WINDOW_SECONDS, "auto_release": True}
 SHORT_INTERVAL = "60"
 SHOP_STACK = {"kind": "stack", "names": ["shop"]}
+
+
+def started(health: Subject, seconds_ago: float) -> str:
+    return (health.clock() - timedelta(seconds=seconds_ago)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000000000Z"
+    )
+
+
+def joining(owner: str) -> dict[str, Any]:
+    return {"NetworkMode": f"container:{owner}"}
 
 
 def container(name: str) -> dict[str, Any]:
@@ -150,8 +163,11 @@ async def test_the_engine_is_asked_for_running_unhealthy_containers_narrowed_by_
 
     await health.run(job)
 
-    [listing] = health.host.calls("GET", CONTAINER_LIST)
+    listing, joiners = health.host.calls("GET", CONTAINER_LIST)
     assert json.loads(listing.query["filters"]) == expected_filters
+    assert json.loads(joiners.query["filters"]) == {
+        key: value for key, value in expected_filters.items() if key != "health"
+    }
 
 
 async def test_a_named_container_is_looked_up_by_exact_name_whatever_its_state(
@@ -163,7 +179,7 @@ async def test_a_named_container_is_looked_up_by_exact_name_whatever_its_state(
 
     await health.run(job)
 
-    [listing] = health.host.calls("GET", CONTAINER_LIST)
+    listing = health.host.calls("GET", CONTAINER_LIST)[0]
     assert json.loads(listing.query["filters"]) == {"name": ["^/web$"]}
     assert health.restarted() == [cid(1)]
 
@@ -1063,3 +1079,206 @@ async def test_the_run_detail_stops_adding_counts_at_the_key_limit(
     result = await health.run(job)
 
     assert set(counts(result)) == {"restarted", "targets", "target_outcomes", "matched"}
+
+
+async def test_it_stands_back_after_any_actor_but_itself_and_acts_after_its_own_restart(
+    health: Subject,
+) -> None:
+    for number, name in ((1, "by-user"), (2, "by-restarter"), (3, "by-stack"), (4, "by-itself")):
+        add_unhealthy(health, number, name, labels={PROJECT_LABEL: "shop"} if number == 3 else {})
+    restarter = LockHolder(SubsystemActor("stack-restarter", 1), "stack-restarter", "restart")
+    own = LockHolder(SubsystemActor(HEALTH, 1), HEALTH, "restart")
+    locks = health.rig.engine.locks
+    async with locks.hold(key(1), user_holder()):
+        pass
+    async with locks.hold(key(2), restarter):
+        pass
+    async with locks.hold(ObjectKey(ENV_A, "stack", "shop"), restarter):
+        pass
+    async with locks.hold(key(4), own):
+        pass
+    _, job = await health.rule(EVERYTHING)
+
+    result = await health.run(job)
+
+    assert health.restarted() == [cid(4)]
+    assert counts(result)["suppressed"] == 3
+    health.advance(6 * 60)
+    later = await health.run(job)
+    assert (later.outcome, counts(later)["restarted"]) == ("success", 4)
+
+
+async def test_a_container_started_within_the_grace_is_skipped_under_its_own_reason(
+    health: Subject,
+) -> None:
+    add_unhealthy(health, 1, "fresh", started_at=started(health, 30))
+    add_unhealthy(health, 2, "settled", started_at=started(health, 600))
+    _, default = await health.rule(EVERYTHING, name="default")
+    _, no_grace = await health.rule(container("fresh"), {"grace_seconds": 0}, name="no grace")
+
+    skipped = await health.run(default)
+    assert health.restarted() == [cid(2)]
+    assert counts(skipped)["start_grace"] == 1
+    assert counts(skipped)["restarted"] == 1
+
+    await health.run(no_grace)
+    assert health.restarted() == [cid(2), cid(1)]
+
+
+@pytest.mark.parametrize(("grace", "valid"), [(0, True), (3600, True), (-1, False), (3601, False)])
+def test_the_grace_is_between_zero_and_an_hour_and_defaults_for_older_rules(
+    grace: int, valid: bool
+) -> None:
+    if valid:
+        assert checker.HealthCheckerParameters(grace_seconds=grace).grace_seconds == grace
+    else:
+        with pytest.raises(ValueError):
+            checker.HealthCheckerParameters(grace_seconds=grace)
+    assert checker.HealthCheckerParameters().grace_seconds == 120
+
+
+@pytest.fixture
+def fast_waits(health: Subject, monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Let the wait for an owner pass on the run's clock instead of in real time."""
+    polls: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        polls.append(seconds)
+        health.advance(seconds)
+
+    defaults = ContainerActionService.__init__.__kwdefaults__
+    assert defaults is not None
+    monkeypatch.setitem(defaults, "sleep", sleep)
+    return polls
+
+
+async def test_a_joiner_on_a_stale_network_is_restarted_and_one_whose_owner_is_down_is_skipped(
+    health: Subject,
+) -> None:
+    stale_since = started(health, 7200)
+    health.host.add(cid(1), "vpn", started_at=started(health, 3600))
+    health.host.add(
+        cid(2), "late-owner-joiner", host_config=joining(cid(1)), started_at=stale_since
+    )
+    health.host.add(cid(3), "down-vpn", state="exited")
+    health.host.add(
+        cid(4), "down-owner-joiner", host_config=joining("down-vpn"), started_at=stale_since
+    )
+    health.host.add(cid(5), "paused-vpn", state="paused", started_at=stale_since)
+    health.host.add(
+        cid(6), "paused-owner-joiner", host_config=joining(cid(5)), started_at=started(health, 3600)
+    )
+    health.host.add(cid(7), "ok-vpn", started_at=stale_since)
+    health.host.add(
+        cid(8), "current-joiner", host_config=joining(cid(7)), started_at=started(health, 3600)
+    )
+    _, job = await health.rule(EVERYTHING, {"max_restarts": 1})
+
+    result = await health.run(job)
+
+    assert health.restarted() == [cid(2)]
+    assert health.host.calls("POST", f"/containers/{cid(3)}/start") == []
+    detail = counts(result)
+    assert (detail["restarted"], detail["owner_not_running"]) == (1, 1)
+    [row] = health.events(RESTARTED)
+    assert (row["target_id"], detail_of(row)["trigger"]) == (cid(2), "stale_network")
+    health.advance(POLL_SECONDS)
+    again = await health.run(job)
+    assert counts(again).get("restarted", 0) == 0
+    assert counts(again)["exhausted"] == 1
+
+
+async def test_a_joiner_that_is_in_order_costs_no_evaluation_and_no_tally(
+    health: Subject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(checker, "MAX_EVALUATED_PER_RUN", 1)
+    health.host.add(cid(1), "vpn", started_at=started(health, 7200))
+    for number in range(2, 6):
+        health.host.add(
+            cid(number),
+            f"fine-{number}",
+            host_config=joining(cid(1)),
+            started_at=started(health, 3600),
+        )
+    add_unhealthy(health, 9, "sick", started_at=started(health, 3600))
+    _, job = await health.rule(EVERYTHING)
+
+    result = await health.run(job)
+
+    assert health.restarted() == [cid(9)]
+    detail = counts(result)
+    assert (detail["restarted"], detail["matched"]) == (1, 1)
+    assert "skipped" not in detail and "deferred" not in detail
+
+
+async def test_a_restart_that_leaves_a_joiner_behind_fails_that_joiner_with_its_own_row(
+    health: Subject, fast_waits: list[float]
+) -> None:
+    add_unhealthy(health, 1, "vpn")
+    health.host.add(cid(2), "busy-joiner", host_config=joining("vpn"))
+    health.host.add(cid(3), "good-joiner", host_config=joining("vpn"))
+    health.subsystem.lock_wait = 0.05  # type: ignore[misc]
+    _, job = await health.rule(container("vpn"))
+
+    async with health.rig.engine.locks.hold(key(2), user_holder()):
+        result = await health.run(job)
+
+    assert health.restarted() == [cid(1), cid(3)]
+    assert (result.outcome, result.reason) == ("partial", "object_busy")
+    detail = counts(result)
+    assert (detail["restarted"], detail["failed"], detail["joiners_restarted"]) == (1, 1, 1)
+    rows = {row["target_id"]: row for row in health.events(RESTARTED)}
+    assert set(rows) == {cid(1), cid(2), cid(3)}
+    assert (rows[cid(2)]["result"], detail_of(rows[cid(2)])["reason"]) == ("failure", "object_busy")
+    assert detail_of(rows[cid(2)])["joined"] == "vpn"
+    assert rows[cid(3)]["result"] == "success"
+
+
+async def test_joiners_still_waiting_when_the_run_deadline_passes_fail_with_a_reason(
+    health: Subject, monkeypatch: pytest.MonkeyPatch, fast_waits: list[float]
+) -> None:
+    monkeypatch.setattr(acting_run, "JOINER_RUN_WAIT_SECONDS", 0.0)
+    monkeypatch.setattr(checker, "JOINER_RUN_WAIT_SECONDS", 0.0)
+    add_unhealthy(health, 1, "vpn", after_restart="restarting")
+    health.host.add(cid(2), "torrent", host_config=joining("vpn"))
+    _, job = await health.rule(container("vpn"))
+
+    result = await health.run(job)
+
+    assert health.restarted() == [cid(1)]
+    assert (result.outcome, result.reason) == ("partial", "wait_expired")
+    [failed] = [row for row in health.events(RESTARTED) if row["result"] == "failure"]
+    assert (failed["target_id"], detail_of(failed)["reason"]) == (cid(2), "wait_expired")
+
+
+async def test_the_grace_is_measured_on_the_hosts_clock(health: Subject) -> None:
+    host_now = health.clock() + timedelta(hours=3)
+    health.host.system_time = host_now.strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
+    stamp = (host_now - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%S.000000000Z")
+    add_unhealthy(health, 1, "fresh-on-the-host", started_at=stamp)
+    _, job = await health.rule(container("fresh-on-the-host"))
+
+    result = await health.run(job)
+
+    assert health.restarted() == []
+    assert counts(result)["start_grace"] == 1
+
+
+@pytest.mark.parametrize("stack_action_by", ["stack-restarter", "container-updater"])
+async def test_a_container_stands_back_after_its_stack_was_acted_on_by_another_actor(
+    health: Subject, stack_action_by: str
+) -> None:
+    add_unhealthy(health, 1, "web", labels={PROJECT_LABEL: "shop"})
+    _, job = await health.rule(EVERYTHING)
+    shop = ObjectKey(ENV_A, "stack", "shop")
+    health.rig.engine.locks.note(
+        shop, LockHolder(SubsystemActor(stack_action_by, 1), stack_action_by, "restart")
+    )
+
+    result = await health.run(job)
+
+    assert health.restarted() == []
+    assert counts(result)["suppressed"] == 1
+    health.advance(POLL_SECONDS * 6)
+    assert (await health.run(job)).outcome == "success"
+    assert health.restarted() == [cid(1)]

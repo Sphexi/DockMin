@@ -8,6 +8,7 @@
 {% set event = view.event %}
 {% set origin_targets = ["container", "network", "service", "node", "automation_rule", "image", "volume", "stack", "user", "team", "object_storage_target", "config", "secret"] %}
 {% set recorded = event.detail or {} %}
+{% set named_as = recorded.get("name") if event.target_type in ["container", "network", "service", "config", "secret"] else none %}
 {% set recorded_at %}Recorded <time datetime="{{ event.occurred_at|timestamp_iso }}">{{ event.occurred_at|timestamp(seconds=True) }}</time>{% endset %}
 {% call page_header("Event " ~ event.id, recorded_at) %}
 <a class="btn" href="{{ list_href }}">Back to the log</a>
@@ -49,7 +50,7 @@
     <dt>Target type</dt>
     <dd class="mono">{{ event.target_type|visible_text }}</dd>
     <dt>Target id</dt>
-    <dd>{% if event.target_id is none %}&mdash;{% elif target_deleted %}<span class="cell-wrap">{{ event.target_id|visible_text }}</span> {{ badge("Deleted", "neutral") }}{% elif target_href %}<a class="cell-wrap" href="{{ with_origin(target_href, 'activity:-:' ~ event.id if event.target_type in origin_targets else none) }}">{{ event.target_id|visible_text }}</a>{% else %}{{ event.target_id|visible_text }}{% endif %}</dd>
+    <dd>{% if event.target_id is none %}&mdash;{% elif target_deleted %}{% if named_as is string and named_as and named_as != event.target_id %}<span class="cell-wrap">{{ named_as|visible_text }}</span> <span class="cell-note mono cell-wrap">{{ event.target_id|visible_text }}</span>{% else %}<span class="cell-wrap">{{ event.target_id|visible_text }}</span>{% endif %} {{ badge("Deleted", "neutral") }}{% elif target_href %}<a class="cell-wrap" href="{{ with_origin(target_href, 'activity:-:' ~ event.id if event.target_type in origin_targets else none) }}">{{ event.target_id|visible_text }}</a>{% else %}{{ event.target_id|visible_text }}{% endif %}</dd>
     <dt>Environment</dt>
     <dd>{{ environment_cell(view, "activity:-:" ~ event.id) }}</dd>
   </dl>

@@ -59,6 +59,7 @@ from app.services.binding_candidates import BindingCandidateScanner
 from app.services.compose_setup import ORPHAN_MIN_AGE_SECONDS, ComposeRuntime
 from app.services.container_actions import ContainerActionService
 from app.services.container_create import ContainerCreateService
+from app.services.container_joiners import ContainerJoinerService
 from app.services.container_logs import ContainerLogService
 from app.services.container_recreate import ContainerRecreateService
 from app.services.container_stats import ContainerStatsService
@@ -338,6 +339,7 @@ class ContainerServices:
     actions: ContainerActionService
     creation: ContainerCreateService
     recreation: ContainerRecreateService
+    joiners: ContainerJoinerService
     stats: ContainerStatsService
     logs: ContainerLogService
     terminals: TerminalService
@@ -408,6 +410,30 @@ def build_container_services(
         if registries is None
         else build_pull_credentials(db, runtime, registries)
     )
+    actions = ContainerActionService(
+        db=db,
+        database=database,
+        authoriser=access.authoriser,
+        inspector=inspector,
+        locks=engine.locks,
+        controls=access.controls,
+        activity=activity,
+        clock=clock,
+        self_identity=self_identity,
+    )
+    recreation = ContainerRecreateService(
+        db=db,
+        database=database,
+        authoriser=access.authoriser,
+        inspector=inspector,
+        locks=engine.locks,
+        controls=access.controls,
+        activity=activity,
+        clock=clock,
+        credentials=credentials,
+        bindings=None if registries is None else bindings,
+        self_identity=self_identity,
+    )
     return ContainerServices(
         queries=ContainerService(
             authoriser=access.authoriser,
@@ -417,17 +443,7 @@ def build_container_services(
             users=UserRepository(db, clock),
             teams=TeamRepository(db, clock),
         ),
-        actions=ContainerActionService(
-            db=db,
-            database=database,
-            authoriser=access.authoriser,
-            inspector=inspector,
-            locks=engine.locks,
-            controls=access.controls,
-            activity=activity,
-            clock=clock,
-            self_identity=self_identity,
-        ),
+        actions=actions,
         creation=ContainerCreateService(
             db=db,
             database=database,
@@ -441,18 +457,9 @@ def build_container_services(
             bindings=None if registries is None else bindings,
             self_identity=self_identity,
         ),
-        recreation=ContainerRecreateService(
-            db=db,
-            database=database,
-            authoriser=access.authoriser,
-            inspector=inspector,
-            locks=engine.locks,
-            controls=access.controls,
-            activity=activity,
-            clock=clock,
-            credentials=credentials,
-            bindings=None if registries is None else bindings,
-            self_identity=self_identity,
+        recreation=recreation,
+        joiners=ContainerJoinerService(
+            hosts=inspector.hosts, recreation=recreation, actions=actions, activity=activity
         ),
         stats=ContainerStatsService(
             authoriser=access.authoriser, inspector=inspector, slots=engine.stream_slots

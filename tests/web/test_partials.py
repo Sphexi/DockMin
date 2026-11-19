@@ -24,7 +24,8 @@ from tests.web.html_tree import Page as Document
 
 MACROS = partial_macros()
 MACRO_IDS = [f"{spec.partial}.{spec.name}" for spec in MACROS]
-ECHOLESS = frozenset({"navigation_counts.navigation_counts"})
+FIXED_TEXT = frozenset({"stale_network.stale_reason_text"})
+ECHOLESS = frozenset({"navigation_counts.navigation_counts", *FIXED_TEXT})
 ECHOING = [
     pytest.param(spec, id=name)
     for spec, name in zip(MACROS, MACRO_IDS, strict=True)
@@ -93,6 +94,16 @@ STRUCTURED_ARGUMENTS: dict[str, Callable[[str], dict[str, Any]]] = {
     },
     "object_links.user_link": lambda text: {"user_id": 1, "username": text},
     "object_links.environment_link": lambda text: {"environment_id": 1, "name": text},
+    "joiners.joiner_notice": lambda text: {
+        "joiners": [SimpleNamespace(container_id="a" * 64, short_id=text, name=text)],
+        "refused": [SimpleNamespace(name=text)],
+        "hidden": 1,
+        "omitted": 1,
+    },
+    "stale_network.stale_network_text": lambda text: {
+        "stale": SimpleNamespace(owner_name=text, reason="owner_not_running")
+    },
+    "stale_network.stale_reason_text": lambda text: {"reason": "owner_not_running"},
 }
 
 NOT_A_CURSOR_CONTRACT = [
@@ -135,7 +146,7 @@ def test_partials_directory_yields_macros() -> None:
 def test_macro_renders_from_its_required_arguments_alone(spec: MacroSpec) -> None:
     output = _render(spec, BENIGN, required_only=True)
 
-    assert BENIGN in output
+    assert BENIGN in output or f"{spec.partial}.{spec.name}" in FIXED_TEXT
 
 
 @pytest.mark.parametrize("spec", ECHOING)

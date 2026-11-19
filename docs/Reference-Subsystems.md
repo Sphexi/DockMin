@@ -89,6 +89,7 @@ Each subsystem declares how its jobs behave. Administrators see them on the job 
 | Targets | A container, a Compose stack, a Swarm stack, a Swarm service, containers with labels |
 | Settings | `action` (`report` or `update`, default `report`), `verify_seconds` 0 to 300 (default 30), `require_healthy` (default on; not used for Swarm services), `prune_replaced` (default off; administrator-owned rules in `update` mode, not for a Swarm service target) and `prune_after_hours` 1 to 720 (default 24) |
 | Schedule | Interval of 900 s or more, or cron |
+| Joiners | Recreates the containers that join a recreated container's network, or restarts them ([Containers](Usage-Containers#joiners-of-a-recreated-container)) |
 | Per run | At most 100 references checked, 200 containers or Swarm services examined, 25 recreates, redeploys and service updates, 25 pulls, 25 credential renewals; none begins after 30 minutes of the run. With `prune_replaced`, 20 replaced-image records examined and 10 images removed |
 | Replaced images | With `prune_replaced`, records the image each container recreate or Compose stack redeploy replaced, and removes it after the grace period unless it carries a tag, a container uses it, an image depends on it or a Swarm service names it. A Swarm stack redeploy records nothing. Turning the setting off deletes the waiting records ([Automation](Operations-Automation#removal-of-replaced-images)) |
 | Swarm | The nodes pull; dockmin pulls nothing and writes no `image_pulled` row. Credentials: the reference's bound set, never another; none for a reference with no binding or a `credential_missing` binding |
@@ -117,13 +118,14 @@ Each subsystem declares how its jobs behave. Administrators see them on the job 
 | Item | Value |
 |---|---|
 | Job | One per rule |
-| Work | Restarts a running container that reports `unhealthy`, at most `max_restarts` times in `window_seconds`. A container that has used its budget is held and reported ([Automation](Operations-Automation#budget-and-hold)). A user can release a hold, and with `auto_release` a held container that stays healthy long enough is released ([Automation](Operations-Automation#release)). A held container the host no longer has is released by the run, with `auto_release` on or off ([Automation](Operations-Automation#a-container-that-is-gone)) |
+| Work | Restarts a running container that reports `unhealthy`, or joins the network of a container that started after it ([stale network](Operations-Automation#stale-network)), at most `max_restarts` times in `window_seconds`. A container that has used its budget is held and reported ([Automation](Operations-Automation#budget-and-hold)). A user can release a hold, and with `auto_release` a held container that stays healthy long enough is released ([Automation](Operations-Automation#release)). A held container the host no longer has is released by the run, with `auto_release` on or off ([Automation](Operations-Automation#a-container-that-is-gone)) |
 | Targets | A container, a Compose stack, containers with labels, every container in the environment |
-| Settings | `max_restarts` 1 to 20 (default 3), `window_seconds` 300 to 86400 (default 3600), `auto_release` (default off) |
+| Settings | `max_restarts` 1 to 20 (default 3), `window_seconds` 300 to 86400 (default 3600), `auto_release` (default off), `grace_seconds` 0 to 3600 (default 120) |
 | Schedule | Interval of 60 s or more. A health event on the host brings the next run forward ([Automation](Operations-Automation#early-runs-and-the-polled-fallback)) |
 | Per run | At most 25 restarts, 200 containers examined |
 | Activity rows | `container_restarted`, `container_restart_budget_exhausted` and, for an automatic release or a held container that is gone, `container_restart_budget_released`, with the automation and the run |
 | Access checks | As for `container-updater`: one pass over the matched containers, at most 25 own checks per run for containers whose listed labels were cut ([Automation](Operations-Automation#owner-access-checks)) |
+| Stands back | For a user's action on the object, and for a restart, start, stop, redeploy, recreate or update of the container or its stack by another automation ([Automation](Operations-Automation#standing-back)) |
 | Where to see it | `Automation`, and `Jobs` under the subsystem name |
 
 ## `stack-restarter`
@@ -131,7 +133,7 @@ Each subsystem declares how its jobs behave. Administrators see them on the job 
 | Item | Value |
 |---|---|
 | Job | One per rule |
-| Work | Restarts a running container, or stops and starts the running services of a Compose stack in dependency order ([Automation](Operations-Automation#stack-restarter)) |
+| Work | Restarts a running container with the running containers that share its network, or stops and starts the running services of a Compose stack in dependency order ([Automation](Operations-Automation#stack-restarter)) |
 | Targets | A container, a Compose stack |
 | Settings | None of its own |
 | Schedule | Interval of 3600 s or more, or cron |

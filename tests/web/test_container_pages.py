@@ -53,6 +53,7 @@ ROW_NAME = re.compile(r'<tr id="container-[0-9a-f]{64}">.*?<a href="[^"]+">([^<]
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 ARIA_LABEL = re.compile(r'aria-label="([^"]+)"')
 ALIAS = container_id(0xD1)
+SATELLITE = container_id(0xE1)
 OVER_THE_CAP = {"Content-Length": "999"}
 SECRETS = (SECRET_ENV_VALUE, SECRET_ARGUMENT, SECRET_LABEL_VALUE, URL_CREDENTIAL, BIND_SOURCE)
 ADMIN_TABS = ["?tab=labels", "?tab=mounts"]
@@ -325,7 +326,15 @@ async def test_a_confirmation_names_the_target_and_changes_nothing(
         {"Type": "volume", "Name": "scratch", "Destination": "/tmp", "RW": True},
     ]
     base = f"{containers(world)}"
+    container_host.add(
+        SATELLITE,
+        "satellite",
+        host_config={"NetworkMode": f"container:{WEB}"},
+        started_at="2020-01-01T00:00:00.000000000Z",
+    )
 
+    restart = await admin_client.get(f"{base}/{WEB}/actions/restart", headers=HTMX)
+    satellite = await admin_client.get(f"{base}/{SATELLITE}")
     stop = await admin_client.get(f"{base}/{WEB}/actions/stop?view=detail", headers=HTMX)
     remove_running = await admin_client.get(f"{base}/{WEB}/actions/remove", headers=HTMX)
     remove_stopped = await admin_client.get(f"{base}/{JOB}/actions/remove", headers=HTMX)
@@ -336,6 +345,13 @@ async def test_a_confirmation_names_the_target_and_changes_nothing(
     not_offered = await admin_client.get(f"{base}/{JOB}/actions/stop", headers=HTMX)
     unknown = await admin_client.get(f"{base}/{WEB}/actions/format")
 
+    assert "Restarted with it" in restart.text and "satellite" in restart.text
+    assert 'name="joiners_reviewed" value="1"' in restart.text
+    assert f'name="joiner" value="{SATELLITE}"' in restart.text
+    assert "satellite" not in stop.text
+    assert (
+        "Stale network" in satellite.text and "was restarted after this container" in satellite.text
+    )
     assert "<html" not in stop.text and 'name="view" value="detail"' in stop.text
     assert all(text in stop.text for text in ("web", WEB[:12], "nginx:1", REMOTE_NAME))
     assert 'name="expected_name"' not in stop.text
@@ -860,3 +876,39 @@ async def test_a_save_under_a_stale_digest_is_a_conflict_that_shows_the_current_
     saves = await save_under_stale_digest(admin_client, access_routes(world))
 
     await assert_stale_saves_refused(world.app, saves)
+
+
+async def test_a_restart_posted_with_its_reviewed_joiners_leaves_one_that_appeared_since(
+    admin_client: AsyncClient, world: World, container_host: ContainerEngine
+) -> None:
+    base = containers(world)
+    container_host.add(SATELLITE, "satellite", host_config={"NetworkMode": f"container:{WEB}"})
+    reviewed = await admin_client.get(f"{base}/{WEB}/actions/restart", headers=HTMX)
+    late = f"{0xEE:064x}"
+    container_host.add(late, "latecomer", host_config={"NetworkMode": f"container:{WEB}"})
+
+    single = await admin_client.post(
+        f"{base}/{WEB}/actions/restart",
+        data=csrf_form(admin_client, joiners_reviewed="1", joiner=[SATELLITE]),
+        headers=HTMX,
+    )
+    batch = await land(
+        admin_client,
+        await admin_client.post(
+            f"{base}/batch",
+            data=csrf_form(
+                admin_client,
+                action="restart",
+                container=[WEB],
+                display_name=["web"],
+                joiners_reviewed="1",
+                joiner=[SATELLITE],
+            ),
+        ),
+    )
+
+    assert f'name="joiner" value="{SATELLITE}"' in reviewed.text
+    assert single.status_code == OK and "latecomer" in single.text
+    restarts = [c.path for c in container_host.calls("POST") if c.path.endswith("/restart")]
+    assert late not in "".join(restarts)
+    assert "latecomer" in batch.text and "Not restarted" in batch.text

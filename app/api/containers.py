@@ -30,6 +30,7 @@ from app.services.container_actions import (
     ContainerStateConflict,
     EngineRefused,
 )
+from app.services.container_joiners import JoinerReport
 from app.services.container_provisioning import (
     NameChanged,
     NotRecreatable,
@@ -202,10 +203,26 @@ class ContainerDetailModel(ContainerFields):
     truncated: bool
 
 
+class JoinerModel(BaseModel):
+    """What became of a container that shares the network of a restarted one.
+
+    status is `done` when it restarted; any other status says it did not, and reason names why.
+    """
+
+    id: str
+    name: str | None
+    status: str
+    reason: str | None = None
+    message: str
+
+
 class ActionModel(BaseModel):
     """What an action did; unchanged means the container was already in the requested state.
 
-    state and health are read after the action and are null when that read failed.
+    state and health are read after the action and are null when that read failed. A restart
+    lists in joiners the containers sharing its network, down the chain of those that share
+    theirs; joiners_omitted counts those the chain limit left out, and joiners_unlisted is true
+    when the host's containers could not be listed so none were restarted.
     """
 
     action: str
@@ -214,6 +231,9 @@ class ActionModel(BaseModel):
     name: str
     state: str | None
     health: str | None
+    joiners: list[JoinerModel] = Field(default_factory=list)
+    joiners_omitted: int = 0
+    joiners_unlisted: bool = False
 
 
 def _port(port: PortView) -> PortModel:
@@ -348,6 +368,18 @@ async def _state_after(
         name=outcome.name,
         state=state,
         health=health,
+        joiners=[
+            JoinerModel(
+                id=item.container_id,
+                name=item.name,
+                status=item.status,
+                reason=item.reason,
+                message=item.message,
+            )
+            for item in outcome.joiners
+        ],
+        joiners_omitted=outcome.joiners_omitted,
+        joiners_unlisted=outcome.joiners_unlisted,
     )
 
 
@@ -446,8 +478,20 @@ class RecreateRequest(BaseModel):
     credential_choice: CredentialChoiceModel | None = None
 
 
+class RecreatedJoinerModel(BaseModel):
+    """What became of a container that shares the network of a recreated one."""
+
+    name: str
+    outcome: Literal["recreated", "restarted", "failed"]
+    reason: str | None = None
+
+
 class RecreateModel(BaseModel):
-    """What a recreate did; changed names categories of configuration, never values."""
+    """What a recreate did; changed names categories of configuration, never values.
+
+    joiners lists the containers that shared its network and what became of each;
+    joiners_omitted counts those the chain limit left out.
+    """
 
     old_id: str
     new_id: str
@@ -461,9 +505,11 @@ class RecreateModel(BaseModel):
     kept_as: str | None
     control_moved: bool
     old_control_kept: bool
+    joiners: list[RecreatedJoinerModel] = Field(default_factory=list)
+    joiners_omitted: int = 0
 
 
-def _recreate_model(outcome: RecreateOutcome) -> RecreateModel:
+def _recreate_model(outcome: RecreateOutcome, followed: JoinerReport) -> RecreateModel:
     return RecreateModel(
         old_id=outcome.old_id,
         new_id=outcome.new_id,
@@ -477,6 +523,15 @@ def _recreate_model(outcome: RecreateOutcome) -> RecreateModel:
         kept_as=outcome.kept_as,
         control_moved=outcome.control_moved,
         old_control_kept=outcome.old_control_kept,
+        joiners=[
+            *(RecreatedJoinerModel(name=name, outcome="recreated") for name in followed.recreated),
+            *(RecreatedJoinerModel(name=name, outcome="restarted") for name in followed.restarted),
+            *(
+                RecreatedJoinerModel(name=name, outcome="failed", reason=reason)
+                for name, reason in followed.failed
+            ),
+        ],
+        joiners_omitted=followed.omitted,
     )
 
 
@@ -513,11 +568,12 @@ async def recreate_container(
     """
     choice = None if body.credential_choice is None else body.credential_choice.choice()
     try:
-        outcome = await services.recreation.recreate(
+        outcome, followed = await services.joiners.recreate(
             principal,
             environment_id,
             container_id,
             expected_name=body.expected_name,
+            confirmed=None,
             pull=body.pull,
             credential_choice=choice,
         )
@@ -551,4 +607,4 @@ async def recreate_container(
         return _problem(HTTPStatus.BAD_GATEWAY, str(error))
     except ObjectTooLarge as error:
         return _problem(HTTPStatus.SERVICE_UNAVAILABLE, str(error))
-    return _recreate_model(outcome)
+    return _recreate_model(outcome, followed)

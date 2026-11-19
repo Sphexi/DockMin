@@ -4,7 +4,7 @@
 {% from "containers/_tables.html" import container_row with context %}
 {% from "partials/toast.html" import toast %}
 
-{% macro feedback(action, name, result, stale=false) %}
+{% macro feedback(action, name, result, stale=false, joiners=(), joiners_omitted=0, joiners_unlisted=false) %}
 {% if stale %}
 {% set level = "warn" %}
 {% set message = action_past(action) ~ " " ~ name ~ ", but its current state could not be read. Reload to see it." %}
@@ -15,25 +15,31 @@
 {% set level = "ok" %}
 {% set message = action_past(action) ~ " " ~ name ~ "." %}
 {% endif %}
+{% set joined = joiners|selectattr("status", "equalto", "done")|map(attribute="name")|join(", ") %}
+{% set refused = joiners|rejectattr("status", "equalto", "done")|map(attribute="name")|join(", ") %}
+{% if joined %}{% set message = message ~ " Also restarted, as they share its network: " ~ joined ~ "." %}{% endif %}
+{% if refused %}{% set level = "warn" %}{% set message = message ~ " Not restarted: " ~ refused ~ "." %}{% endif %}
+{% if joiners_omitted %}{% set level = "warn" %}{% set message = message ~ " " ~ joiners_omitted ~ " more sharing its network " ~ ("was" if joiners_omitted == 1 else "were") ~ " not restarted, because the chain is limited." %}{% endif %}
+{% if joiners_unlisted %}{% set level = "warn" %}{% set message = message ~ " The containers sharing its network could not be listed, so none were restarted." %}{% endif %}
 <div id="action-region" hx-swap-oob="innerHTML"></div>
 <div id="toasts" hx-swap-oob="beforeend">{{ toast(level, message) }}</div>
 {% endmacro %}
 
-{% macro row_updated(row, action, result, may_create=false, stack_links=none) %}
+{% macro row_updated(row, action, result, may_create=false, stack_links=none, joiners=(), joiners_omitted=0, joiners_unlisted=false) %}
 {{ container_row(row, true, may_create, stack_links) }}
-{{ feedback(action, row.name, result) }}
+{{ feedback(action, row.name, result, false, joiners, joiners_omitted, joiners_unlisted) }}
 {% endmacro %}
 
-{% macro row_removed(name, action, result) %}
+{% macro row_removed(name, action, result, joiners=(), joiners_omitted=0, joiners_unlisted=false) %}
 {{ feedback(action, name, result) }}
 {% endmacro %}
 
-{% macro summary_updated(detail, action, result, instance_href=none) %}
+{% macro summary_updated(detail, action, result, instance_href=none, joiners=(), joiners_omitted=0, joiners_unlisted=false) %}
 {{ container_summary(detail, instance_href) }}
-{{ feedback(action, detail.name, result) }}
+{{ feedback(action, detail.name, result, false, joiners, joiners_omitted, joiners_unlisted) }}
 {% endmacro %}
 
-{% macro summary_removed(name, environment_id, action, result) %}
+{% macro summary_removed(name, environment_id, action, result, joiners=(), joiners_omitted=0, joiners_unlisted=false) %}
 {{ removed_summary(name, environment_id) }}
 {{ feedback(action, name, result) }}
 {% endmacro %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "containers/_actions.html" import action_label, action_past with context %}
 {% from "containers/_confirm.html" import busy_notice with context %}
+{% from "partials/badge.html" import badge %}
 {% from "partials/error_state.html" import error_state %}
 {% from "partials/page_header.html" import page_header %}
 {% block title %}{{ action_label(action) }} container - dockmin{% endblock %}
@@ -18,6 +19,18 @@
 <a class="btn" href="{{ detail_href }}">View container</a>
 {% endif %}
 {% endcall %}
+{% if outcome.joiners or outcome.joiners_omitted or outcome.joiners_unlisted %}
+<section class="section" aria-labelledby="joiners-heading">
+  <h2 id="joiners-heading">Containers sharing its network</h2>
+  {% if outcome.joiners_unlisted %}<p class="field__help">The containers sharing its network could not be listed, so none were restarted.</p>{% endif %}
+  {% if outcome.joiners_omitted %}<p class="field__help">{{ outcome.joiners_omitted }} more {{ "container shares" if outcome.joiners_omitted == 1 else "containers share" }} its network and {{ "was" if outcome.joiners_omitted == 1 else "were" }} not restarted, because the chain is limited.</p>{% endif %}
+  <ul>
+    {% for joiner in outcome.joiners %}
+    <li><span class="mono">{{ joiner.name if joiner.name else joiner.short_id }}</span> {{ badge("Restarted", "ok") if joiner.status == "done" else badge("Not restarted", "warn") }} <span class="cell-note">{{ joiner.message }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% else %}
 {% call page_header(action_label(action) ~ " did not run", "The action was not carried out.") %}
 <a class="btn" href="{{ list_href }}">Back to containers</a>

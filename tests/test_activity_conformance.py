@@ -67,6 +67,14 @@ SELF_RECORDING = frozenset(
 )
 
 NOT_AUDITED: Mapping[str, str] = {
+    "app/services/container_actions.py:ContainerActionService.restart": (
+        "restarts the container through the audited container_restarted operation, then each "
+        "container sharing its network as its own audited restart or failed event"
+    ),
+    "app/services/container_joiners.py:JoinerFollower.follow": (
+        "recreates or restarts each container sharing a recreated container's network as its own "
+        "audited operation, and writes a failed event for each it does not act on"
+    ),
     "app/services/navigation.py:remember_navigation": ("display preference; grants nothing"),
     "app/services/bulk_bindings.py:BulkBindingService.apply": (
         "binds each confirmed reference through bind_verified, one audited image_bound "
@@ -364,6 +372,7 @@ WRAPPERS = frozenset(
         "app/services/jobs.py:JobService.enable",
         "app/services/jobs.py:JobService.run_now",
         "app/services/jobs.py:JobService.run_rule_job",
+        "app/services/container_actions.py:ContainerActionService.restart",
     }
 )
 RUNNER_FILE = "app/services/stack_runs.py"

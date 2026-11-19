@@ -33,8 +33,11 @@
 {% endmacro %}
 
 {% macro target_cell(event, href=none, origin=none) %}
+{% set recorded = (event.detail or {}).get("name") if event.target_type in ["container", "network", "service", "config", "secret"] else none %}
+{% set named = recorded is string and recorded and recorded != event.target_id %}
 <div class="cell-stack">
-  <span class="cell-wrap">{% if event.target_id is none %}&mdash;{% elif href %}<a href="{{ with_origin(href, origin) }}">{{ event.target_id|visible_text }}</a>{% else %}{{ event.target_id|visible_text }}{% endif %}</span>
+  <span class="cell-wrap">{% if event.target_id is none %}&mdash;{% elif href %}<a href="{{ with_origin(href, origin) }}">{{ (recorded if named else event.target_id)|visible_text }}</a>{% else %}{{ (recorded if named else event.target_id)|visible_text }}{% endif %}</span>
+  {% if named %}<span class="cell-note mono cell-wrap">{{ event.target_id|visible_text }}</span>{% endif %}
   <span class="cell-note mono">{{ event.target_type|visible_text }}</span>
 </div>
 {% endmacro %}

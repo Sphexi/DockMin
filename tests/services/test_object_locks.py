@@ -100,15 +100,20 @@ async def test_the_holder_is_stamped_with_the_time_the_lock_was_taken(
     assert current.age_seconds(locks.now()) == 90.0
 
 
-async def test_a_release_tells_the_observer_who_held_the_object_even_when_the_body_failed(
+async def test_a_release_tells_the_observer_who_held_the_object_only_when_the_body_returned(
     clock: Clock,
 ) -> None:
     seen: list[tuple[ObjectKey, LockHolder]] = []
     locks = ObjectLockRegistry(clock, observer=lambda noted, held: seen.append((noted, held)))
 
     with pytest.raises(RuntimeError):
-        async with locks.hold(key(), holder(FIRST_USER, "restart")):
+        async with locks.hold(key(), holder(SECOND_USER, "restart")):
             raise RuntimeError("body failed")
+    assert seen == []
+    assert locks.holder_of(key()) is None
+
+    async with locks.hold(key(), holder(FIRST_USER, "restart")):
+        pass
 
     [(noted, held)] = seen
     assert noted == key()
